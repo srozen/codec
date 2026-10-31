@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Segment geometry for an LCD-style seven-segment readout, the kind a codec shows its frequency on.
+/// Segment geometry for an LCD-style seven-segment readout, used by the status bar meters.
 ///
 ///      a
 ///    f   b

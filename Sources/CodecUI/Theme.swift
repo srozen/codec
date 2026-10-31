@@ -1,26 +1,28 @@
 import AppKit
 import SwiftTerm
 
-/// A Codec colour scheme. Every theme is named after a place you'd rather not be stuck in without backup.
+/// A Codec colour scheme.
 struct CodecTheme: Identifiable, Equatable {
     let id: String
     let name: String
-    let briefing: String
+    let summary: String
     let isDark: Bool
     let background: NSColor
     let foreground: NSColor
-    /// Phosphor colour used for the frequency display, signal meters and caret.
+    /// Used for the caret, the active-tab highlight and the status readouts.
     let accent: NSColor
-    /// Colour of the "!" alert.
+    /// Used for errors, failed commands and the bell indicator.
     let alert: NSColor
     let selection: NSColor
     /// The 16 ANSI colours: 8 normal followed by 8 bright.
     let ansi: [NSColor]
 
     var appearance: NSAppearance? { NSAppearance(named: isDark ? .darkAqua : .aqua) }
+    /// Hairlines between panes and around the bars.
+    var divider: NSColor { foreground.withAlphaComponent(isDark ? 0.1 : 0.14) }
     var terminalPalette: [SwiftTerm.Color] { ansi.map(\.terminalColor) }
 
-    static let all: [CodecTheme] = [.codec, .shadowMoses, .outerHeaven, .tanker]
+    static let all: [CodecTheme] = [.codec, .arctic, .amber, .daylight]
 
     static func named(_ id: String) -> CodecTheme {
         all.first { $0.id == id } ?? .codec
@@ -31,23 +33,23 @@ extension CodecTheme {
     static let codec = CodecTheme(
         id: "codec",
         name: "Codec",
-        briefing: "Green phosphor. The classic frequency.",
+        summary: "Near-black with a phosphor-green accent.",
         isDark: true,
-        background: NSColor(hex: 0x06100B),
-        foreground: NSColor(hex: 0xBDF5D3),
+        background: NSColor(hex: 0x0A0F0C),
+        foreground: NSColor(hex: 0xE3EAE6),
         accent: NSColor(hex: 0x52FFA8),
         alert: NSColor(hex: 0xFF3B4E),
         selection: NSColor(hex: 0x1D5C3E),
         ansi: [
-            0x0B1A12, 0xFF5C6C, 0x4DE89A, 0xE6E07A, 0x5CB8FF, 0xC792EA, 0x4DE8D8, 0xB8D9C6,
-            0x3D5C4B, 0xFF8A95, 0x8CFFC2, 0xFFF59E, 0x8FD0FF, 0xDDB6F2, 0x8CF5EA, 0xEAFFF3,
+            0x161C19, 0xFF5C6C, 0x4DE89A, 0xE6D07A, 0x5CB8FF, 0xC792EA, 0x4DD8D8, 0xC5CCC8,
+            0x58625D, 0xFF8A95, 0x8CFFC2, 0xFFE89E, 0x8FD0FF, 0xDDB6F2, 0x8CF0EA, 0xF4F7F5,
         ].map(NSColor.init(hex:))
     )
 
-    static let shadowMoses = CodecTheme(
-        id: "shadow-moses",
-        name: "Shadow Moses",
-        briefing: "Arctic night. Cold steel and blue ice.",
+    static let arctic = CodecTheme(
+        id: "arctic",
+        name: "Arctic",
+        summary: "Cool blue-grey with an ice-blue accent.",
         isDark: true,
         background: NSColor(hex: 0x070B12),
         foreground: NSColor(hex: 0xC9D7E8),
@@ -60,10 +62,10 @@ extension CodecTheme {
         ].map(NSColor.init(hex:))
     )
 
-    static let outerHeaven = CodecTheme(
-        id: "outer-heaven",
-        name: "Outer Heaven",
-        briefing: "Amber warning lights. A fortress of its own.",
+    static let amber = CodecTheme(
+        id: "amber",
+        name: "Amber",
+        summary: "Warm dark brown with an amber accent.",
         isDark: true,
         background: NSColor(hex: 0x120B05),
         foreground: NSColor(hex: 0xF5D9B0),
@@ -76,10 +78,10 @@ extension CodecTheme {
         ].map(NSColor.init(hex:))
     )
 
-    static let tanker = CodecTheme(
-        id: "tanker",
-        name: "Tanker",
-        briefing: "Daylight on deck. For operatives who work in the open.",
+    static let daylight = CodecTheme(
+        id: "daylight",
+        name: "Daylight",
+        summary: "A light theme for bright rooms.",
         isDark: false,
         background: NSColor(hex: 0xF3F6F2),
         foreground: NSColor(hex: 0x1D2A24),

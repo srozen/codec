@@ -5,12 +5,13 @@ import CodecCore
 struct SettingsView: View {
     let preferences: Preferences
     let sounds: any SoundPlaying
+    var history: HistoryStore?
 
     var body: some View {
         TabView {
             AppearanceSettings(prefs: preferences)
                 .tabItem { Label("Appearance", systemImage: "paintpalette") }
-            ShellSettings(prefs: preferences)
+            ShellSettings(prefs: preferences, history: history)
                 .tabItem { Label("Shell", systemImage: "terminal") }
             PromptSettings(prefs: preferences)
                 .tabItem { Label("Prompt", systemImage: "chevron.right.square") }
@@ -23,8 +24,8 @@ struct SettingsView: View {
 
     /// The Settings window: resizable, sized to fit the screen, with each tab scrolling on its own.
     @MainActor
-    static func makeWindow(preferences: Preferences, sounds: any SoundPlaying) -> NSWindow {
-        let controller = NSHostingController(rootView: SettingsView(preferences: preferences, sounds: sounds))
+    static func makeWindow(preferences: Preferences, sounds: any SoundPlaying, history: HistoryStore? = nil) -> NSWindow {
+        let controller = NSHostingController(rootView: SettingsView(preferences: preferences, sounds: sounds, history: history))
         controller.sizingOptions = [.minSize]
         let window = NSWindow(contentViewController: controller)
         window.title = "Settings"
@@ -139,6 +140,8 @@ private struct ThemeCard: View {
 
 private struct ShellSettings: View {
     @ObservedObject var prefs: Preferences
+    var history: HistoryStore?
+    @State private var confirmingClear = false
 
     var body: some View {
         Form {
@@ -150,6 +153,32 @@ private struct ShellSettings: View {
                 Toggle("Shell integration", isOn: $prefs.shellIntegration)
             } footer: {
                 Text("Lets Codec track commands in zsh: exit status and duration in the status bar, ⌘↑ / ⌘↓ to jump between commands, and notifications when long commands finish. Your own startup files load unchanged. Applies to new panes.")
+                    .foregroundStyle(.secondary)
+            }
+            Section {
+                Toggle("Suggest commands from history as you type", isOn: $prefs.suggestCommands)
+                Toggle("↑ opens the history menu, ⌃R searches history", isOn: $prefs.historyKeys)
+                Toggle("Friendlier Tab completion", isOn: $prefs.friendlyCompletion)
+            } header: {
+                Text("Command line")
+            } footer: {
+                Text("Suggestions appear dimmed after the cursor: → or End takes them, ⌥→ one word. Friendlier completion ignores case, matches inside names (“dev” finds “Development”), forgives a typo in longer words and lets you pick with the arrows. Settings from your .zshrc win. Applies to new panes; zsh only.")
+                    .foregroundStyle(.secondary)
+            }
+            Section {
+                Toggle("Remember commands I run", isOn: $prefs.recordHistory)
+                if let history {
+                    Button("Clear History…", role: .destructive) { confirmingClear = true }
+                        .confirmationDialog("Clear Codec’s command history?", isPresented: $confirmingClear) {
+                            Button("Clear History", role: .destructive) { history.clear() }
+                        } message: {
+                            Text("Codec forgets every command recorded so far, and hides the older ones from your shell’s history file. The file itself isn’t changed.")
+                        }
+                }
+            } header: {
+                Text("History")
+            } footer: {
+                Text("Codec keeps where each command ran, how long it took and whether it failed, alongside your shell’s own history. Commands typed with a leading space aren’t kept. Search it with ⌘Y.")
                     .foregroundStyle(.secondary)
             }
             Section {

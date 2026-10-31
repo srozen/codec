@@ -104,7 +104,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, AppCoordinating {
 
     @objc func showSettings(_ sender: Any?) {
         if settingsWindow == nil {
-            settingsWindow = SettingsView.makeWindow(preferences: environment.preferences, sounds: environment.sounds)
+            settingsWindow = SettingsView.makeWindow(preferences: environment.preferences, sounds: environment.sounds,
+                                                     history: environment.history)
         }
         settingsWindow?.makeKeyAndOrderFront(nil)
     }

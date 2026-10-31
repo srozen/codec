@@ -139,6 +139,16 @@ private final class ZshHarness: @unchecked Sendable {
         payloads(9999).filter { $0.hasPrefix("prompt=") }.map { String($0.dropFirst("prompt=".count)) }
     }
 
+    /// The screen's lines, as text.
+    var screen: [String] {
+        terminal.terminal.terminalLock.withLock {
+            (0..<terminal.terminal.rows).compactMap { terminal.terminal.getLine(row: $0)?.translateToString(trimRight: true) }
+        }
+    }
+
+    /// The last line with anything on it: the command line, usually.
+    var lastLine: String { screen.last { !$0.isEmpty } ?? "" }
+
     /// Runs a command and waits for the integration to report it finished.
     func run(_ command: String) async -> Bool {
         let finished = payloads(6973).filter { $0.hasPrefix("done;") }.count
@@ -181,9 +191,11 @@ struct ZshIntegrationTests {
         let events = zsh.payloads(6973).compactMap(IntegrationEvent.init(payload:)).filter {
             if case .prompt = $0 { return false }
             if case .commandLineSelection = $0 { return false }
+            if case .historyFile = $0 { return false }
             return true
         }
         #expect(events.first == .commandStarted("sleep 0.2; false"))
+        #expect(events.dropFirst().first == .commandText("sleep 0.2; false"))
         guard case .commandFinished(let code, let duration) = events.last else {
             Issue.record("No finish event in \(events)")
             return
@@ -596,3 +608,112 @@ struct CommandLineEditingTests {
         #expect(calls >= "echo hello".count + "bye".count)
     }
 }
+
+@Suite("History and completion in zsh", .serialized, .timeLimit(.minutes(1)),
+       .enabled(if: FileManager.default.isExecutableFile(atPath: "/bin/zsh")))
+struct HistoryAndCompletionTests {
+    private static let features = ["CODEC_SUGGESTIONS": "1", "CODEC_HISTORY_KEYS": "1", "CODEC_COMPLETION": "1"]
+
+    private func shell(rc: String = "", environment: [String: String] = features, directory: String? = nil) async throws -> ZshHarness {
+        let zsh = try ZshHarness(homeFiles: [".zshrc": rc], directory: directory, environment: environment)
+        #expect(await zsh.wait { zsh.payloads(133).contains { $0.hasPrefix("A") } })
+        return zsh
+    }
+
+    private func ranCommand(_ zsh: ZshHarness, after before: Int) async -> String? {
+        guard await zsh.wait(until: { zsh.payloads(6973).dropFirst(before).contains { $0.hasPrefix("exec;") } }) else { return nil }
+        return zsh.payloads(6973).dropFirst(before).first { $0.hasPrefix("exec;") }.map { String($0.dropFirst(5)) }
+    }
+
+    @Test func reportsTheWholeCommandAndTheHistoryFile() async throws {
+        let zsh = try await shell(rc: "HISTFILE=$HOME/.zsh_history")
+        #expect(zsh.payloads(6973).contains { $0.hasPrefix("histfile;") && $0.hasSuffix("/.zsh_history") })
+        #expect(await zsh.run("echo one; \\\necho two"))
+        let encoded = zsh.payloads(6973).first { $0.hasPrefix("command;") }.map { String($0.dropFirst(8)) }
+        let text = encoded.flatMap { Data(base64Encoded: $0) }.map { String(decoding: $0, as: UTF8.self) }
+        #expect(text == "echo one; \\\necho two")
+    }
+
+    @Test func suggestsFromHistoryAndTakesItWithTheRightArrow() async throws {
+        let zsh = try await shell()
+        #expect(await zsh.run("echo codec-suggestion-42"))
+        zsh.send("echo codec-s")
+        #expect(await zsh.wait { zsh.lastLine.hasSuffix("echo codec-suggestion-42") })
+        let before = zsh.payloads(6973).count
+        zsh.send("\u{1b}[C\r")
+        #expect(await ranCommand(zsh, after: before) == "echo codec-suggestion-42")
+    }
+
+    @Test func optionRightTakesOneWord() async throws {
+        let zsh = try await shell()
+        #expect(await zsh.run("echo alpha beta gamma"))
+        zsh.send("echo al")
+        #expect(await zsh.wait { zsh.lastLine.hasSuffix("echo alpha beta gamma") })
+        let before = zsh.payloads(6973).count
+        // ⌥→ with Option as Meta: ESC f, forward-word.
+        zsh.send("\u{1b}f\r")
+        #expect(await ranCommand(zsh, after: before) == "echo alpha")
+    }
+
+    @Test func noSuggestionWhenTurnedOff() async throws {
+        let zsh = try await shell(environment: [:])
+        #expect(await zsh.run("echo nothing-to-see"))
+        zsh.send("echo noth")
+        #expect(await zsh.wait { zsh.lastLine.hasSuffix("echo noth") })
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(zsh.lastLine.hasSuffix("echo noth"))
+    }
+
+    @Test func upArrowAndControlRAskCodec() async throws {
+        let zsh = try await shell()
+        zsh.send("git st")
+        zsh.send("\u{1b}[A")
+        #expect(await zsh.wait { zsh.payloads(6973).contains("history;menu;" + Data("git st".utf8).base64EncodedString()) })
+        zsh.send("\u{12}")
+        #expect(await zsh.wait { zsh.payloads(6973).contains("history;search;" + Data("git st".utf8).base64EncodedString()) })
+    }
+
+    @Test func keysTheUserReboundAreLeftAlone() async throws {
+        let zsh = try await shell(rc: "bindkey '^R' clear-screen")
+        zsh.send("\u{12}")
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(!zsh.payloads(6973).contains { $0.hasPrefix("history;search") })
+    }
+
+    @Test func pastingReplacesWhatWasTyped() async throws {
+        let zsh = try await shell()
+        zsh.send("old text")
+        let before = zsh.payloads(6973).count
+        zsh.sendBytes(CommandLineEditing.Action.selectAll.sequence + Array("\u{1b}[200~echo pasted\u{1b}[201~\r".utf8))
+        #expect(await ranCommand(zsh, after: before) == "echo pasted")
+    }
+
+    @Test func tabCompletesIgnoringCaseAndInsideNames() async throws {
+        let temp = try TemporaryDirectory()
+        let folder = try temp.directory("work")
+        try temp.directory("work/Development")
+        try temp.file("work/my-notes.txt", "")
+        let zsh = try await shell(directory: folder.path)
+        var before = zsh.payloads(6973).count
+        zsh.send("ls dev\t")
+        try await Task.sleep(for: .milliseconds(500))
+        zsh.send("\r")
+        let ran = await ranCommand(zsh, after: before)
+        #expect(ran?.hasPrefix("ls Development") == true)
+
+        before = zsh.payloads(6973).count
+        zsh.send("cat notes\t")
+        try await Task.sleep(for: .milliseconds(500))
+        zsh.send("\r")
+        #expect(await ranCommand(zsh, after: before)?.trimmingCharacters(in: .whitespaces) == "cat my-notes.txt")
+    }
+
+    @Test func leavesTheUsersCompletionStylesAlone() async throws {
+        let zsh = try await shell(rc: "autoload -Uz compinit && compinit -u\nzstyle ':completion:*' matcher-list ''")
+        let before = zsh.payloads(9999).count
+        zsh.send(#"print -rn -- $'\e]9999;'"$(zstyle -L ':completion:*' matcher-list)"$'\a'"# + "\r")
+        #expect(await zsh.wait { zsh.payloads(9999).count > before })
+        #expect(zsh.payloads(9999).last == "zstyle ':completion:*' matcher-list ''")
+    }
+}
+

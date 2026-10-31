@@ -71,7 +71,7 @@ final class Session: ObservableObject {
             commandLineSelection = false
         case .commandLineSelection(let active):
             commandLineSelection = active
-        case .clipboard:
+        case .clipboard, .commandText, .historyFile, .historyRequest:
             break
         case .commandStarted(let command):
             commandLineSelection = false

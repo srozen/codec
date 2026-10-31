@@ -72,6 +72,9 @@ enum MainMenu {
         menu.addItem(item("Restart Shell", #selector(W.restartShell(_:))))
         menu.addItem(item("Clear Buffer", #selector(W.clearBuffer(_:)), "k"))
         menu.addItem(.separator())
+        menu.addItem(item("Save File", #selector(W.saveDocument(_:)), "s"))
+        menu.addItem(item("Close File", #selector(W.closeFile(_:)), "w", [.command, .option]))
+        menu.addItem(.separator())
         menu.addItem(item("Switch Branch…", #selector(W.switchBranch(_:)), "b", [.command, .shift]))
         return menu
     }
@@ -82,6 +85,7 @@ enum MainMenu {
         menu.addItem(item("Copy", #selector(NSText.copy(_:)), "c"))
         menu.addItem(item("Paste", #selector(NSText.paste(_:)), "v"))
         menu.addItem(item("Select All", #selector(NSText.selectAll(_:)), "a"))
+        menu.addItem(item("Toggle Comment", #selector(EditorTextView.toggleComment(_:)), "/"))
         menu.addItem(.separator())
         menu.addItem(item("Copy Output of Last Command", #selector(W.copyLastOutput(_:)), "c", [.command, .shift]))
         menu.addItem(item("Select Output of Last Command", #selector(W.selectLastOutput(_:)), "a", [.command, .shift]))
@@ -114,6 +118,7 @@ enum MainMenu {
         let menu = NSMenu(title: "View")
         menu.addItem(item("Command Palette…", #selector(W.showCommandPalette(_:)), "p", [.command, .shift]))
         menu.addItem(item("Toggle File Tree", #selector(W.toggleFileTree(_:)), "e", [.command, .shift]))
+        menu.addItem(item("Toggle Markdown Preview", #selector(W.toggleMarkdownPreview(_:)), "v", [.command, .shift]))
         menu.addItem(.separator())
         menu.addItem(item("Jump to Previous Command", #selector(W.previousCommand(_:)), arrow(NSUpArrowFunctionKey)))
         menu.addItem(item("Jump to Next Command", #selector(W.nextCommand(_:)), arrow(NSDownArrowFunctionKey)))

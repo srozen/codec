@@ -50,6 +50,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, AppCoordinating {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if let unsaved = windows.first(where: \.hasUnsavedFiles) {
+            // Ask in that window, then try quitting again.
+            unsaved.window?.makeKeyAndOrderFront(nil)
+            unsaved.confirmDiscardingUnsavedFiles {
+                unsaved.editor.documents.filter(\.isDirty).forEach { $0.revert() }
+                NSApp.terminate(nil)
+            }
+            return .terminateCancel
+        }
         guard windows.contains(where: \.hasRunningJobs) else { return .terminateNow }
         let alert = NSAlert()
         alert.messageText = "Quit Codec?"

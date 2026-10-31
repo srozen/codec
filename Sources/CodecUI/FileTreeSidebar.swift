@@ -5,8 +5,11 @@ import CodecCore
 
 /// What the file tree asks its window to do.
 struct FileTreeActions {
-    /// Opens a file with its default app.
-    var open: (URL) -> Void = { NSWorkspace.shared.open($0) }
+    /// Shows a file in Codec's editor as a preview tab, which the next one replaces.
+    var preview: (URL) -> Void = { _ in }
+    /// Opens a file in Codec's editor, in a tab of its own.
+    var open: (URL) -> Void = { _ in }
+    var openInDefaultApp: (URL) -> Void = { NSWorkspace.shared.open($0) }
     /// Opens a file in `$EDITOR`, in a new pane.
     var openInEditor: (URL) -> Void = { _ in }
     /// `cd`s the focused pane into a folder.
@@ -226,13 +229,15 @@ final class FileTreeSidebar: NSView {
 
     // MARK: Clicks and keys
 
+    /// A click previews a file or opens a folder.
     @objc private func clicked() {
         let row = outline.clickedRow
         // The disclosure triangle opens folders itself; the second click of a double-click is
         // handled as one.
-        guard row >= 0, let node = outline.item(atRow: row) as? FileNode, node.isDirectory,
-              NSApp.currentEvent?.clickCount ?? 1 == 1,
-              !outline.frameOfOutlineCell(atRow: row).contains(outline.convert(NSApp.currentEvent?.locationInWindow ?? .zero, from: nil))
+        guard row >= 0, let node = outline.item(atRow: row) as? FileNode, NSApp.currentEvent?.clickCount ?? 1 == 1,
+              NSApp.currentEvent?.modifierFlags.intersection([.command, .shift]).isEmpty ?? true else { return }
+        guard node.isDirectory else { return actions.preview(node.url) }
+        guard !outline.frameOfOutlineCell(atRow: row).contains(outline.convert(NSApp.currentEvent?.locationInWindow ?? .zero, from: nil))
         else { return }
         toggle(node)
     }
@@ -384,11 +389,14 @@ extension FileTreeSidebar: NSMenuDelegate {
                 self?.actions.openInNewTab(first.url)
             })
         } else if !first.isDirectory {
-            items.append(ClosureMenuItem("Open", image: "arrow.up.forward.app") { [weak self] in
+            items.append(ClosureMenuItem("Open", image: "doc.text") { [weak self] in
                 urls.forEach { self?.actions.open($0) }
             })
+            items.append(ClosureMenuItem("Open in Default App", image: "arrow.up.forward.app") { [weak self] in
+                urls.forEach { self?.actions.openInDefaultApp($0) }
+            })
             if nodes.count == 1 {
-                items.append(ClosureMenuItem("Open in Editor", image: "pencil.and.list.clipboard") { [weak self] in
+                items.append(ClosureMenuItem("Open in Terminal Editor", image: "apple.terminal") { [weak self] in
                     self?.actions.openInEditor(first.url)
                 })
             }

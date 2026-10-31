@@ -2,12 +2,22 @@ import AppKit
 import Synchronization
 import SwiftTerm
 
-/// SwiftTerm's local-process view, with the bell routed to Codec and a context menu.
+/// SwiftTerm's local-process view, with the bell routed to Codec, a context menu, and the hooks that
+/// let the command line be edited with the mouse.
 final class CodecTerminalView: LocalProcessTerminalView {
     var onBell: (() -> Void)?
     /// Builds the menu shown on right-click when the running program isn't tracking the mouse.
     var contextMenuProvider: ((NSEvent) -> NSMenu?)?
+    /// A click or drag finished: where it started and ended (window coordinates), its click count,
+    /// and whether it was a drag.
+    var onPointerRelease: ((_ press: NSPoint, _ release: NSPoint, _ clicks: Int, _ dragged: Bool) -> Void)?
+    /// A mouse press began, before the view handles it.
+    var onPointerPress: (() -> Void)?
+    var canCut: (() -> Bool)?
+    var onCut: (() -> Void)?
     private var relay: BellRelay?
+    private var press: (point: NSPoint, clicks: Int)?
+    private var dragged = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -25,6 +35,35 @@ final class CodecTerminalView: LocalProcessTerminalView {
         window?.makeFirstResponder(self)
         return contextMenuProvider?(event) ?? super.menu(for: event)
     }
+
+    override func mouseDown(with event: NSEvent) {
+        press = (event.locationInWindow, event.clickCount)
+        dragged = false
+        onPointerPress?()
+        super.mouseDown(with: event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        dragged = true
+        super.mouseDragged(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+        guard let press else { return }
+        self.press = nil
+        onPointerRelease?(press.point, event.locationInWindow, press.clicks, dragged)
+    }
+
+    @objc func cut(_ sender: Any?) {
+        onCut?()
+    }
+
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(cut(_:)) { return canCut?() ?? false }
+        return super.validateUserInterfaceItem(item)
+    }
+
 
     fileprivate func ringBell() {
         onBell?()

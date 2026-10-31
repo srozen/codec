@@ -378,6 +378,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
     @objc func resetFontSize(_ sender: Any?) { allPanes.forEach { $0.resetFontSize() } }
 
     @objc func clearBuffer(_ sender: Any?) { focusedPane?.clearBuffer() }
+
+    @objc func moveToStartOfCommandLine(_ sender: Any?) { focusedPane?.editCommandLine(.moveToStart) }
+    @objc func moveToEndOfCommandLine(_ sender: Any?) { focusedPane?.editCommandLine(.moveToEnd) }
+    @objc func selectToStartOfCommandLine(_ sender: Any?) { focusedPane?.editCommandLine(.selectToStart) }
+    @objc func selectToEndOfCommandLine(_ sender: Any?) { focusedPane?.editCommandLine(.selectToEnd) }
+    @objc func deleteToStartOfCommandLine(_ sender: Any?) { focusedPane?.editCommandLine(.deleteToStart) }
+    @objc func selectCommandLine(_ sender: Any?) { focusedPane?.editCommandLine(.selectAll) }
     @objc func previousCommand(_ sender: Any?) { focusedPane?.jumpToCommand(previous: true) }
     @objc func nextCommand(_ sender: Any?) { focusedPane?.jumpToCommand(previous: false) }
 

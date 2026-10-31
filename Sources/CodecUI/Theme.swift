@@ -25,10 +25,7 @@ struct CodecTheme: Identifiable, Equatable {
 
     /// The pill behind a prompt chip of `color`: that color washed over the background, as `#rrggbb`.
     func promptChipFill(_ color: PromptConfiguration.Color) -> String {
-        let mixed = background.blended(withFraction: isDark ? 0.18 : 0.16, of: ansi[color.ansiIndex]) ?? background
-        let c = mixed.usingColorSpace(.sRGB) ?? mixed
-        return String(format: "#%02x%02x%02x", Int(round(c.redComponent * 255)), Int(round(c.greenComponent * 255)),
-                      Int(round(c.blueComponent * 255)))
+        (background.blended(withFraction: isDark ? 0.18 : 0.16, of: ansi[color.ansiIndex]) ?? background).hexString
     }
 
     var promptChipFills: [PromptConfiguration.Color: String] {
@@ -109,6 +106,13 @@ extension CodecTheme {
 }
 
 extension NSColor {
+    /// `#rrggbb`.
+    var hexString: String {
+        let c = usingColorSpace(.sRGB) ?? self
+        return String(format: "#%02x%02x%02x", Int(round(c.redComponent * 255)), Int(round(c.greenComponent * 255)),
+                      Int(round(c.blueComponent * 255)))
+    }
+
     convenience init(hex: UInt32) {
         self.init(
             srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,

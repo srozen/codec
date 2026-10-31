@@ -101,6 +101,10 @@ private final class ZshHarness: @unchecked Sendable {
         terminal.process.send(data: Array(text.utf8)[...])
     }
 
+    func sendBytes(_ bytes: [UInt8]) {
+        terminal.process.send(data: bytes[...])
+    }
+
     /// Asks the shell to report its current PROMPT (minus control characters) as OSC 9999.
     func reportPrompt() {
         send(#"print -rn -- $'\e]9999;prompt='"${${PROMPT//$'\e'/}//$'\a'/}"$'\a'"# + "\r")
@@ -163,18 +167,18 @@ private final class ZshHarness: @unchecked Sendable {
 struct ZshIntegrationTests {
     @Test func marksPromptsAndReportsTheWorkingDirectory() async throws {
         let zsh = try ZshHarness()
-        #expect(await zsh.wait { zsh.payloads(133).contains("A") })
+        #expect(await zsh.wait { zsh.payloads(133).contains { $0.hasPrefix("A") } })
         let directories = zsh.payloads(7)
         #expect(directories.contains { $0.hasPrefix("file://") && $0.hasSuffix(zsh.home.path) })
     }
 
     @Test func reportsCommandsWithTheirStatusAndDuration() async throws {
         let zsh = try ZshHarness()
-        #expect(await zsh.wait { zsh.payloads(133).contains("A") })
+        #expect(await zsh.wait { zsh.payloads(133).contains { $0.hasPrefix("A") } })
         zsh.send("sleep 0.2; false\r")
         #expect(await zsh.wait { zsh.payloads(6973).contains { $0.hasPrefix("done;") } })
 
-        let events = zsh.payloads(6973).compactMap(IntegrationEvent.init(payload:))
+        let events = zsh.payloads(6973).compactMap(IntegrationEvent.init(payload:)).filter { $0 != .prompt }
         #expect(events.first == .commandStarted("sleep 0.2; false"))
         guard case .commandFinished(let code, let duration) = events.last else {
             Issue.record("No finish event in \(events)")
@@ -188,10 +192,10 @@ struct ZshIntegrationTests {
 
     @Test func reportsSuccessAndDirectoryChanges() async throws {
         let zsh = try ZshHarness()
-        #expect(await zsh.wait { zsh.payloads(133).contains("A") })
+        #expect(await zsh.wait { zsh.payloads(133).contains { $0.hasPrefix("A") } })
         zsh.send("mkdir -p 'with space' && cd 'with space'\r")
         #expect(await zsh.wait { zsh.payloads(6973).contains { $0.hasPrefix("done;") } })
-        #expect(zsh.payloads(6973).last == zsh.payloads(6973).last.flatMap { $0.hasPrefix("done;0;") ? $0 : nil })
+        #expect(zsh.payloads(6973).last { $0.hasPrefix("done;") }?.hasPrefix("done;0;") == true)
         #expect(await zsh.wait { zsh.payloads(7).contains { $0.hasSuffix("/home/with%20space") } })
     }
 
@@ -201,7 +205,7 @@ struct ZshIntegrationTests {
             ".zshrc": "print -rn -- $'\\e]9999;zshrc-env='\"$CODEC_TEST_ENV\"$'\\a'\n",
         ])
         #expect(await zsh.wait { zsh.payloads(9999).contains("zshrc-env=1") })
-        #expect(await zsh.wait { zsh.payloads(133).contains("A") })
+        #expect(await zsh.wait { zsh.payloads(133).contains { $0.hasPrefix("A") } })
     }
 
     @Test func honorsACustomZdotdir() async throws {
@@ -259,7 +263,7 @@ struct ZshPromptTests {
         let setup = try TemporaryDirectory()
         let repo = try repository(in: setup, branch: "feature/prompt")
         let zsh = try ZshHarness(homeFiles: [".zshrc": "PS1='USER> '\n"], prompt: prompt, directory: repo.path)
-        #expect(await zsh.wait { zsh.payloads(133).contains("A") })
+        #expect(await zsh.wait { zsh.payloads(133).contains { $0.hasPrefix("A") } })
 
         #expect(await zsh.run("false"))
         zsh.reportPrompt()
@@ -278,7 +282,7 @@ struct ZshPromptTests {
 
     @Test func appliesSettingsChangesToOpenShells() async throws {
         let zsh = try ZshHarness(homeFiles: [".zshrc": "PS1='USER> '\n"], prompt: prompt)
-        #expect(await zsh.wait { zsh.payloads(133).contains("A") })
+        #expect(await zsh.wait { zsh.payloads(133).contains { $0.hasPrefix("A") } })
         zsh.reportPrompt()
         #expect(await zsh.wait { zsh.reportedPrompts.count == 1 })
         #expect(zsh.reportedPrompts.last?.contains("❯") == true)
@@ -313,7 +317,7 @@ struct ZshPromptTests {
             .init(.time, enabled: true, color: .red),
         ]
         let zsh = try ZshHarness(prompt: configuration, directory: repo.path)
-        #expect(await zsh.wait { zsh.payloads(133).contains("A") })
+        #expect(await zsh.wait { zsh.payloads(133).contains { $0.hasPrefix("A") } })
         zsh.reportPrompt()
         #expect(await zsh.wait { !zsh.reportedPrompts.isEmpty })
         let rendered = try #require(zsh.reportedPrompts.last)
@@ -344,7 +348,7 @@ struct ZshPromptTests {
         let home = realPath(repo.deletingLastPathComponent())
         let zsh = try ZshHarness(prompt: configuration, directory: repo.path,
                                  environment: ["VIRTUAL_ENV": "/opt/envs/venv", "HOME": home])
-        #expect(await zsh.wait { zsh.payloads(133).contains("A") })
+        #expect(await zsh.wait { zsh.payloads(133).contains { $0.hasPrefix("A") } })
         #expect(await zsh.run("false"))
         zsh.reportExpandedPrompt()
         #expect(await zsh.wait { !zsh.expandedPrompts.isEmpty })
@@ -380,7 +384,7 @@ struct ZshPromptTests {
         let home = realPath(repo.deletingLastPathComponent())
         let zsh = try ZshHarness(directory: repo.path, environment: ["HOME": home])
         try zsh.integration.writePrompt(configuration, chipFills: [.blue: "#102a40", .magenta: "#2a1040", .red: "#401010"])
-        #expect(await zsh.wait { zsh.payloads(133).contains("A") })
+        #expect(await zsh.wait { zsh.payloads(133).contains { $0.hasPrefix("A") } })
         #expect(await zsh.run("false"))
         zsh.reportExpandedPrompt()
         #expect(await zsh.wait { !zsh.expandedPrompts.isEmpty })
@@ -413,7 +417,7 @@ struct ZshPromptTests {
         // A short "~/repo" keeps the prompt on one line of the 80-column terminal.
         let zsh = try ZshHarness(prompt: configuration, directory: repo.path,
                                  environment: ["HOME": realPath(repo.deletingLastPathComponent())])
-        #expect(await zsh.wait { zsh.payloads(133).contains("A") })
+        #expect(await zsh.wait { zsh.payloads(133).contains { $0.hasPrefix("A") } })
         // Successful commands in the same place draw the same prompt each time, so the reported prompt
         // is also the one on screen afterwards.
         #expect(await zsh.run("true"))
@@ -431,7 +435,7 @@ struct ZshPromptTests {
         configuration.blankLineBetweenCommands = true
         configuration.segments = [.init(.directory, enabled: true, color: .blue)]
         let zsh = try ZshHarness(prompt: configuration)
-        #expect(await zsh.wait { zsh.payloads(133).contains("A") })
+        #expect(await zsh.wait { zsh.payloads(133).contains { $0.hasPrefix("A") } })
         #expect(await zsh.run("true"))
         zsh.reportExpandedPrompt()
         #expect(await zsh.wait { !zsh.expandedPrompts.isEmpty })
@@ -443,7 +447,7 @@ struct ZshPromptTests {
         let setup = try TemporaryDirectory()
         let repo = try repository(in: setup, branch: "$(touch${IFS}pwned)")
         let zsh = try ZshHarness(homeFiles: [".zshrc": "setopt prompt_subst\n"], prompt: prompt, directory: repo.path)
-        #expect(await zsh.wait { zsh.payloads(133).contains("A") })
+        #expect(await zsh.wait { zsh.payloads(133).contains { $0.hasPrefix("A") } })
         // The first prompt has been drawn once a command has run after it.
         #expect(await zsh.run("true"))
         #expect(await zsh.run("true"))
@@ -459,4 +463,111 @@ private func realPath(_ url: URL) -> String {
     guard let resolved = realpath(url.path, nil) else { return url.path }
     defer { free(resolved) }
     return String(cString: resolved)
+}
+
+/// Typing, selecting and deleting on the command line, the way Codec drives it, in a real zsh.
+@Suite("Command line editing in zsh", .serialized, .timeLimit(.minutes(1)),
+       .enabled(if: FileManager.default.isExecutableFile(atPath: "/bin/zsh")))
+struct CommandLineEditingTests {
+    typealias Action = CommandLineEditing.Action
+
+    private func shell(rc: String = "") async throws -> ZshHarness {
+        let zsh = try ZshHarness(homeFiles: [".zshrc": rc])
+        #expect(await zsh.wait { zsh.payloads(133).contains { $0.hasPrefix("A") } })
+        return zsh
+    }
+
+    /// Types `text`, applies `keys`, presses Return, and gives back the command zsh ran.
+    private func run(_ zsh: ZshHarness, typing text: String, then keys: [UInt8]) async -> String? {
+        let before = zsh.payloads(6973).count
+        zsh.send(text)
+        zsh.sendBytes(keys)
+        zsh.send("\r")
+        guard await zsh.wait(until: { zsh.payloads(6973).dropFirst(before).contains { $0.hasPrefix("exec;") } }) else { return nil }
+        return zsh.payloads(6973).dropFirst(before).first { $0.hasPrefix("exec;") }.map { String($0.dropFirst(5)) }
+    }
+
+    @Test func advertisesClickToMove() async throws {
+        let zsh = try await shell()
+        #expect(zsh.payloads(133).contains("A;cl=line"))
+    }
+
+    @Test func deletingRemovesTheSelection() async throws {
+        let zsh = try await shell()
+        let command = await run(zsh, typing: "echo hello world", then: CommandLineEditing.select(from: -5, to: 0) + [0x7F])
+        #expect(command == "echo hello ")
+    }
+
+    @Test func typingReplacesTheSelection() async throws {
+        let zsh = try await shell()
+        let command = await run(zsh, typing: "echo hello world", then: CommandLineEditing.select(from: -11, to: -6) + Array("bye".utf8))
+        #expect(command == "echo bye world")
+    }
+
+    @Test func forwardDeleteRemovesTheSelection() async throws {
+        let zsh = try await shell()
+        let command = await run(zsh, typing: "echo abcdef", then: CommandLineEditing.select(from: -3, to: -1) + Array("\u{1b}[3~".utf8))
+        #expect(command == "echo abcf")
+    }
+
+    @Test func shiftArrowsExtendTheSelection() async throws {
+        let zsh = try await shell()
+        let shiftLeft = Array("\u{1b}[1;2D".utf8)
+        let command = await run(zsh, typing: "echo abc", then: shiftLeft + shiftLeft + shiftLeft + Array("X".utf8))
+        #expect(command == "echo X")
+    }
+
+    @Test func plainArrowsEndTheSelection() async throws {
+        let zsh = try await shell()
+        let shiftLeft = Array("\u{1b}[1;2D".utf8), left = Array("\u{1b}[D".utf8)
+        let command = await run(zsh, typing: "echo abc", then: shiftLeft + shiftLeft + shiftLeft + left + Array("X".utf8))
+        #expect(command == "echoX abc")
+    }
+
+    @Test func selectsAWordAndCutsIt() async throws {
+        let zsh = try await shell()
+        let keys = CommandLineEditing.steps(-6) + Action.selectWord.sequence + Action.cut.sequence
+        let command = await run(zsh, typing: "ls /usr/local/bin now", then: keys)
+        #expect(command == "ls  now")
+    }
+
+    @Test func selectAllThenTypeReplacesTheCommand() async throws {
+        let zsh = try await shell()
+        let command = await run(zsh, typing: "echo old", then: Action.selectAll.sequence + Array("echo new".utf8))
+        #expect(command == "echo new")
+    }
+
+    @Test func movesAndDeletesToTheStartOfTheLine() async throws {
+        let zsh = try await shell()
+        #expect(await run(zsh, typing: "cho one", then: Action.moveToStart.sequence + Array("e".utf8)) == "echo one")
+        #expect(await run(zsh, typing: "echo one two", then: CommandLineEditing.steps(-3) + Action.deleteToStart.sequence) == "two")
+        let selectToEnd = Action.moveToStart.sequence + Action.selectToEnd.sequence + Array("pwd".utf8)
+        #expect(await run(zsh, typing: "echo gone", then: selectToEnd) == "pwd")
+    }
+
+    /// Selections clamp to the command line: a drag that starts over the prompt selects from its start,
+    /// and one that ends past the text selects to its end, without moving the other edge.
+    @Test func selectionsClampToTheCommandLine() async throws {
+        let zsh = try await shell()
+        #expect(await run(zsh, typing: "echo x", then: CommandLineEditing.select(from: -40, to: -2) + Array("pwd ".utf8)) == "pwd  x")
+        // Cursor at index 2 of "echo abc"; 3 → 30 selects index 5 to the end: "abc".
+        #expect(await run(zsh, typing: "echo abc", then: CommandLineEditing.steps(-6) + CommandLineEditing.select(from: 3, to: 30)
+                          + [0x7F]) == "echo ")
+    }
+
+    /// Plugins wrap self-insert too; their wrapper must keep running, and selections still replace.
+    @Test func keepsWidgetsWrappedByPlugins() async throws {
+        let rc = #"""
+        typeset -gi PLUGIN_CALLS=0
+        plugin_self_insert() { (( PLUGIN_CALLS++ )); zle .self-insert }
+        zle -N self-insert plugin_self_insert
+        """#
+        let zsh = try await shell(rc: rc)
+        let command = await run(zsh, typing: "echo hello", then: CommandLineEditing.select(from: -5, to: 0) + Array("bye".utf8))
+        #expect(command == "echo bye")
+        zsh.send(#"print -rn -- $'\e]9999;calls='$PLUGIN_CALLS$'\a'"# + "\r")
+        #expect(await zsh.wait { zsh.payloads(9999).contains { $0.hasPrefix("calls=") } })
+        let calls = zsh.payloads(9999).first { $0.hasPrefix("calls=") }.flatMap { Int($0.dropFirst(6)) } ?? 0
+        #expect(calls >= "echo hello".count + "bye".count)
+    }
 }

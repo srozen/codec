@@ -76,6 +76,7 @@ enum MainMenu {
 
     private static func editMenu() -> NSMenu {
         let menu = NSMenu(title: "Edit")
+        menu.addItem(item("Cut", #selector(NSText.cut(_:)), "x"))
         menu.addItem(item("Copy", #selector(NSText.copy(_:)), "c"))
         menu.addItem(item("Paste", #selector(NSText.paste(_:)), "v"))
         menu.addItem(item("Select All", #selector(NSText.selectAll(_:)), "a"))
@@ -89,6 +90,18 @@ enum MainMenu {
         findMenu.addItem(item("Use Selection for Find", findAction, "e", tag: Int(NSFindPanelAction.setFindString.rawValue)))
         find.submenu = findMenu
         menu.addItem(find)
+        menu.addItem(.separator())
+        let commandLine = NSMenuItem(title: "Command Line", action: nil, keyEquivalent: "")
+        let commandLineMenu = NSMenu(title: "Command Line")
+        commandLineMenu.addItem(item("Move to Start", #selector(W.moveToStartOfCommandLine(_:)), arrow(NSLeftArrowFunctionKey)))
+        commandLineMenu.addItem(item("Move to End", #selector(W.moveToEndOfCommandLine(_:)), arrow(NSRightArrowFunctionKey)))
+        commandLineMenu.addItem(item("Select to Start", #selector(W.selectToStartOfCommandLine(_:)), arrow(NSLeftArrowFunctionKey), [.command, .shift]))
+        commandLineMenu.addItem(item("Select to End", #selector(W.selectToEndOfCommandLine(_:)), arrow(NSRightArrowFunctionKey), [.command, .shift]))
+        commandLineMenu.addItem(item("Select Command Line", #selector(W.selectCommandLine(_:))))
+        commandLineMenu.addItem(.separator())
+        commandLineMenu.addItem(item("Delete to Start", #selector(W.deleteToStartOfCommandLine(_:)), "\u{8}"))
+        commandLine.submenu = commandLineMenu
+        menu.addItem(commandLine)
         return menu
     }
 

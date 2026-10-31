@@ -126,6 +126,7 @@ enum MainMenu {
         controlShiftTab.isHidden = true
         controlShiftTab.allowsKeyEquivalentWhenHidden = true
         menu.addItem(controlShiftTab)
+        menu.addItem(item("Rename Tab…", #selector(W.renameTab(_:)), "r", [.command, .shift]))
         let tabs = NSMenuItem(title: "Go to Tab", action: nil, keyEquivalent: "")
         let tabsMenu = NSMenu(title: "Go to Tab")
         for n in 1...9 {

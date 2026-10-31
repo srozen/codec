@@ -9,35 +9,45 @@ final class WindowModel: ObservableObject {
     @Published var selectedID: UUID?
     @Published var paletteOpen = false
     @Published var fullScreen = false
+    /// The tab whose name is being edited in the tab bar.
+    @Published var renamingTabID: UUID?
 
     var selected: TerminalTab? { tabs.first { $0.id == selectedID } }
 }
 
 // MARK: - Tab bar
 
+/// What the tab bar asks its window to do.
+struct TabBarActions {
+    var select: (TerminalTab) -> Void
+    var close: (TerminalTab) -> Void
+    var newTab: () -> Void
+    var showPalette: () -> Void
+    var beginRenaming: (TerminalTab) -> Void
+    /// Ends an edit: a new name (blank resets it), or nil to cancel.
+    var finishRenaming: (TerminalTab, String?) -> Void
+}
+
 struct TabBar: View {
     static let height: CGFloat = 40
 
     @ObservedObject var model: WindowModel
     @ObservedObject var preferences: Preferences
-    var onSelect: (TerminalTab) -> Void
-    var onClose: (TerminalTab) -> Void
-    var onNewTab: () -> Void
-    var onPalette: () -> Void
+    let actions: TabBarActions
 
     var body: some View {
         HStack(spacing: 6) {
             HStack(spacing: 4) {
                 ForEach(Array(model.tabs.enumerated()), id: \.element.id) { index, tab in
-                    TabButton(tab: tab, index: index, selected: tab.id == model.selectedID, theme: preferences.theme,
-                              onSelect: { onSelect(tab) }, onClose: { onClose(tab) })
+                    TabButton(tab: tab, index: index, selected: tab.id == model.selectedID,
+                              renaming: tab.id == model.renamingTabID, theme: preferences.theme, actions: actions)
                 }
             }
             .layoutPriority(1)
 
-            BarIconButton(systemImage: "plus", help: "New Tab (⌘T)", action: onNewTab)
+            BarIconButton(systemImage: "plus", help: "New Tab (⌘T)", action: actions.newTab)
             Spacer(minLength: 24)
-            BarIconButton(systemImage: "command", help: "Command Palette (⇧⌘P)", action: onPalette)
+            BarIconButton(systemImage: "command", help: "Command Palette (⇧⌘P)", action: actions.showPalette)
         }
         .padding(.leading, model.fullScreen ? 10 : 84)
         .padding(.trailing, 10)
@@ -70,9 +80,9 @@ private struct TabButton: View {
     @ObservedObject var tab: TerminalTab
     let index: Int
     let selected: Bool
+    let renaming: Bool
     let theme: CodecTheme
-    var onSelect: () -> Void
-    var onClose: () -> Void
+    let actions: TabBarActions
     @State private var hovering = false
 
     var body: some View {
@@ -94,16 +104,22 @@ private struct TabButton: View {
             }
             .frame(width: 12)
 
-            Text(session.title)
-                .font(.system(size: 12, weight: selected ? .semibold : .medium))
-                .foregroundStyle(selected ? .primary : .secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if renaming {
+                TabNameEditor(initialName: tab.customTitle ?? "", placeholder: tab.automaticTitle,
+                              onFinish: { actions.finishRenaming(tab, $0) })
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text(tab.title)
+                    .font(.system(size: 12, weight: selected ? .semibold : .medium))
+                    .foregroundStyle(selected ? .primary : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             ZStack {
                 if hovering || selected {
-                    Button(action: onClose) {
+                    Button(action: { actions.close(tab) }) {
                         Image(systemName: "xmark")
                             .font(.system(size: 9, weight: .bold))
                             .frame(width: 16, height: 16)
@@ -133,11 +149,56 @@ private struct TabButton: View {
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: 9))
-        .onTapGesture(perform: onSelect)
+        .onTapGesture { actions.select(tab) }
+        .simultaneousGesture(TapGesture(count: 2).onEnded { actions.beginRenaming(tab) })
         .onHover { hovering = $0 }
-        .help(session.abbreviatedDirectory)
+        .contextMenu {
+            Button("Rename Tab…") { actions.beginRenaming(tab) }
+            if tab.customTitle != nil {
+                Button("Reset Tab Name") { actions.finishRenaming(tab, "") }
+            }
+            Divider()
+            Button("Close Tab") { actions.close(tab) }
+        }
+        .help(tab.customTitle == nil ? session.abbreviatedDirectory : "\(tab.automaticTitle) — \(session.abbreviatedDirectory)")
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+/// Inline editor for a tab's name. Return saves, Escape cancels, clicking elsewhere saves.
+/// A blank name goes back to the automatic title, shown as the placeholder.
+private struct TabNameEditor: View {
+    let placeholder: String
+    var onFinish: (String?) -> Void
+    @State private var text: String
+    @State private var finished = false
+    @FocusState private var focused: Bool
+
+    init(initialName: String, placeholder: String, onFinish: @escaping (String?) -> Void) {
+        self.placeholder = placeholder
+        self.onFinish = onFinish
+        _text = State(initialValue: initialName)
+    }
+
+    var body: some View {
+        TextField(placeholder, text: $text)
+            .textFieldStyle(.plain)
+            .font(.system(size: 12, weight: .semibold))
+            .focused($focused)
+            .onSubmit { finish(text) }
+            .onExitCommand { finish(nil) }
+            .onChange(of: focused) { _, isFocused in
+                if !isFocused { finish(text) }
+            }
+            .task { focused = true }
+            .accessibilityLabel("Tab name")
+    }
+
+    private func finish(_ name: String?) {
+        guard !finished else { return }
+        finished = true
+        onFinish(name)
     }
 }
 

@@ -62,20 +62,25 @@ private final class ZshHarness: @unchecked Sendable {
     private let terminal: HeadlessTerminal
     private var observation: TerminalOscObservation?
 
-    init(zdotdir: String? = nil, homeFiles: [String: String] = [:]) throws {
+    let integration: ShellIntegration
+
+    init(zdotdir: String? = nil, homeFiles: [String: String] = [:], prompt: PromptConfiguration? = nil,
+         directory: String? = nil, environment extra: [String: String] = [:]) throws {
         temp = try TemporaryDirectory()
         home = try temp.directory("home")
         for (path, contents) in homeFiles {
             try temp.file("home/\(path)", contents)
         }
-        let integration = ShellIntegration(directory: temp.url.appendingPathComponent("integration"))
+        integration = ShellIntegration(directory: temp.url.appendingPathComponent("integration"))
         try integration.install()
+        if let prompt { try integration.writePrompt(prompt) }
 
         var base = [
-            "HOME": home.path, "TERM": "xterm-256color", "LANG": "en_US.UTF-8",
+            "HOME": realPath(home), "TERM": "xterm-256color", "LANG": "en_US.UTF-8",
             "PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "USER": NSUserName(),
         ]
         if let zdotdir { base["ZDOTDIR"] = zdotdir }
+        base.merge(extra) { _, new in new }
         let environment = integration.environment(base, forShell: "/bin/zsh")
 
         terminal = HeadlessTerminal(queue: DispatchQueue(label: "codec.tests.zsh")) { _ in }
@@ -84,7 +89,7 @@ private final class ZshHarness: @unchecked Sendable {
         }
         terminal.process.startProcess(executable: "/bin/zsh", args: ["-i"],
                                       environment: environment.map { "\($0.key)=\($0.value)" },
-                                      execName: "-zsh", currentDirectory: home.path)
+                                      execName: "-zsh", currentDirectory: directory ?? home.path)
     }
 
     deinit {
@@ -94,6 +99,47 @@ private final class ZshHarness: @unchecked Sendable {
 
     func send(_ text: String) {
         terminal.process.send(data: Array(text.utf8)[...])
+    }
+
+    /// Asks the shell to report its current PROMPT (minus control characters) as OSC 9999.
+    func reportPrompt() {
+        send(#"print -rn -- $'\e]9999;prompt='"${${PROMPT//$'\e'/}//$'\a'/}"$'\a'"# + "\r")
+    }
+
+    /// Asks the shell for its prompt as zsh draws it (prompt escapes expanded), base64-encoded.
+    func reportExpandedPrompt() {
+        send(#"print -rn -- $'\e]9999;expanded='"$(print -rn -- "${(%)PROMPT}" | /usr/bin/base64)"$'\a'"# + "\r")
+    }
+
+    /// Expanded prompts reported so far, with color and other escape sequences removed.
+    var expandedPrompts: [String] {
+        rawExpandedPrompts.map { raw in
+            raw.replacingOccurrences(of: "\u{1b}\\[[0-9;]*[A-Za-z]", with: "", options: .regularExpression)
+                .replacingOccurrences(of: "\u{1b}\\][^\u{07}]*\u{07}", with: "", options: .regularExpression)
+        }
+    }
+
+    /// Expanded prompts with their escape sequences.
+    var rawExpandedPrompts: [String] {
+        payloads(9999).filter { $0.hasPrefix("expanded=") }.compactMap { payload in
+            Data(base64Encoded: String(payload.dropFirst("expanded=".count))).map { String(decoding: $0, as: UTF8.self) }
+        }
+    }
+
+    /// Where the terminal's cursor is.
+    var cursor: (x: Int, y: Int) {
+        terminal.terminal.terminalLock.withLock { terminal.terminal.getCursorLocation() }
+    }
+
+    var reportedPrompts: [String] {
+        payloads(9999).filter { $0.hasPrefix("prompt=") }.map { String($0.dropFirst("prompt=".count)) }
+    }
+
+    /// Runs a command and waits for the integration to report it finished.
+    func run(_ command: String) async -> Bool {
+        let finished = payloads(6973).filter { $0.hasPrefix("done;") }.count
+        send(command + "\r")
+        return await wait { payloads(6973).filter { $0.hasPrefix("done;") }.count > finished }
     }
 
     /// OSC payloads with this code, in arrival order.
@@ -166,4 +212,251 @@ struct ZshIntegrationTests {
         zsh.send("print -rn -- $'\\e]9999;'\"$ZDOTDIR\"$'\\a'\r")
         #expect(await zsh.wait { zsh.payloads(9999).contains(config.url.path) })
     }
+}
+
+/// Runs git in `directory`.
+private func git(_ arguments: [String], in directory: URL) throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = arguments
+    process.currentDirectoryURL = directory
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    try process.run()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+        throw CocoaError(.executableLoad, userInfo: [NSLocalizedDescriptionKey: "git \(arguments) failed"])
+    }
+}
+
+private let gitAvailable = FileManager.default.isExecutableFile(atPath: "/Library/Developer/CommandLineTools/usr/bin/git")
+    || FileManager.default.fileExists(atPath: "/Applications/Xcode.app")
+
+@Suite("Codec prompt in zsh", .serialized, .timeLimit(.minutes(1)),
+       .enabled(if: FileManager.default.isExecutableFile(atPath: "/bin/zsh") && gitAvailable))
+struct ZshPromptTests {
+    private var prompt: PromptConfiguration {
+        var prompt = PromptConfiguration.default
+        prompt.style = .codec
+        prompt.layout = .singleLine
+        prompt.blankLineBetweenCommands = false
+        prompt.segments = [
+            .init(.directory, enabled: true, color: .blue),
+            .init(.gitBranch, enabled: true, color: .magenta),
+            .init(.exitStatus, enabled: true, color: .red),
+        ]
+        return prompt
+    }
+
+    private func repository(in temp: TemporaryDirectory, branch: String) throws -> URL {
+        let repo = try temp.directory("home/repo")
+        try git(["init", "-q"], in: repo)
+        try git(["symbolic-ref", "HEAD", "refs/heads/\(branch)"], in: repo)
+        return repo
+    }
+
+    @Test func rendersSegmentsFromTheShellsState() async throws {
+        let setup = try TemporaryDirectory()
+        let repo = try repository(in: setup, branch: "feature/prompt")
+        let zsh = try ZshHarness(homeFiles: [".zshrc": "PS1='USER> '\n"], prompt: prompt, directory: repo.path)
+        #expect(await zsh.wait { zsh.payloads(133).contains("A") })
+
+        #expect(await zsh.run("false"))
+        zsh.reportPrompt()
+        #expect(await zsh.wait { !zsh.reportedPrompts.isEmpty })
+        let afterFailure = try #require(zsh.reportedPrompts.last)
+        #expect(afterFailure.contains("feature/prompt"))
+        #expect(afterFailure.contains("✘ 1"))
+        #expect(afterFailure.contains("%F{4}%~%f"))
+        #expect(afterFailure.contains("❯"))
+
+        #expect(await zsh.run("true"))
+        zsh.reportPrompt()
+        #expect(await zsh.wait { zsh.reportedPrompts.count == 2 })
+        #expect(zsh.reportedPrompts.last?.contains("✘") == false)
+    }
+
+    @Test func appliesSettingsChangesToOpenShells() async throws {
+        let zsh = try ZshHarness(homeFiles: [".zshrc": "PS1='USER> '\n"], prompt: prompt)
+        #expect(await zsh.wait { zsh.payloads(133).contains("A") })
+        zsh.reportPrompt()
+        #expect(await zsh.wait { zsh.reportedPrompts.count == 1 })
+        #expect(zsh.reportedPrompts.last?.contains("❯") == true)
+
+        var changed = prompt
+        changed.symbol = "λ"
+        try zsh.integration.writePrompt(changed)
+        #expect(await zsh.run("true"))
+        zsh.reportPrompt()
+        #expect(await zsh.wait { zsh.reportedPrompts.count == 2 })
+        #expect(zsh.reportedPrompts.last?.contains("λ") == true)
+
+        try zsh.integration.writePrompt(.default)
+        #expect(await zsh.run("true"))
+        zsh.reportPrompt()
+        #expect(await zsh.wait { zsh.reportedPrompts.count == 3 })
+        #expect(zsh.reportedPrompts.last?.hasPrefix("USER> ") == true)
+    }
+
+    @Test func showsGitChangeStatsDateAndTime() async throws {
+        let setup = try TemporaryDirectory()
+        let repo = try repository(in: setup, branch: "main")
+        try "one\ntwo\nthree\n".write(to: repo.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+        try git(["add", "."], in: repo)
+        try git(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "init"], in: repo)
+        try "one\n2\nthree\nfour\n".write(to: repo.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+
+        var configuration = prompt
+        configuration.segments = [
+            .init(.gitDiffStats, enabled: true, color: .green),
+            .init(.date, enabled: true, color: .green),
+            .init(.time, enabled: true, color: .red),
+        ]
+        let zsh = try ZshHarness(prompt: configuration, directory: repo.path)
+        #expect(await zsh.wait { zsh.payloads(133).contains("A") })
+        zsh.reportPrompt()
+        #expect(await zsh.wait { !zsh.reportedPrompts.isEmpty })
+        let rendered = try #require(zsh.reportedPrompts.last)
+        #expect(rendered.contains("1 • +2 -1"), "\(rendered)")
+        #expect(rendered.contains("%D{%b %d}"))
+        #expect(rendered.contains("%D{%H:%M}"))
+    }
+
+    /// The prompt zsh draws must match the Settings preview exactly.
+    @Test(arguments: [true, false])
+    func drawsExactlyWhatThePreviewShows(connectingWords: Bool) async throws {
+        let setup = try TemporaryDirectory()
+        let repo = try repository(in: setup, branch: "feature/prompt")
+        var configuration = prompt
+        configuration.appearance = .text
+        configuration.connectingWords = connectingWords
+        configuration.separator = " | "
+        configuration.layout = connectingWords ? .twoLines : .singleLine
+        configuration.showsGitChanges = false
+        configuration.segments = [
+            .init(.directory, enabled: true, color: .blue),
+            .init(.gitBranch, enabled: true, color: .magenta),
+            .init(.pythonEnvironment, enabled: true, color: .yellow),
+            .init(.duration, enabled: true, color: .yellow),
+            .init(.exitStatus, enabled: true, color: .red),
+        ]
+        // zsh reports the physical path (/private/var/…), so give it HOME in the same form.
+        let home = realPath(repo.deletingLastPathComponent())
+        let zsh = try ZshHarness(prompt: configuration, directory: repo.path,
+                                 environment: ["VIRTUAL_ENV": "/opt/envs/venv", "HOME": home])
+        #expect(await zsh.wait { zsh.payloads(133).contains("A") })
+        #expect(await zsh.run("false"))
+        zsh.reportExpandedPrompt()
+        #expect(await zsh.wait { !zsh.expandedPrompts.isEmpty })
+        let drawn = try #require(zsh.expandedPrompts.last)
+
+        var sample = PromptConfiguration.Sample()
+        sample.home = home
+        sample.directory = realPath(repo)
+        sample.branch = "feature/prompt"
+        sample.pythonEnvironment = "venv"
+        sample.duration = 0
+        sample.exitStatus = 1
+        let preview = configuration.preview(sample).map(\.text).joined()
+        #expect(drawn == preview)
+        #expect(drawn == (connectingWords
+            ? "~/repo on feature/prompt via venv ✘ 1\n\n❯ "
+            : "~/repo | feature/prompt | (venv) | ✘ 1 ❯ "))
+    }
+
+    /// Chips: pills with rounded caps, filled with the theme's tint, matching the preview.
+    @Test func drawsChipsExactlyAsThePreviewShows() async throws {
+        let setup = try TemporaryDirectory()
+        let repo = try repository(in: setup, branch: "feature/prompt")
+        var configuration = prompt
+        configuration.appearance = .chips
+        configuration.layout = .twoLines
+        configuration.showsGitChanges = false
+        configuration.segments = [
+            .init(.directory, enabled: true, color: .blue),
+            .init(.gitBranch, enabled: true, color: .magenta),
+            .init(.exitStatus, enabled: true, color: .red),
+        ]
+        let home = realPath(repo.deletingLastPathComponent())
+        let zsh = try ZshHarness(directory: repo.path, environment: ["HOME": home])
+        try zsh.integration.writePrompt(configuration, chipFills: [.blue: "#102a40", .magenta: "#2a1040", .red: "#401010"])
+        #expect(await zsh.wait { zsh.payloads(133).contains("A") })
+        #expect(await zsh.run("false"))
+        zsh.reportExpandedPrompt()
+        #expect(await zsh.wait { !zsh.expandedPrompts.isEmpty })
+        let drawn = try #require(zsh.expandedPrompts.last)
+        #expect(drawn == "\u{E0B6} ~/repo \u{E0B4} \u{E0B6} ⎇ feature/prompt \u{E0B4} \u{E0B6} ✘ 1 \u{E0B4}\n\n❯ ")
+
+        var sample = PromptConfiguration.Sample()
+        sample.home = home
+        sample.directory = realPath(repo)
+        sample.branch = "feature/prompt"
+        sample.duration = 0
+        sample.exitStatus = 1
+        let withoutCaps = drawn.replacingOccurrences(of: "\u{E0B6} ", with: "").replacingOccurrences(of: " \u{E0B4}", with: "")
+        #expect(withoutCaps == configuration.preview(sample).map(\.text).joined())
+
+        // The pill is the theme's fill, in true color: #102a40 → 16;42;64.
+        let raw = try #require(zsh.rawExpandedPrompts.last)
+        #expect(raw.contains("\u{1b}[48;2;16;42;64m"))
+    }
+
+    /// zsh and the terminal must agree on how wide the chips are, or the cursor drifts while editing.
+    @Test func cursorLandsWhereZshExpectsAfterTheChips() async throws {
+        let setup = try TemporaryDirectory()
+        let repo = try repository(in: setup, branch: "main")
+        var configuration = prompt
+        configuration.appearance = .chips
+        configuration.layout = .singleLine
+        configuration.blankLineBetweenCommands = false
+        configuration.segments = [.init(.directory, enabled: true, color: .blue), .init(.gitBranch, enabled: true, color: .magenta)]
+        // A short "~/repo" keeps the prompt on one line of the 80-column terminal.
+        let zsh = try ZshHarness(prompt: configuration, directory: repo.path,
+                                 environment: ["HOME": realPath(repo.deletingLastPathComponent())])
+        #expect(await zsh.wait { zsh.payloads(133).contains("A") })
+        // Successful commands in the same place draw the same prompt each time, so the reported prompt
+        // is also the one on screen afterwards.
+        #expect(await zsh.run("true"))
+        zsh.reportExpandedPrompt()
+        #expect(await zsh.wait { !zsh.expandedPrompts.isEmpty })
+        let width = try #require(zsh.expandedPrompts.last).count
+        #expect(width > 10 && width < 80)
+        let landed = await zsh.wait { zsh.cursor.x == width }
+        #expect(landed, "cursor at column \(zsh.cursor.x), but zsh drew a prompt \(width) columns wide")
+    }
+
+    @Test func separatesCommandsWithABlankLine() async throws {
+        var configuration = prompt
+        configuration.appearance = .text
+        configuration.blankLineBetweenCommands = true
+        configuration.segments = [.init(.directory, enabled: true, color: .blue)]
+        let zsh = try ZshHarness(prompt: configuration)
+        #expect(await zsh.wait { zsh.payloads(133).contains("A") })
+        #expect(await zsh.run("true"))
+        zsh.reportExpandedPrompt()
+        #expect(await zsh.wait { !zsh.expandedPrompts.isEmpty })
+        #expect(zsh.expandedPrompts.last == "\n~ ❯ ")
+    }
+
+    /// Regression: with prompt_subst on, a hostile branch name must not run code when the prompt is drawn.
+    @Test func neverRunsCodeFromBranchNames() async throws {
+        let setup = try TemporaryDirectory()
+        let repo = try repository(in: setup, branch: "$(touch${IFS}pwned)")
+        let zsh = try ZshHarness(homeFiles: [".zshrc": "setopt prompt_subst\n"], prompt: prompt, directory: repo.path)
+        #expect(await zsh.wait { zsh.payloads(133).contains("A") })
+        // The first prompt has been drawn once a command has run after it.
+        #expect(await zsh.run("true"))
+        #expect(await zsh.run("true"))
+        zsh.reportPrompt()
+        #expect(await zsh.wait { !zsh.reportedPrompts.isEmpty })
+        #expect(zsh.reportedPrompts.last?.contains(#"\$(touch"#) == true)
+        #expect(!FileManager.default.fileExists(atPath: repo.appendingPathComponent("pwned").path))
+    }
+}
+
+/// The physical path, with symlinks such as /var → /private/var resolved the way the kernel reports it.
+private func realPath(_ url: URL) -> String {
+    guard let resolved = realpath(url.path, nil) else { return url.path }
+    defer { free(resolved) }
+    return String(cString: resolved)
 }

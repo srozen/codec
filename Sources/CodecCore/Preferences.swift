@@ -29,6 +29,7 @@ public final class Preferences: ObservableObject {
     /// Empty means the user's login shell.
     @Published public var shellPath: String { didSet { store(shellPath, .shellPath) } }
     @Published public var showSystemStats: Bool { didSet { store(showSystemStats, .showSystemStats) } }
+    @Published public var prompt: PromptConfiguration { didSet { storePrompt() } }
 
     /// Commands that run at least this long notify you when they finish in the background.
     public let longCommandThreshold: TimeInterval = 10
@@ -36,7 +37,7 @@ public final class Preferences: ObservableObject {
     private enum Key: String {
         case themeID, fontName, fontSize, opacity, blur, scanlines, dimInactivePanes, bell, notifyInBackground,
              codecSounds, paneSounds, soundVolume, optionAsMeta, exitBehavior, shellIntegration, shellPath,
-             showSystemStats
+             showSystemStats, prompt
     }
 
     private static let factoryDefaults: [Key: Any] = [
@@ -79,10 +80,17 @@ public final class Preferences: ObservableObject {
         shellIntegration = defaults.bool(forKey: Key.shellIntegration.rawValue)
         shellPath = defaults.string(forKey: Key.shellPath.rawValue) ?? ""
         showSystemStats = defaults.bool(forKey: Key.showSystemStats.rawValue)
+        prompt = defaults.data(forKey: Key.prompt.rawValue)
+            .flatMap { try? JSONDecoder().decode(PromptConfiguration.self, from: $0) } ?? .default
     }
 
     private static func clamp(_ value: Double, _ range: ClosedRange<Double>, fallback: Double) -> Double {
         range.contains(value) ? value : fallback
+    }
+
+    private func storePrompt() {
+        guard let data = try? JSONEncoder().encode(prompt) else { return }
+        store(data, .prompt)
     }
 
     private func store(_ value: Any, _ key: Key) {

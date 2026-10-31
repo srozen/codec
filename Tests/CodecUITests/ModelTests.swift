@@ -116,3 +116,31 @@ struct SessionTests {
         #expect(session.lastCommand?.command == "")
     }
 }
+
+@Suite("Settings window")
+@MainActor
+struct SettingsWindowTests {
+    /// Regression: the window sized itself to its full content and ran off the screen instead of scrolling.
+    @Test func fitsOnScreenAndCanBeResized() throws {
+        _ = NSApplication.shared
+        let defaults = try #require(UserDefaults(suiteName: "codec.settings-tests.\(UUID())"))
+        let window = SettingsView.makeWindow(preferences: Preferences(defaults: defaults), sounds: FakeSounds())
+        defer { window.close() }
+        let screen = NSScreen.main?.visibleFrame.height ?? 800
+        #expect(window.styleMask.contains(.resizable))
+        #expect(window.frame.height <= screen)
+        #expect(window.frame.height <= 720)
+    }
+}
+
+@Suite("Prompt sample")
+@MainActor
+struct PromptSampleTests {
+    @Test func usesThisMacsDetails() {
+        let sample = PromptConfiguration.Sample.current(now: Date(timeIntervalSince1970: 0))
+        #expect(sample.user == NSUserName())
+        #expect(sample.directory.hasPrefix(NSHomeDirectory()))
+        #expect(!sample.host.isEmpty && !sample.host.contains("."))
+        #expect(!sample.time.isEmpty && !sample.date.isEmpty)
+    }
+}

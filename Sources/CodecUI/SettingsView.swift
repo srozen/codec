@@ -12,11 +12,30 @@ struct SettingsView: View {
                 .tabItem { Label("Appearance", systemImage: "paintpalette") }
             ShellSettings(prefs: preferences)
                 .tabItem { Label("Shell", systemImage: "terminal") }
+            PromptSettings(prefs: preferences)
+                .tabItem { Label("Prompt", systemImage: "chevron.right.square") }
             NotificationSettings(prefs: preferences, sounds: sounds)
                 .tabItem { Label("Alerts", systemImage: "bell.badge") }
         }
-        .frame(width: 560)
-        .fixedSize(horizontal: false, vertical: true)
+        // A bounded size: long tabs scroll inside the window instead of growing it off the screen.
+        .frame(minWidth: 560, idealWidth: 620, maxWidth: 900, minHeight: 420, idealHeight: 620)
+    }
+
+    /// The Settings window: resizable, sized to fit the screen, with each tab scrolling on its own.
+    @MainActor
+    static func makeWindow(preferences: Preferences, sounds: any SoundPlaying) -> NSWindow {
+        let controller = NSHostingController(rootView: SettingsView(preferences: preferences, sounds: sounds))
+        controller.sizingOptions = [.minSize]
+        let window = NSWindow(contentViewController: controller)
+        window.title = "Settings"
+        window.styleMask = [.titled, .closable, .resizable, .fullSizeContentView]
+        window.toolbarStyle = .preference
+        window.isReleasedWhenClosed = false
+        let visible = NSScreen.main?.visibleFrame.height ?? 800
+        window.setContentSize(NSSize(width: 620, height: min(640, visible - 80)))
+        window.setFrameAutosaveName("CodecSettings")
+        window.center()
+        return window
     }
 }
 

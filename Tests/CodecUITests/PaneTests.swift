@@ -177,9 +177,10 @@ struct PaneTests {
         let pane = env.makePane(host: FakeHost())
         defer { pane.shutDown() }
         #expect(await waitUntil { pane.terminal.process.running })
+        // Killed by a signal: not a clean exit, so the pane stays with its banner once SwiftTerm reports it.
         pane.terminal.terminate()
-        #expect(await waitUntil { !pane.terminal.process.running })
-        pane.processTerminated(source: pane.terminal, exitCode: 137)
+        #expect(await waitUntil { pane.session.exitStatus != nil })
+        #expect(pane.view.isExitBannerVisible)
         pane.restart()
         #expect(pane.session.exitStatus == nil)
         #expect(!pane.view.isExitBannerVisible)

@@ -120,7 +120,26 @@ struct SystemMeters: View {
     let theme: CodecTheme
 
     var body: some View {
-        let reading = monitor.reading
+        SystemMeterReadout(reading: monitor.reading, theme: theme)
+            .contentShape(Rectangle())
+            .onTapGesture(perform: Self.openActivityMonitor)
+            .onAppear { monitor.start() }
+            .onDisappear { monitor.stop() }
+    }
+
+    private static func openActivityMonitor() {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.ActivityMonitor") else { return }
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+    }
+}
+
+/// The meters for one reading. Every part has a fixed width, so changing values never shift the
+/// status bar's layout.
+struct SystemMeterReadout: View {
+    let reading: SystemReading
+    let theme: CodecTheme
+
+    var body: some View {
         HStack(spacing: 14) {
             Meter(label: "CPU", level: reading.cpu, value: percent(reading.cpu), unit: "%", theme: theme)
                 .help("CPU: \(percent(reading.cpu))% in use across all cores")
@@ -128,21 +147,41 @@ struct SystemMeters: View {
                 .help("Memory: \(Formatting.bytes(reading.memoryUsed)) of \(Formatting.bytes(reading.memoryTotal)) in use")
             NetworkMeter(reading: reading, theme: theme)
         }
-        .contentShape(Rectangle())
-        .onTapGesture(perform: Self.openActivityMonitor)
-        .onAppear { monitor.start() }
-        .onDisappear { monitor.stop() }
+        .fixedSize()
         .accessibilityElement(children: .contain)
         .accessibilityLabel("System load")
     }
 
     private func percent(_ fraction: Double) -> String {
-        String(Int((fraction * 100).rounded()))
+        String(Int((min(max(fraction, 0), 1) * 100).rounded()))
     }
+}
 
-    private static func openActivityMonitor() {
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.ActivityMonitor") else { return }
-        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+/// A three-digit seven-segment readout in a fixed frame.
+private struct Readout: View {
+    static let height: CGFloat = 10
+    static let width = height * SevenSegment.aspectRatio(for: "888")
+
+    let value: String
+    let color: Color
+
+    var body: some View {
+        SevenSegmentDisplay(text: value.leftPadded(to: 3), color: color, ghost: 0.1, glow: 0.2)
+            .frame(width: Self.width, height: Self.height, alignment: .trailing)
+    }
+}
+
+/// A unit label in a fixed frame wide enough for the longest unit ("MB/s").
+private struct UnitLabel: View {
+    let text: String
+    var width: CGFloat = 24
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .frame(width: width, alignment: .leading)
     }
 }
 
@@ -159,11 +198,8 @@ private struct Meter: View {
             MeterLabel(text: label)
             SignalMeter(level: level, color: color, bars: 6)
                 .frame(width: 20, height: 10)
-            SevenSegmentDisplay(text: value.leftPadded(to: 3), color: color.opacity(0.9), ghost: 0.1, glow: 0.2)
-                .frame(height: 10)
-            Text(unit)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.secondary)
+            Readout(value: value, color: color.opacity(0.9))
+            UnitLabel(text: unit, width: 8)
         }
         .animation(.easeOut(duration: 0.3), value: level)
         .accessibilityElement(children: .ignore)
@@ -193,11 +229,9 @@ private struct NetworkMeter: View {
             Image(systemName: symbol)
                 .font(.system(size: 8, weight: .bold))
                 .foregroundStyle(theme.accentColor.opacity(0.8))
-            SevenSegmentDisplay(text: value.leftPadded(to: 3), color: theme.accentColor.opacity(0.9), ghost: 0.1, glow: 0.2)
-                .frame(height: 10)
-            Text(unit)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .frame(width: 8)
+            Readout(value: value, color: theme.accentColor.opacity(0.9))
+            UnitLabel(text: unit)
         }
     }
 }

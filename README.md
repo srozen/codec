@@ -21,6 +21,7 @@ Put `codec_call.mp3`, `codec_lock.mp3` and `codec_exit.mp3` in `Resources/Sounds
 ## Features
 
 - **Tabs and splits.** Tabs live in the title bar. Split any pane right (⌘D) or down (⇧⌘D); inactive panes dim. New tabs and panes open in the current directory.
+- **Tab names.** A tab is titled after what's running in it. Double-click it, right-click → Rename Tab…, or press ⇧⌘R to give it a name of your own; clear the name to go back to the automatic title.
 - **Right-click menu.** Copy, Paste, Select All, Split Right/Down, Find, Clear Buffer, Restart Shell, Open in Finder, Copy Path, Close Pane. Programs that use the mouse (vim, htop, tmux) still get right-clicks.
 - **Shell integration (zsh).** Codec loads a small hook script through `ZDOTDIR`, then your own startup files unchanged. It reports OSC 133 prompt marks, the working directory (OSC 7) and each command's exit status and duration. That gives you:
   - the status bar: directory (click to open in Finder), git branch, and the running or last command with its exit status and time,
@@ -43,6 +44,7 @@ Put `codec_call.mp3`, `codec_lock.mp3` and `codec_exit.mp3` in `Resources/Sounds
 | ⌥⌘←→↑↓ | Focus the pane in that direction |
 | ⇧⌘] / ⇧⌘[, ⌃⇥ | Next / previous tab |
 | ⌘1…⌘9 | Go to tab |
+| ⇧⌘R | Rename tab |
 | ⌘↑ / ⌘↓ | Previous / next command |
 | ⇧⌘P | Command palette |
 | ⌘K | Clear buffer |

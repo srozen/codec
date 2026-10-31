@@ -12,6 +12,8 @@ final class TerminalTab: ObservableObject, Identifiable {
     @Published private(set) var focused: Pane {
         didSet { onLayoutChange?() }
     }
+    /// A name the user gave the tab. Nil means the title follows the focused pane.
+    @Published private(set) var customTitle: String?
     /// Called synchronously after the layout or the focused pane changed, so the window can update its views.
     var onLayoutChange: (() -> Void)?
     private var sessionObservers: [ObjectIdentifier: AnyCancellable] = [:]
@@ -23,6 +25,19 @@ final class TerminalTab: ObservableObject, Identifiable {
     }
 
     var panes: [Pane] { layout.leaves }
+
+    /// What the tab bar and the window title show.
+    var title: String { customTitle ?? automaticTitle }
+
+    /// The title the tab has without a custom name: what's running in its focused pane.
+    var automaticTitle: String { focused.session.title }
+
+    /// Names the tab. Blank names (or nil) go back to the automatic title.
+    func rename(to name: String?) {
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let newTitle = trimmed.isEmpty ? nil : trimmed
+        if newTitle != customTitle { customTitle = newTitle }
+    }
 
     func focus(_ pane: Pane) {
         guard pane !== focused, layout.contains(pane) else { return }

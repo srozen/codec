@@ -60,6 +60,35 @@ struct TerminalTabTests {
         #expect(tab.panes.count == 1)
     }
 
+    @Test func renamingOverridesTheAutomaticTitle() throws {
+        let env = try TestEnvironment()
+        defer { env.tearDown() }
+        let pane = env.makePane()
+        defer { pane.shutDown() }
+        let tab = TerminalTab(pane: pane)
+        pane.session.processName = "sh"
+        #expect(tab.title == env.directory.lastPathComponent)
+        tab.rename(to: "  Server logs  ")
+        #expect(tab.customTitle == "Server logs")
+        #expect(tab.title == "Server logs")
+        pane.session.processName = "vim"
+        #expect(tab.title == "Server logs")
+        #expect(tab.automaticTitle == "vim")
+    }
+
+    @Test(arguments: [String?.none, "", "   \n"])
+    func blankNamesGoBackToAutomatic(name: String?) throws {
+        let env = try TestEnvironment()
+        defer { env.tearDown() }
+        let pane = env.makePane()
+        defer { pane.shutDown() }
+        let tab = TerminalTab(pane: pane)
+        tab.rename(to: "API")
+        tab.rename(to: name)
+        #expect(tab.customTitle == nil)
+        #expect(tab.title == tab.automaticTitle)
+    }
+
     @Test func buildsNestedSplitViews() throws {
         let env = try TestEnvironment()
         defer { env.tearDown() }
@@ -247,6 +276,74 @@ struct WindowTests {
         #expect(window.model.paletteOpen)
         window.showCommandPalette(nil)
         #expect(!window.model.paletteOpen)
+    }
+
+    @Test func renamesTheSelectedTabThroughTheEditor() throws {
+        let env = try TestEnvironment()
+        defer { env.tearDown() }
+        let window = makeWindow(env)
+        defer { close(window) }
+        let tab = try #require(window.model.selected)
+        window.renameTab(nil)
+        #expect(window.model.renamingTabID == tab.id)
+        window.finishRenaming(tab, to: "Deploy")
+        #expect(window.model.renamingTabID == nil)
+        #expect(tab.title == "Deploy")
+        #expect(window.window?.title == "Deploy")
+    }
+
+    @Test func cancellingKeepsTheName() throws {
+        let env = try TestEnvironment()
+        defer { env.tearDown() }
+        let window = makeWindow(env)
+        defer { close(window) }
+        let tab = try #require(window.model.selected)
+        tab.rename(to: "Build")
+        window.beginRenaming(tab)
+        window.finishRenaming(tab, to: nil)
+        #expect(window.model.renamingTabID == nil)
+        #expect(tab.title == "Build")
+    }
+
+    @Test func renamingAnotherTabSelectsIt() throws {
+        let env = try TestEnvironment()
+        defer { env.tearDown() }
+        let window = makeWindow(env)
+        defer { close(window) }
+        let first = try #require(window.model.selected)
+        window.newTab(nil)
+        window.beginRenaming(first)
+        #expect(window.model.selectedID == first.id)
+        #expect(window.model.renamingTabID == first.id)
+    }
+
+    @Test func closingTheTabBeingRenamedEndsTheEdit() throws {
+        let env = try TestEnvironment()
+        defer { env.tearDown() }
+        let window = makeWindow(env)
+        defer { close(window) }
+        window.newTab(nil)
+        let tab = try #require(window.model.selected)
+        window.beginRenaming(tab)
+        window.paneDidFinish(tab.focused)
+        #expect(window.model.renamingTabID == nil)
+        #expect(window.model.tabs.count == 1)
+    }
+
+    @Test func paletteCanRenameAndResetTabs() throws {
+        let env = try TestEnvironment()
+        defer { env.tearDown() }
+        let window = makeWindow(env)
+        defer { close(window) }
+        let tab = try #require(window.model.selected)
+        #expect(!window.paletteCommands().contains { $0.id == "reset-tab-name" })
+        window.paletteCommands().first { $0.id == "rename-tab" }?.action()
+        #expect(window.model.renamingTabID == tab.id)
+        window.finishRenaming(tab, to: "Tests")
+        #expect(window.paletteCommands().contains { $0.title == "Go to Tab 1: Tests" })
+        window.paletteCommands().first { $0.id == "reset-tab-name" }?.action()
+        #expect(tab.customTitle == nil)
+        #expect(window.window?.title == tab.automaticTitle)
     }
 
     @Test func revealsAPaneBySessionID() throws {

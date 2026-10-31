@@ -76,10 +76,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
         tabBar = PassthroughHostingView(rootView: TabBar(
             model: model,
             preferences: preferences,
-            onSelect: { [weak self] in self?.select($0) },
-            onClose: { [weak self] in self?.requestClose(tab: $0) },
-            onNewTab: { [weak self] in self?.newTab(nil) },
-            onPalette: { [weak self] in self?.showCommandPalette(nil) }))
+            actions: TabBarActions(
+                select: { [weak self] in self?.select($0) },
+                close: { [weak self] in self?.requestClose(tab: $0) },
+                newTab: { [weak self] in self?.newTab(nil) },
+                showPalette: { [weak self] in self?.showCommandPalette(nil) },
+                beginRenaming: { [weak self] in self?.beginRenaming($0) },
+                finishRenaming: { [weak self] in self?.finishRenaming($0, to: $1) })))
         statusBar = PassthroughHostingView(rootView: StatusBar(model: model, preferences: preferences,
                                                                monitor: environment.systemMonitor))
         palette = PassthroughHostingView(rootView: AnyView(EmptyView()))
@@ -151,7 +154,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
         for pane in tab.panes {
             pane.view.setDimmed(dim && pane !== tab.focused)
         }
-        if !model.paletteOpen, let window, window.firstResponder !== tab.focused.view.preferredResponder {
+        if !model.paletteOpen, model.renamingTabID == nil,
+           let window, window.firstResponder !== tab.focused.view.preferredResponder {
             window.makeFirstResponder(tab.focused.view.preferredResponder)
         }
         focusedPaneCameToFront()
@@ -159,7 +163,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
     }
 
     private func updateWindowTitle() {
-        guard let window, let title = model.selected?.focused.session.title, window.title != title else { return }
+        guard let window, let title = model.selected?.title, window.title != title else { return }
         window.title = title
     }
 
@@ -241,6 +245,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
         guard let index = model.tabs.firstIndex(where: { $0 === tab }) else { return }
         tab.panes.forEach { $0.shutDown() }
         tabObservers[tab.id] = nil
+        if model.renamingTabID == tab.id { model.renamingTabID = nil }
         model.tabs.remove(at: index)
         if model.tabs.isEmpty {
             window?.close()
@@ -248,6 +253,30 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
         }
         if model.selectedID == tab.id {
             select(model.tabs[min(index, model.tabs.count - 1)])
+        }
+    }
+
+    // MARK: Renaming
+
+    /// Shows the name editor on `tab`'s button.
+    func beginRenaming(_ tab: TerminalTab) {
+        guard model.tabs.contains(where: { $0 === tab }) else { return }
+        if model.paletteOpen { hideCommandPalette() }
+        select(tab)
+        model.renamingTabID = tab.id
+    }
+
+    /// Ends editing `tab`'s name: `name` renames it (blank resets it), nil cancels.
+    func finishRenaming(_ tab: TerminalTab, to name: String?) {
+        if let name { tab.rename(to: name) }
+        guard model.renamingTabID != nil else {
+            updateWindowTitle()
+            return
+        }
+        model.renamingTabID = nil
+        updateWindowTitle()
+        if tab === model.selected, let pane = focusedPane {
+            window?.makeFirstResponder(pane.view.preferredResponder)
         }
     }
 
@@ -316,6 +345,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
 
     @objc func restartShell(_ sender: Any?) {
         focusedPane?.restart()
+    }
+
+    @objc func renameTab(_ sender: Any?) {
+        if let tab = model.selected { beginRenaming(tab) }
     }
 
     @objc func nextTab(_ sender: Any?) { cycleTab(by: 1) }
@@ -389,6 +422,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
             .init(id: "next-command", title: "Jump to Next Command", shortcut: "⌘↓", systemImage: "arrow.down.to.line") { [weak self] in self?.nextCommand(nil) },
             .init(id: "clear", title: "Clear Buffer", shortcut: "⌘K", systemImage: "eraser") { [weak self] in self?.clearBuffer(nil) },
             .init(id: "restart", title: "Restart Shell", systemImage: "arrow.clockwise") { [weak self] in self?.restartShell(nil) },
+            .init(id: "rename-tab", title: "Rename Tab…", shortcut: "⇧⌘R", systemImage: "pencil") { [weak self] in self?.renameTab(nil) },
             .init(id: "find", title: "Find…", shortcut: "⌘F", systemImage: "magnifyingglass") { [weak self] in
                 let item = NSMenuItem()
                 item.tag = Int(NSFindPanelAction.showFindPanel.rawValue)
@@ -422,8 +456,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
                               systemImage: "line.3.horizontal") {
             preferences.scanlines.toggle()
         })
+        if let tab = model.selected, tab.customTitle != nil {
+            commands.append(.init(id: "reset-tab-name", title: "Reset Tab Name", systemImage: "arrow.uturn.backward") { [weak self] in
+                self?.finishRenaming(tab, to: "")
+            })
+        }
         for (index, tab) in model.tabs.enumerated() {
-            commands.append(.init(id: "tab-\(tab.id)", title: "Go to Tab \(index + 1): \(tab.focused.session.title)",
+            commands.append(.init(id: "tab-\(tab.id)", title: "Go to Tab \(index + 1): \(tab.title)",
                                   shortcut: index < 9 ? "⌘\(index + 1)" : nil, systemImage: "square.on.square") { [weak self] in
                 self?.select(tab)
             })

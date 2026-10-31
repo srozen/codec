@@ -35,6 +35,14 @@ public final class Preferences: ObservableObject {
     @Published public var prompt: PromptConfiguration { didSet { storePrompt() } }
     /// Copies text to the clipboard as soon as it's selected.
     @Published public var copyOnSelect: Bool { didSet { store(copyOnSelect, .copyOnSelect) } }
+    /// Shows the rest of a matching earlier command, dimmed, as you type (zsh).
+    @Published public var suggestCommands: Bool { didSet { store(suggestCommands, .suggestCommands) } }
+    /// ↑ opens the history menu and ⌃R the history search at the prompt (zsh).
+    @Published public var historyKeys: Bool { didSet { store(historyKeys, .historyKeys) } }
+    /// Tab completion that ignores case, matches inside names and forgives typos (zsh).
+    @Published public var friendlyCompletion: Bool { didSet { store(friendlyCompletion, .friendlyCompletion) } }
+    /// Keeps the commands you run, with where and how they ran, for the history.
+    @Published public var recordHistory: Bool { didSet { store(recordHistory, .recordHistory) } }
 
     /// Commands that run at least this long notify you when they finish in the background.
     public let longCommandThreshold: TimeInterval = 10
@@ -42,7 +50,7 @@ public final class Preferences: ObservableObject {
     private enum Key: String {
         case themeID, fontName, fontSize, opacity, blur, scanlines, dimInactivePanes, bell, notifyInBackground,
              codecSounds, paneSounds, soundVolume, optionAsMeta, exitBehavior, shellIntegration, shellPath,
-             showSystemStats, prompt, copyOnSelect
+             showSystemStats, prompt, copyOnSelect, suggestCommands, historyKeys, friendlyCompletion, recordHistory
     }
 
     private static let factoryDefaults: [Key: Any] = [
@@ -64,6 +72,10 @@ public final class Preferences: ObservableObject {
         .shellPath: "",
         .showSystemStats: true,
         .copyOnSelect: false,
+        .suggestCommands: true,
+        .historyKeys: true,
+        .friendlyCompletion: true,
+        .recordHistory: true,
     ]
 
     public init(defaults: UserDefaults) {
@@ -87,6 +99,10 @@ public final class Preferences: ObservableObject {
         shellPath = defaults.string(forKey: Key.shellPath.rawValue) ?? ""
         showSystemStats = defaults.bool(forKey: Key.showSystemStats.rawValue)
         copyOnSelect = defaults.bool(forKey: Key.copyOnSelect.rawValue)
+        suggestCommands = defaults.bool(forKey: Key.suggestCommands.rawValue)
+        historyKeys = defaults.bool(forKey: Key.historyKeys.rawValue)
+        friendlyCompletion = defaults.bool(forKey: Key.friendlyCompletion.rawValue)
+        recordHistory = defaults.bool(forKey: Key.recordHistory.rawValue)
         prompt = defaults.data(forKey: Key.prompt.rawValue)
             .flatMap { try? JSONDecoder().decode(PromptConfiguration.self, from: $0) } ?? .default
     }

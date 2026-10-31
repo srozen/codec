@@ -32,17 +32,20 @@ final class AppEnvironment {
     let sounds: any SoundPlaying
     let notifier: any Notifying
     let systemMonitor: SystemMonitor
+    /// The commands run in every window, for suggestions and search.
+    let history: HistoryStore
     /// Nil when the scripts couldn't be installed; panes then run without integration.
     let shellIntegration: ShellIntegration?
     weak var coordinator: (any AppCoordinating)?
     private var promptSync: AnyCancellable?
 
     init(preferences: Preferences, sounds: any SoundPlaying, notifier: any Notifying,
-         systemMonitor: SystemMonitor, shellIntegration: ShellIntegration?) {
+         systemMonitor: SystemMonitor, shellIntegration: ShellIntegration?, history: HistoryStore = HistoryStore(logURL: nil)) {
         self.preferences = preferences
         self.sounds = sounds
         self.notifier = notifier
         self.systemMonitor = systemMonitor
+        self.history = history
         self.shellIntegration = shellIntegration
         // Keep the prompt file in step with Settings; open zsh sessions read it at their next prompt.
         if let shellIntegration {
@@ -69,12 +72,15 @@ final class AppEnvironment {
             Log.app.error("Couldn't install shell integration: \(error.localizedDescription, privacy: .public)")
             integration = nil
         }
+        let history = HistoryStore.standard()
+        history.load()
         return AppEnvironment(
             preferences: preferences,
             sounds: CodecSound(preferences: preferences),
             notifier: Notifier(),
             systemMonitor: SystemMonitor(),
-            shellIntegration: integration)
+            shellIntegration: integration,
+            history: history)
     }
 }
 

@@ -16,6 +16,16 @@ public enum IntegrationEvent: Equatable, Sendable {
     case commandStarted(String)
     /// The command finished.
     case commandFinished(exitCode: Int32, duration: TimeInterval)
+    /// The full text of the command that just started, all its lines, for the history.
+    case commandText(String)
+    /// Where the shell keeps its history (`$HISTFILE`).
+    case historyFile(String)
+    /// The user asked for history at the prompt: ↑ for the menu, ⌃R for the search, with what's typed.
+    case historyRequest(HistoryRequest, typed: String)
+
+    public enum HistoryRequest: String, Sendable {
+        case menu, search
+    }
 
     /// Parses the payload after `ESC ] 6973 ;`, e.g. `prompt`, `exec;make test` or `done;1;2.5`.
     public init?(payload: String) {
@@ -39,6 +49,17 @@ public enum IntegrationEvent: Equatable, Sendable {
             self = .clipboard(String(decoding: data, as: UTF8.self))
         case "exec":
             self = .commandStarted(rest)
+        case "command":
+            guard let data = Data(base64Encoded: rest) else { return nil }
+            self = .commandText(String(decoding: data, as: UTF8.self))
+        case "histfile":
+            guard !rest.isEmpty else { return nil }
+            self = .historyFile(rest)
+        case "history":
+            let fields = rest.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
+            guard fields.count == 2, let request = HistoryRequest(rawValue: String(fields[0])),
+                  let data = Data(base64Encoded: String(fields[1])) else { return nil }
+            self = .historyRequest(request, typed: String(decoding: data, as: UTF8.self))
         case "done":
             let fields = rest.split(separator: ";", omittingEmptySubsequences: false)
             guard fields.count == 2,

@@ -13,6 +13,8 @@ protocol PaneHost: AnyObject {
     func requestClose(_ pane: Pane)
     /// The pane's shell is gone and the pane should be removed now.
     func paneDidFinish(_ pane: Pane)
+    /// The shell asked for the history (↑ or ⌃R at the prompt), starting from what's typed.
+    func showHistory(for pane: Pane, request: IntegrationEvent.HistoryRequest, typed: String)
 }
 
 /// One shell in one pane: owns the process, the terminal view and the pane's `Session`.
@@ -117,7 +119,14 @@ final class Pane: LocalProcessTerminalViewDelegate {
         env["TERM_PROGRAM_VERSION"] = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
         env["CODEC_PANE_ID"] = session.id.uuidString
         if env["LANG"] == nil { env["LANG"] = "en_US.UTF-8" }
-        env["CODEC_SELECTION_STYLE"] = "bg=" + preferences.theme.selection.hexString
+        let theme = preferences.theme
+        env["CODEC_SELECTION_STYLE"] = "bg=" + theme.selection.hexString
+        env["CODEC_SUGGESTIONS"] = preferences.suggestCommands ? "1" : "0"
+        env["CODEC_HISTORY_KEYS"] = preferences.historyKeys ? "1" : "0"
+        env["CODEC_COMPLETION"] = preferences.friendlyCompletion ? "1" : "0"
+        // Suggestions in the theme's muted color; the completion menu's pick in its selection color.
+        env["CODEC_SUGGESTION_STYLE"] = "fg=" + (theme.background.blended(withFraction: 0.45, of: theme.foreground) ?? theme.foreground).hexString
+        env["CODEC_MENU_SELECTION"] = theme.selection.sgrBackground
         if preferences.shellIntegration, let integration = environment.shellIntegration {
             env = integration.environment(env, forShell: shell)
         }
@@ -215,12 +224,28 @@ final class Pane: LocalProcessTerminalViewDelegate {
     // MARK: - Shell integration
 
     func handle(_ event: IntegrationEvent) {
-        if case .clipboard(let text) = event {
+        switch event {
+        case .clipboard(let text):
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
             return
+        case .commandText(let text):
+            runningCommandText = text
+            return
+        case .historyFile(let path):
+            environment.history.useShellFile(URL(fileURLWithPath: path))
+            return
+        case .historyRequest(let request, let typed):
+            host?.showHistory(for: self, request: request, typed: typed)
+            return
+        case .commandStarted:
+            runningCommandText = nil
+            runningDirectory = session.directory
+        default:
+            break
         }
         let command = session.running?.command ?? ""
+        let started = session.running?.started
         session.apply(event)
         if case .commandStarted(let started) = event, let screen = pendingCommandScreen {
             pendingCommandScreen = nil
@@ -230,6 +255,12 @@ final class Pane: LocalProcessTerminalViewDelegate {
             }
         }
         guard case .commandFinished(let exitCode, let duration) = event else { return }
+        if preferences.recordHistory {
+            environment.history.record(HistoryEntry(
+                command: runningCommandText ?? command, date: started ?? Date().addingTimeInterval(-duration),
+                directory: runningDirectory ?? session.directory, exitCode: exitCode, duration: duration))
+        }
+        runningCommandText = nil
         refreshGitBranch()
         let reaction = preferences.attentionPolicy.reactionToFinishedCommand(
             duration: duration, paneInFront: host?.isInFront(self) ?? false)
@@ -527,6 +558,20 @@ final class Pane: LocalProcessTerminalViewDelegate {
     }
 
     // MARK: - Paths and commands from elsewhere
+
+    /// The running command's full text and where it started, for the history.
+    private var runningCommandText: String?
+    private var runningDirectory: String?
+
+    /// Puts a command on the command line in place of what's typed, as a paste so nothing in it is
+    /// taken as a key, and runs it if asked. False when the shell isn't at its prompt.
+    @discardableResult
+    func replaceCommandLine(with command: String, run: Bool) -> Bool {
+        guard isAtCommandLine else { return false }
+        terminal.send(CommandLineEditing.Action.selectAll.sequence)
+        terminal.send(txt: "\u{1b}[200~" + command.replacingOccurrences(of: "\u{1b}", with: "") + "\u{1b}[201~" + (run ? "\r" : ""))
+        return true
+    }
 
     /// Types paths for the shell, quoted and separated by spaces: relative to the shell's directory
     /// when they're under it.

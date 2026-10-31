@@ -5,6 +5,9 @@ import Foundation
 /// - OSC 7 working directory,
 /// - OSC 6973 `exec;<command>` and `done;<status>;<seconds>` (see `IntegrationEvent`).
 ///
+/// It also adds history suggestions as you type, ↑ and ⌃R for Codec's history, and friendlier Tab
+/// completion, each when Codec sets `CODEC_SUGGESTIONS`, `CODEC_HISTORY_KEYS` or `CODEC_COMPLETION`.
+///
 /// The user's own startup files still load, unchanged: the bootstrap `.zshenv` restores `ZDOTDIR`
 /// before zsh looks for `.zprofile` and `.zshrc`.
 public struct ShellIntegration: Sendable {
@@ -124,7 +127,11 @@ public struct ShellIntegration: Sendable {
       local line=${1%%$'\n'*}
       _codec_osc "133;C"
       _codec_osc "6973;exec;${line//[$'\a\e']/}"
+      # The whole command, every line, for Codec's history.
+      _codec_osc "6973;command;$(_codec_base64 "$1")"
     }
+
+    _codec_base64() { builtin print -rn -- "$1" | command base64 | command tr -d '\n' }
 
     # --- Editing the command line like a text field ------------------------------
     # The zsh region (mark to cursor) is the selection. Codec sends the private sequences bound below
@@ -177,7 +184,7 @@ public struct ShellIntegration: Sendable {
       if (( REGION_ACTIVE )); then zle kill-region; REGION_ACTIVE=0; else zle backward-kill-line; fi
     }
     _codec_move_to_start() { REGION_ACTIVE=0; zle .beginning-of-line }
-    _codec_move_to_end() { REGION_ACTIVE=0; zle .end-of-line }
+    _codec_move_to_end() { _codec_take_suggestion || { REGION_ACTIVE=0; zle .end-of-line } }
 
     # Typing, pasting or deleting with a selection replaces it. These wrap whatever the widgets were
     # (plugins such as zsh-autosuggestions wrap them too), so existing behavior is kept.
@@ -247,8 +254,122 @@ public struct ShellIntegration: Sendable {
         [[ $(bindkey -M $map $'\e[3~') == *undefined-key ]] && bindkey -M $map $'\e[3~' delete-char
       done
       autoload -Uz add-zle-hook-widget && add-zle-hook-widget line-pre-redraw _codec_collapse_on_move
+      add-zle-hook-widget line-pre-redraw _codec_suggest
+      add-zle-hook-widget line-finish _codec_clear_suggestion
       # Show the selection in the theme's selection color, unless the user styled it.
       [[ -n $CODEC_SELECTION_STYLE && ${(j: :)zle_highlight} != *region:* ]] && zle_highlight+=(region:$CODEC_SELECTION_STYLE)
+    }
+
+    # --- History ----------------------------------------------------------------------
+
+    # A suggestion from history, dimmed after the cursor, as you type: → or End takes it, ⌥→ a word.
+    # zsh-autosuggestions does this itself when it's loaded.
+    typeset -g _codec_suggestion_style=${CODEC_SUGGESTION_STYLE:-fg=8}
+    _codec_suggesting() { [[ $CODEC_SUGGESTIONS == 1 ]] && (( ! $+functions[_zsh_autosuggest_start] )) }
+    _codec_clear_suggestion() {
+      [[ -n $POSTDISPLAY || ${(j: :)region_highlight} == *memo=codec* ]] || return 0
+      POSTDISPLAY=
+      region_highlight=("${(@)region_highlight:#*memo=codec*}")
+    }
+    _codec_suggest() {
+      _codec_suggesting || return 0
+      _codec_clear_suggestion
+      (( CURSOR == $#BUFFER && ! REGION_ACTIVE && PENDING == 0 )) || return 0
+      [[ -n $BUFFER && $BUFFER != *$'\n'* && $KEYMAP != vicmd ]] || return 0
+      # The most recent command that starts with what's typed and goes further.
+      local match=${history[(r)${(b)BUFFER}?*]}
+      [[ -n $match && $match != *$'\n'* ]] || return 0
+      POSTDISPLAY=${match#$BUFFER}
+      region_highlight+=("$#BUFFER $(( $#BUFFER + $#POSTDISPLAY )) $_codec_suggestion_style,memo=codec")
+    }
+    _codec_take_suggestion() {
+      [[ -n $POSTDISPLAY ]] && (( CURSOR == $#BUFFER )) || return 1
+      BUFFER+=$POSTDISPLAY
+      CURSOR=$#BUFFER
+      _codec_clear_suggestion
+    }
+    _codec_forward_char() { _codec_take_suggestion || zle _codec_orig_forward-char }
+    _codec_end_of_line() { _codec_take_suggestion || zle _codec_orig_end-of-line }
+    _codec_forward_word() {
+      setopt localoptions extendedglob
+      if [[ -n $POSTDISPLAY ]] && (( CURSOR == $#BUFFER )); then
+        BUFFER+=${(M)POSTDISPLAY##[[:space:]]#[^[:space:]]##}
+        CURSOR=$#BUFFER
+      else
+        zle _codec_orig_forward-word
+      fi
+    }
+    _codec_accept_line() { _codec_clear_suggestion; zle _codec_orig_accept-line }
+    _codec_setup_suggestions() {
+      _codec_suggesting || return 0
+      local widget
+      for widget in forward-char end-of-line forward-word accept-line; do
+        zle -A $widget _codec_orig_$widget
+      done
+      zle -N forward-char _codec_forward_char
+      zle -N end-of-line _codec_end_of_line
+      zle -N forward-word _codec_forward_word
+      zle -N accept-line _codec_accept_line
+    }
+
+    # ↑ opens Codec's history menu and ⌃R its history search, starting from what's typed. Only where
+    # those keys still do zsh's default; in a multi-line command ↑ still moves up a line.
+    _codec_history_request() { _codec_osc "6973;history;$1;$(_codec_base64 "$BUFFER")" >/dev/tty }
+    _codec_history_up() {
+      if [[ $LBUFFER == *$'\n'* ]]; then
+        zle .up-line-or-history
+      else
+        _codec_clear_suggestion
+        _codec_history_request menu
+      fi
+    }
+    _codec_history_search() { _codec_clear_suggestion; _codec_history_request search }
+    _codec_setup_history_keys() {
+      [[ $CODEC_HISTORY_KEYS == 1 ]] || return 0
+      zle -N _codec_history_up
+      zle -N _codec_history_search
+      local map key bound
+      for map in emacs viins; do
+        for key in $'\e[A' $'\eOA'; do
+          bound=$(bindkey -M $map $key)
+          bound=${bound##* }
+          [[ $bound == (up-line-or-history|up-line-or-search|up-line-or-beginning-search|up-history|undefined-key) ]] &&
+            bindkey -M $map $key _codec_history_up
+        done
+        bound=$(bindkey -M $map '^R')
+        bound=${bound##* }
+        [[ $bound == (history-incremental-search-backward|history-incremental-pattern-search-backward) ]] &&
+          bindkey -M $map '^R' _codec_history_search
+      done
+    }
+
+    # --- Completion ---------------------------------------------------------------------
+    # Friendlier Tab: any case, matches inside names (dev finds Development), one typo forgiven in
+    # longer words, and a menu to pick from with the arrows. Styles you set yourself win.
+    _codec_style() { [[ -n $(zstyle -L "$1" "$2" 2>/dev/null) ]] || zstyle "$@" }
+    _codec_setup_completion() {
+      [[ $CODEC_COMPLETION == 1 ]] || return 0
+      if (( ! $+functions[compdef] )); then
+        autoload -Uz compinit
+        local dump=${XDG_CACHE_HOME:-$HOME/.cache}/codec/zcompdump-$ZSH_VERSION
+        command mkdir -p ${dump:h} 2>/dev/null
+        compinit -i -d $dump
+      fi
+      zmodload -i zsh/complist 2>/dev/null
+      _codec_style ':completion:*' matcher-list 'm:{[:lower:][:upper:]}={[:upper:][:lower:]}' \
+        'm:{[:lower:][:upper:]}={[:upper:][:lower:]} r:|[._-]=* r:|=*' \
+        'm:{[:lower:][:upper:]}={[:upper:][:lower:]} l:|=* r:|=*'
+      _codec_style ':completion:*' completer _complete _approximate
+      _codec_style ':completion:*:approximate:*' max-errors 'reply=( $(( ($#PREFIX + $#SUFFIX) / 4 )) numeric )'
+      _codec_style ':completion:*' menu select
+      _codec_style ':completion:*' list-dirs-first true
+      _codec_style ':completion:*' group-name ''
+      _codec_style ':completion:*:descriptions' format '%F{8}%d%f'
+      _codec_style ':completion:*:warnings' format '%F{8}No matches for %d%f'
+      _codec_style ':completion:*' list-colors "${(s.:.)LS_COLORS:-di=34:ln=36:ex=32}" "ma=${CODEC_MENU_SELECTION:-7}"
+      _codec_style ':completion:*' squeeze-slashes true
+      setopt COMPLETE_IN_WORD AUTO_MENU
+      unsetopt LIST_BEEP
     }
 
     # Install on the first prompt so these hooks wrap whatever .zshrc set up.
@@ -256,6 +377,10 @@ public struct ShellIntegration: Sendable {
       precmd_functions=(_codec_capture_status ${precmd_functions:#_codec_install} _codec_precmd)
       preexec_functions+=(_codec_preexec)
       _codec_setup_editing
+      _codec_setup_suggestions
+      _codec_setup_history_keys
+      _codec_setup_completion
+      [[ -n $HISTFILE ]] && _codec_osc "6973;histfile;$HISTFILE"
       _codec_precmd
     }
     precmd_functions+=(_codec_install)

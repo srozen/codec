@@ -36,6 +36,10 @@ final class FakeHost: PaneHost {
     func split(_ pane: Pane, axis: SplitAxis) { splits.append(axis) }
     func requestClose(_ pane: Pane) { closeRequests += 1 }
     func paneDidFinish(_ pane: Pane) { finished += 1 }
+    private(set) var historyRequests: [(IntegrationEvent.HistoryRequest, String)] = []
+    func showHistory(for pane: Pane, request: IntegrationEvent.HistoryRequest, typed: String) {
+        historyRequests.append((request, typed))
+    }
 }
 
 /// Never reports anything, so tests don't depend on the machine's load.
@@ -74,7 +78,8 @@ final class TestEnvironment {
         if integration { try shellIntegration.install() }
         environment = AppEnvironment(preferences: preferences, sounds: sounds, notifier: notifier,
                                      systemMonitor: SystemMonitor(sampler: IdleSampler(), interval: 3600),
-                                     shellIntegration: integration ? shellIntegration : nil)
+                                     shellIntegration: integration ? shellIntegration : nil,
+                                     history: HistoryStore(logURL: directory.appendingPathComponent("history.jsonl")))
         environment.coordinator = coordinator
     }
 

@@ -19,6 +19,18 @@ struct IntegrationEventTests {
         #expect(IntegrationEvent(payload: "clipboard;not base64!") == nil)
     }
 
+    @Test func parsesHistoryEvents() {
+        let multiline = Data("echo one\necho two".utf8).base64EncodedString()
+        #expect(IntegrationEvent(payload: "command;" + multiline) == .commandText("echo one\necho two"))
+        #expect(IntegrationEvent(payload: "command;%%") == nil)
+        #expect(IntegrationEvent(payload: "histfile;/Users/me/.zsh_history") == .historyFile("/Users/me/.zsh_history"))
+        #expect(IntegrationEvent(payload: "histfile;") == nil)
+        let typed = Data("git st".utf8).base64EncodedString()
+        #expect(IntegrationEvent(payload: "history;menu;" + typed) == .historyRequest(.menu, typed: "git st"))
+        #expect(IntegrationEvent(payload: "history;search;") == .historyRequest(.search, typed: ""))
+        #expect(IntegrationEvent(payload: "history;other;") == nil)
+    }
+
     @Test func parsesCommandStart() {
         #expect(IntegrationEvent(payload: "exec;make test") == .commandStarted("make test"))
     }

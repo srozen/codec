@@ -15,7 +15,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     let paneContainer = NSView()
     private(set) var tabBar: PassthroughHostingView<TabBar>!
     private(set) var statusBar: PassthroughHostingView<StatusBar>!
-    private var palette: PassthroughHostingView<AnyView>!
+    private(set) var palette: PassthroughHostingView<AnyView>!
     private var installedTab: TerminalTab?
     private var installedLayout: SplitLayout<Pane>?
     private var tabObservers: [UUID: AnyCancellable] = [:]
@@ -548,6 +548,190 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         remove(pane)
     }
 
+    // MARK: - History
+
+    private var historyPopover: NSPopover?
+    private var historyPopoverClosed: NSObjectProtocol?
+    var isShowingHistoryMenu: Bool { historyPopover?.isShown == true }
+    private(set) var isShowingHistoryPanel = false
+
+    func showHistory(for pane: Pane, request: IntegrationEvent.HistoryRequest, typed: String) {
+        guard let tab = model.tabs.first(where: { $0.layout.contains(pane) }) else { return }
+        if tab !== model.selected { select(tab) }
+        tab.focus(pane)
+        switch request {
+        case .menu: showHistoryMenu(for: pane, typed: typed)
+        case .search: showHistoryPanel(for: pane, typed: typed)
+        }
+    }
+
+    /// ⌘Y: the history search, for the focused pane.
+    @objc func showCommandHistory(_ sender: Any?) {
+        if isShowingHistoryPanel { return hideCommandPalette() }
+        guard let pane = focusedPane else { return NSSound.beep() }
+        showHistoryPanel(for: pane, typed: "")
+    }
+
+    private func historyView(for pane: Pane, style: HistoryView.Style, typed: String,
+                             dismiss: @escaping () -> Void) -> HistoryView {
+        // Picks up commands other terminals added to the shell's history file.
+        environment.history.load()
+        return HistoryView(store: environment.history, style: style, theme: preferences.theme, codeFont: preferences.font(),
+                           directory: pane.session.directory, canInsert: pane.isAtCommandLine, query: typed,
+                           onChoose: { [weak self, weak pane] choice in
+                               dismiss()
+                               self?.apply(choice, to: pane)
+                           },
+                           onDismiss: dismiss)
+    }
+
+    private func apply(_ choice: HistoryChoice, to pane: Pane?) {
+        switch choice {
+        case .insert(let command): pane?.replaceCommandLine(with: command, run: false)
+        case .run(let command): pane?.replaceCommandLine(with: command, run: true)
+        case .copy(let command):
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(command, forType: .string)
+        }
+        if let pane { window?.makeFirstResponder(pane.view.preferredResponder) }
+    }
+
+    /// ↑ at the prompt: a menu just above the cursor.
+    private func showHistoryMenu(for pane: Pane, typed: String) {
+        historyPopover?.close()
+        guard let grid = TerminalGrid(terminal: pane.terminal) else { return showHistoryPanel(for: pane, typed: typed) }
+        let popover = NSPopover()
+        popover.behavior = .transient
+        let controller = NSHostingController(rootView: historyView(for: pane, style: .menu, typed: typed) { [weak popover] in
+            popover?.performClose(nil)
+        })
+        controller.sizingOptions = .preferredContentSize
+        popover.contentViewController = controller
+        historyPopoverClosed = NotificationCenter.default.addObserver(
+            forName: NSPopover.didCloseNotification, object: popover, queue: .main) { [weak self, weak pane] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if let observer = self.historyPopoverClosed { NotificationCenter.default.removeObserver(observer) }
+                self.historyPopoverClosed = nil
+                self.historyPopover = nil
+                self.stopWatchingOverlayKeys()
+                if let pane, !self.model.paletteOpen { self.window?.makeFirstResponder(pane.view.preferredResponder) }
+            }
+        }
+        historyPopover = popover
+        popover.show(relativeTo: pane.terminal.convert(grid.caret, from: nil), of: pane.terminal, preferredEdge: .maxY)
+        watchOverlayKeys()
+        focusSearchField(in: controller.view)
+    }
+
+    /// ⌃R at the prompt, or ⌘Y: the full search, over the window like the command palette.
+    private func showHistoryPanel(for pane: Pane, typed: String) {
+        historyPopover?.close()
+        if model.paletteOpen { hideCommandPalette() }
+        model.paletteOpen = true
+        isShowingHistoryPanel = true
+        let view = historyView(for: pane, style: .panel, typed: typed) { [weak self] in self?.hideCommandPalette() }
+        palette.rootView = AnyView(
+            ZStack(alignment: .top) {
+                Color.black.opacity(0.001)
+                    .onTapGesture { [weak self] in self?.hideCommandPalette() }
+                view
+                    .glassEffect(.regular, in: .rect(cornerRadius: 18))
+                    .shadow(color: .black.opacity(0.3), radius: 30, y: 12)
+                    .padding(.top, TabBar.height + 36)
+            })
+        palette.capturesMouse = true
+        watchOverlayKeys()
+        focusSearchField(in: palette)
+    }
+
+    // MARK: Overlay keyboard
+
+    private var overlayKeyMonitor: Any?
+
+    /// Puts the keyboard in an overlay's search field. Opened from the shell (⌃R, ↑), the overlay
+    /// appears outside a key event, and SwiftUI's own focus request doesn't always land.
+    /// SwiftUI builds the field a little later the first time, and its own focus handling can let go
+    /// of it again while it settles. So for up to a second this keeps putting the keyboard back in the
+    /// field, until it has stayed there for a few checks in a row.
+    private func focusSearchField(in view: NSView, attempt: Int = 0, held: Int = 0) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + (attempt == 0 ? 0 : 0.02)) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, view.window != nil else { return }
+                view.layoutSubtreeIfNeeded()
+                var holding = 0
+                if let field = Self.firstTextField(in: view), let window = field.window {
+                    if Self.isEditing(field, in: window) {
+                        holding = held + 1
+                    } else {
+                        if !window.isKeyWindow { window.makeKey() }
+                        window.makeFirstResponder(field)
+                    }
+                }
+                if holding < 3, attempt < 50 { self.focusSearchField(in: view, attempt: attempt + 1, held: holding) }
+            }
+        }
+    }
+
+    private static func firstTextField(in view: NSView) -> NSTextField? {
+        if let field = view as? NSTextField, field.isEditable { return field }
+        for subview in view.subviews {
+            if let field = firstTextField(in: subview) { return field }
+        }
+        return nil
+    }
+
+    private static func isEditing(_ field: NSTextField, in window: NSWindow) -> Bool {
+        guard let responder = window.firstResponder as? NSView else { return false }
+        return responder === field || responder.isDescendant(of: field) || (responder as? NSText)?.delegate === field
+    }
+
+    /// While the palette, the history panel or the history menu is open: Esc closes it, and typing
+    /// goes to its search field, wherever the keyboard ended up.
+    private func watchOverlayKeys() {
+        guard overlayKeyMonitor == nil else { return }
+        overlayKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let consumed = MainActor.assumeIsolated { self?.handleOverlayKey(event) ?? false }
+            return consumed ? nil : event
+        }
+    }
+
+    private func stopWatchingOverlayKeys() {
+        guard !model.paletteOpen, !isShowingHistoryMenu, let monitor = overlayKeyMonitor else { return }
+        NSEvent.removeMonitor(monitor)
+        overlayKeyMonitor = nil
+    }
+
+    /// Handles a key pressed while an overlay is open. True when it was used up here.
+    func handleOverlayKey(_ event: NSEvent) -> Bool {
+        let menuWindow = historyPopover?.contentViewController?.view.window
+        guard event.window === window || (menuWindow != nil && event.window === menuWindow) else { return false }
+        if let popover = historyPopover, popover.isShown {
+            if event.keyCode == 53 {
+                popover.performClose(nil)
+                return true
+            }
+            if let content = popover.contentViewController?.view, let field = Self.firstTextField(in: content),
+               let menuWindow, !Self.isEditing(field, in: menuWindow) {
+                menuWindow.makeKey()
+                menuWindow.makeFirstResponder(field)
+            }
+            return false
+        }
+        guard model.paletteOpen else {
+            stopWatchingOverlayKeys()
+            return false
+        }
+        if event.keyCode == 53 {
+            hideCommandPalette()
+            return true
+        }
+        if let window, let field = Self.firstTextField(in: palette), !Self.isEditing(field, in: window) {
+            window.makeFirstResponder(field)
+        }
+        return false
+    }
+
     // MARK: - Actions (menus, shortcuts and the palette)
 
     @objc func newTab(_ sender: Any?) {
@@ -647,13 +831,17 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
                     .padding(.top, TabBar.height + 36)
             })
         palette.capturesMouse = true
+        watchOverlayKeys()
+        focusSearchField(in: palette)
     }
 
     func hideCommandPalette() {
         guard model.paletteOpen else { return }
         model.paletteOpen = false
+        isShowingHistoryPanel = false
         palette.capturesMouse = false
         palette.rootView = AnyView(EmptyView())
+        stopWatchingOverlayKeys()
         if let pane = focusedPane { window?.makeFirstResponder(pane.view.preferredResponder) }
     }
 
@@ -681,6 +869,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
             },
             .init(id: "file-tree", title: model.fileTreeVisible ? "Hide File Tree" : "Show File Tree", shortcut: "⇧⌘E",
                   systemImage: "sidebar.left") { [weak self] in self?.toggleFileTree(nil) },
+            .init(id: "command-history", title: "Search Command History", shortcut: "⌘Y", systemImage: "clock.arrow.circlepath") { [weak self] in
+                self?.showCommandHistory(nil)
+            },
             .init(id: "save-file", title: "Save File", shortcut: "⌘S", systemImage: "square.and.arrow.down") { [weak self] in
                 self?.saveDocument(nil)
             },
@@ -792,6 +983,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     }
 
     func windowWillClose(_ notification: Notification) {
+        if let monitor = overlayKeyMonitor { NSEvent.removeMonitor(monitor) }
+        overlayKeyMonitor = nil
         allPanes.forEach { $0.shutDown() }
         cancellables.removeAll()
         tabObservers.removeAll()

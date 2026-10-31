@@ -7,7 +7,7 @@ final class PaneView: NSView {
     let terminal = CodecTerminalView(frame: .zero)
     let scanlines = ScanlineView()
     let overlay: PassthroughHostingView<PaneOverlay>
-    private let dimmer = NSView()
+    private let dimmer = PassthroughView()
     private let keyCatcher = KeyCatcherView()
     private(set) var isDimmed = false
 
@@ -120,6 +120,11 @@ final class PassthroughHostingView<Content: View>: NSHostingView<Content> {
 }
 
 /// Faint CRT scanlines over the terminal (off by default).
+/// A view the mouse goes through, for overlays like the inactive-pane dimmer.
+final class PassthroughView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 final class ScanlineView: NSView {
     var lineColor: NSColor = .black
 

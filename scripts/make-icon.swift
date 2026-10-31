@@ -44,7 +44,7 @@ func squircle(in rect: CGRect, exponent: CGFloat = 4.2) -> CGPath {
     return path
 }
 
-let phosphor: UInt32 = 0x5BFFAE
+let phosphor: UInt32 = 0x52FFA8
 let tile = CGRect(x: 100, y: 100, width: 824, height: 824)
 let shape = squircle(in: tile)
 
@@ -64,10 +64,10 @@ ctx.clip()
 ctx.drawLinearGradient(gradient([(0x1F2B25, 1, 0), (0x0E1612, 1, 0.5), (0x060A08, 1, 1)]),
                        start: CGPoint(x: 0, y: tile.minY), end: CGPoint(x: 0, y: tile.maxY), options: [])
 
-// Phosphor bloom behind the prompt.
-ctx.drawRadialGradient(gradient([(phosphor, 0.20, 0), (phosphor, 0, 1)]),
-                       startCenter: CGPoint(x: 470, y: 560), startRadius: 0,
-                       endCenter: CGPoint(x: 470, y: 560), endRadius: 400, options: [])
+// Phosphor bloom behind the C.
+ctx.drawRadialGradient(gradient([(phosphor, 0.22, 0), (phosphor, 0, 1)]),
+                       startCenter: CGPoint(x: 470, y: 512), startRadius: 0,
+                       endCenter: CGPoint(x: 470, y: 512), endRadius: 420, options: [])
 
 // Fine scanlines.
 ctx.setFillColor(color(0x000000, 0.16))
@@ -84,42 +84,23 @@ func glowing(_ draw: () -> Void, blur: CGFloat = 40) {
     ctx.restoreGState()
 }
 
-// The prompt: a chevron and a cursor.
-let chevron = CGMutablePath()
-chevron.move(to: CGPoint(x: 300, y: 382))
-chevron.addLine(to: CGPoint(x: 476, y: 528))
-chevron.addLine(to: CGPoint(x: 300, y: 674))
+// The C: a stack of level bars cut to a ring that opens on the right, the top bar dimmed like a "max" line.
+let pitch: CGFloat = 64, thickness: CGFloat = 44, outer: CGFloat = 300, inner: CGFloat = 150
+glowing({
+    for i in -4...4 {
+        let offset = CGFloat(i) * pitch, d = abs(offset)
+        let reach = sqrt(outer * outer - d * d)
+        let right = d < inner ? -sqrt(inner * inner - d * d) : min(reach, (d - 60) * 1.15)
+        ctx.setFillColor(color(phosphor, i == -4 ? 0.55 : 1))
+        ctx.fill(CGRect(x: 512 - reach, y: 512 + offset - thickness / 2, width: right + reach, height: thickness))
+    }
+}, blur: 34)
+
+// A block cursor waiting in the C's mouth.
 glowing {
-    ctx.addPath(chevron)
-    ctx.setStrokeColor(color(phosphor))
-    ctx.setLineWidth(76)
-    ctx.setLineCap(.round)
-    ctx.setLineJoin(.round)
-    ctx.strokePath()
-}
-glowing {
-    ctx.addPath(CGPath(roundedRect: CGRect(x: 540, y: 634, width: 196, height: 76), cornerWidth: 38, cornerHeight: 38, transform: nil))
+    ctx.addPath(CGPath(roundedRect: CGRect(x: 476, y: 448, width: 72, height: 128), cornerWidth: 14, cornerHeight: 14, transform: nil))
     ctx.setFillColor(color(phosphor))
     ctx.fillPath()
-}
-
-// Level meter, top right: the codec's thin rising bars, four of six lit.
-let bars = 6
-for i in 0..<bars {
-    let height = 22 + CGFloat(i) * 14
-    let rect = CGRect(x: 618 + CGFloat(i) * 24, y: 352 - height, width: 13, height: height)
-    let bar = CGPath(roundedRect: rect, cornerWidth: 4, cornerHeight: 4, transform: nil)
-    if i < 4 {
-        glowing({
-            ctx.addPath(bar)
-            ctx.setFillColor(color(phosphor, 0.95))
-            ctx.fillPath()
-        }, blur: 20)
-    } else {
-        ctx.addPath(bar)
-        ctx.setFillColor(color(phosphor, 0.16))
-        ctx.fillPath()
-    }
 }
 
 // Glass: a soft sheen across the top and an inner vignette.

@@ -181,7 +181,7 @@ struct FileTreeWindowTests {
             "Change Directory Here", "Open in New Tab", "-", "Insert Path", "Copy Path", "Copy Relative Path", "-", "Reveal in Finder",
         ])
         #expect(titles(controller.sidebar.contextMenuItems(for: [file])) == [
-            "Open", "Open in Editor", "-", "Insert Path", "Copy Path", "Copy Relative Path", "-", "Reveal in Finder",
+            "Open", "Open in Default App", "Open in Terminal Editor", "-", "Insert Path", "Copy Path", "Copy Relative Path", "-", "Reveal in Finder",
         ])
         #expect(titles(controller.sidebar.contextMenuItems(for: [file, folder])).contains("Insert Paths"))
 

@@ -4,7 +4,7 @@ import Combine
 import CodecCore
 
 /// A Codec window: a tab bar, the selected tab's panes, a status bar and the command palette.
-final class TerminalWindowController: NSWindowController, NSWindowDelegate, PaneHost {
+final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMenuItemValidation, PaneHost {
     let model = WindowModel()
     var onClose: ((TerminalWindowController) -> Void)?
 
@@ -26,6 +26,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
     private var sidebarWidth: NSLayoutConstraint!
     private var focusedDirectory: AnyCancellable?
     private weak var followedPane: Pane?
+    let editor = EditorModel()
+    private(set) var editorPanel: EditorPanel!
+    private var editorWidth: NSLayoutConstraint!
+    private static let editorWidthKey = "EditorWidth"
     private static let fileTreeVisibleKey = "FileTreeVisible"
     private static let fileTreeWidthKey = "FileTreeWidth"
 
@@ -105,7 +109,14 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
         sidebarWidth = sidebar.widthAnchor.constraint(equalToConstant: 0)
         fileTreeWidth = storedWidth > 0 ? min(max(CGFloat(storedWidth), FileTreeSidebar.widthRange.lowerBound), FileTreeSidebar.widthRange.upperBound) : FileTreeSidebar.defaultWidth
 
-        for view in [backdrop, tint, tabBar!, sidebar!, paneContainer, statusBar!, palette!] as [NSView] {
+        editorPanel = EditorPanel(model: editor, theme: preferences.theme, font: preferences.font())
+        editorPanel.openFile = { [weak self] url in self?.openFile(url, pin: true, focus: false) }
+        editorPanel.onResize = { [weak self] width in self?.resizeEditor(to: width) }
+        editorPanel.isHidden = true
+        editorWidth = editorPanel.widthAnchor.constraint(equalToConstant: 0)
+        editor.confirmClose = { [weak self] document, done in self?.confirmClosing(document, then: done) ?? done(true) }
+
+        for view in [backdrop, tint, tabBar!, sidebar!, editorPanel!, paneContainer, statusBar!, palette!] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(view)
         }
@@ -120,7 +131,11 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
                 sidebar.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
                 sidebarWidth,
                 paneContainer.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
-                paneContainer.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
+                editorPanel.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+                editorPanel.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
+                editorPanel.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
+                editorWidth,
+                paneContainer.leadingAnchor.constraint(equalTo: editorPanel.trailingAnchor),
                 paneContainer.trailingAnchor.constraint(equalTo: content.trailingAnchor),
                 paneContainer.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
                 statusBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
@@ -138,6 +153,12 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
         NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
             .sink { [weak self] _ in MainActor.assumeIsolated { self?.focusedPaneCameToFront() } }
             .store(in: &cancellables)
+        editor.$documents
+            .map(\.isEmpty)
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in MainActor.assumeIsolated { self?.updateEditorVisibility() } }
+            .store(in: &cancellables)
         firstResponderObservation = window?.observe(\.firstResponder, options: [.new]) { [weak self] window, _ in
             MainActor.assumeIsolated { self?.firstResponderChanged(window.firstResponder) }
         }
@@ -149,6 +170,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
         backdrop.isHidden = !preferences.blur
         tint.layer?.backgroundColor = theme.background.withAlphaComponent(preferences.blur ? preferences.opacity : 1).cgColor
         sidebar?.applyTheme(theme)
+        editorPanel?.apply(theme: theme, font: preferences.font())
         allPanes.forEach { $0.applyPreferences() }
         installSelectedTab(force: true)
     }
@@ -244,6 +266,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
 
     private func fileTreeActions() -> FileTreeActions {
         FileTreeActions(
+            preview: { [weak self] url in self?.openFile(url, pin: false, focus: false) },
+            open: { [weak self] url in self?.openFile(url, pin: true, focus: true) },
             openInEditor: { [weak self] url in self?.openInEditor(url) },
             changeDirectory: { [weak self] url in
                 guard let self else { return }
@@ -259,6 +283,115 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
                 self?.focusTerminal()
             },
             focusTerminal: { [weak self] in self?.focusTerminal() })
+    }
+
+    // MARK: - Editor
+
+    /// Shows a file in the editor. Unpinned, it replaces the preview tab; focused, typing goes to it.
+    func openFile(_ url: URL, pin: Bool, focus: Bool) {
+        editor.open(url, pin: pin)
+        updateEditorVisibility()
+        editorPanel.update()
+        if focus {
+            window?.layoutIfNeeded()
+            editorPanel.focus()
+        }
+    }
+
+    private func updateEditorVisibility() {
+        let visible = !editor.documents.isEmpty
+        guard visible == editorPanel.isHidden else { return }
+        if !visible, editorPanel.hasFocus { focusTerminal() }
+        editorPanel.isHidden = !visible
+        if visible {
+            let stored = CGFloat(preferences.stateDefaults.double(forKey: Self.editorWidthKey))
+            let available = (window?.contentView?.bounds.width ?? 1000) - sidebarWidth.constant
+            editorWidth.constant = clampedEditorWidth(stored > 0 ? stored : available * 0.5)
+        } else {
+            editorWidth.constant = 0
+        }
+    }
+
+    private func clampedEditorWidth(_ width: CGFloat) -> CGFloat {
+        let available = (window?.contentView?.bounds.width ?? 1000) - sidebarWidth.constant
+        return max(280, min(width, available - 320))
+    }
+
+    private func resizeEditor(to width: CGFloat) {
+        editorWidth.constant = clampedEditorWidth(width)
+        preferences.stateDefaults.set(Double(editorWidth.constant), forKey: Self.editorWidthKey)
+    }
+
+    /// Asks whether to save a file's changes before closing it.
+    private func confirmClosing(_ document: EditorDocument, then done: @escaping (Bool) -> Void) {
+        guard let window else { return done(true) }
+        let alert = NSAlert()
+        alert.messageText = "Save changes to “\(document.name)”?"
+        alert.informativeText = "Your changes will be lost if you don’t save them."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Don’t Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            switch response {
+            case .alertFirstButtonReturn: done(self?.save(document) ?? false)
+            case .alertSecondButtonReturn: done(true)
+            default: done(false)
+            }
+        }
+    }
+
+    /// Saves, telling the user when it fails. True when it worked.
+    @discardableResult
+    private func save(_ document: EditorDocument) -> Bool {
+        do {
+            try document.save()
+            return true
+        } catch {
+            let alert = NSAlert(error: error)
+            alert.messageText = "“\(document.name)” couldn’t be saved."
+            if let window { alert.beginSheetModal(for: window) } else { alert.runModal() }
+            return false
+        }
+    }
+
+    var hasUnsavedFiles: Bool { editor.hasUnsavedChanges }
+
+    @objc func saveDocument(_ sender: Any?) {
+        guard let document = editor.selected, document.isEditable, document.kind != .otherEncoding else { return NSSound.beep() }
+        save(document)
+    }
+
+    @objc func closeFile(_ sender: Any?) {
+        guard let document = editor.selected else { return NSSound.beep() }
+        let hadFocus = editorPanel.hasFocus
+        editor.close(document) { [weak self] in
+            guard let self else { return }
+            self.updateEditorVisibility()
+            self.editorPanel.update()
+            guard hadFocus else { return }
+            if self.editor.documents.isEmpty { self.focusTerminal() } else { self.editorPanel.focus() }
+        }
+    }
+
+    @objc func toggleMarkdownPreview(_ sender: Any?) {
+        guard let document = editor.selected, document.kind == .markdown else { return NSSound.beep() }
+        document.mode = document.mode == .preview ? .source : .preview
+        editorPanel.update()
+    }
+
+    private func showMarkdown(_ mode: EditorDocument.Mode) {
+        guard let document = editor.selected, document.kind == .markdown else { return NSSound.beep() }
+        document.mode = mode
+        editorPanel.update()
+    }
+
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        switch item.action {
+        case #selector(saveDocument(_:)): return editor.selected.map { $0.isEditable && $0.kind != .otherEncoding } ?? false
+        case #selector(closeFile(_:)): return editor.selected != nil
+        case #selector(toggleMarkdownPreview(_:)): return editor.selected?.kind == .markdown
+        default: return true
+        }
     }
 
     /// Opens a file in `$EDITOR` (vi without one) in a new pane to the right.
@@ -430,6 +563,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
     }
 
     @objc func closePane(_ sender: Any?) {
+        // ⌘W closes the file when the editor has the keyboard.
+        if editorPanel.hasFocus, editor.selected != nil { return closeFile(sender) }
         if let pane = focusedPane { requestClose(pane) }
     }
 
@@ -546,6 +681,19 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
             },
             .init(id: "file-tree", title: model.fileTreeVisible ? "Hide File Tree" : "Show File Tree", shortcut: "⇧⌘E",
                   systemImage: "sidebar.left") { [weak self] in self?.toggleFileTree(nil) },
+            .init(id: "save-file", title: "Save File", shortcut: "⌘S", systemImage: "square.and.arrow.down") { [weak self] in
+                self?.saveDocument(nil)
+            },
+            .init(id: "close-file", title: "Close File", systemImage: "xmark.square") { [weak self] in self?.closeFile(nil) },
+            .init(id: "markdown-source", title: "Markdown: Show Source", systemImage: "doc.plaintext") { [weak self] in
+                self?.showMarkdown(.source)
+            },
+            .init(id: "markdown-split", title: "Markdown: Show Source and Preview", systemImage: "rectangle.split.2x1") { [weak self] in
+                self?.showMarkdown(.split)
+            },
+            .init(id: "markdown-preview", title: "Markdown: Show Preview", shortcut: "⇧⌘V", systemImage: "doc.richtext") { [weak self] in
+                self?.showMarkdown(.preview)
+            },
             .init(id: "switch-branch", title: "Switch Branch…", shortcut: "⇧⌘B", systemImage: "arrow.triangle.branch") { [weak self] in
                 self?.switchBranch(nil)
             },
@@ -607,9 +755,40 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
     func windowDidExitFullScreen(_ notification: Notification) { model.fullScreen = false }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if hasUnsavedFiles {
+            confirmDiscardingUnsavedFiles { [weak self] in
+                guard let self else { return }
+                if self.hasRunningJobs {
+                    self.confirmClosing(self.allPanes, what: "this window") { sender.close() }
+                } else {
+                    sender.close()
+                }
+            }
+            return false
+        }
         guard hasRunningJobs else { return true }
         confirmClosing(allPanes, what: "this window") { sender.close() }
         return false
+    }
+
+    /// Offers to save every file with unsaved changes, then goes ahead unless cancelled.
+    func confirmDiscardingUnsavedFiles(then proceed: @escaping () -> Void) {
+        let dirty = editor.documents.filter(\.isDirty)
+        guard !dirty.isEmpty, let window else { return proceed() }
+        let alert = NSAlert()
+        alert.messageText = dirty.count == 1 ? "Save changes to “\(dirty[0].name)”?" : "Save changes to \(dirty.count) files?"
+        alert.informativeText = "Your changes will be lost if you don’t save them."
+        alert.addButton(withTitle: dirty.count == 1 ? "Save" : "Save All")
+        alert.addButton(withTitle: "Don’t Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            switch response {
+            case .alertFirstButtonReturn:
+                if dirty.allSatisfy({ self?.save($0) ?? false }) { proceed() }
+            case .alertSecondButtonReturn: proceed()
+            default: break
+            }
+        }
     }
 
     func windowWillClose(_ notification: Notification) {

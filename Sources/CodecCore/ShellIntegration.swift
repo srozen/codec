@@ -111,7 +111,10 @@ public struct ShellIntegration: Sendable {
       [[ -n "$CODEC_PROMPT_FILE" && -r "$CODEC_PROMPT_FILE" ]] && source "$CODEC_PROMPT_FILE"
       # cl=line: clicking on the command line moves the cursor there.
       _codec_osc "133;A;cl=line"
-      _codec_osc "6973;prompt"
+      # How many lines the prompt takes, so Codec can find where each command's prompt begins.
+      local newlines=${(%)PS1//[^$'\n']/}
+      _codec_osc "6973;prompt;$(( ${#newlines} + 1 ))"
+      _codec_reported_region=0
       [[ "$PS1" == *$'\e]133;B'* ]] || PS1+=$'%{\e]133;B\a%}'
     }
 
@@ -144,6 +147,15 @@ public struct ShellIntegration: Sendable {
     _codec_select_all() { MARK=0; CURSOR=$#BUFFER; REGION_ACTIVE=1 }
     _codec_save_cursor() { typeset -gi _codec_saved_cursor=$CURSOR }
     _codec_restore_cursor() { CURSOR=${_codec_saved_cursor:-$CURSOR} }
+    _codec_set_anchor() { typeset -gi _codec_anchor=$CURSOR }
+    _codec_to_anchor() { CURSOR=${_codec_anchor:-$CURSOR} }
+    # Hands the selected text to Codec, base64-encoded, for the clipboard.
+    _codec_copy() {
+      (( REGION_ACTIVE )) || return 0
+      local from=$(( MARK < CURSOR ? MARK : CURSOR )) to=$(( MARK < CURSOR ? CURSOR : MARK ))
+      local encoded=$(builtin print -rn -- "${BUFFER[from+1,to]}" | command base64 | command tr -d '\n')
+      _codec_osc "6973;clipboard;$encoded" >/dev/tty
+    }
     # The word around the cursor: everything up to the surrounding whitespace, so paths stay whole.
     _codec_select_word() {
       local start=$CURSOR end=$CURSOR
@@ -151,7 +163,16 @@ public struct ShellIntegration: Sendable {
       while (( end < $#BUFFER )) && [[ ${BUFFER[end+1]} != [[:space:]] ]]; do (( end++ )); done
       MARK=$start CURSOR=$end REGION_ACTIVE=1
     }
-    _codec_cut() { (( REGION_ACTIVE )) && zle kill-region; REGION_ACTIVE=0; return 0 }
+    # Re-runs the prompt hooks (yours too, such as vcs_info) and redraws, keeping what's typed.
+    _codec_refresh_prompt() {
+      local hook
+      for hook in $precmd_functions; do
+        [[ $hook == _codec_* ]] || $hook
+      done
+      [[ -n "$CODEC_PROMPT_FILE" && -r "$CODEC_PROMPT_FILE" ]] && source "$CODEC_PROMPT_FILE"
+      zle reset-prompt
+    }
+    _codec_cut() { (( REGION_ACTIVE )) && { _codec_copy; zle kill-region }; REGION_ACTIVE=0; return 0 }
     _codec_delete_to_start() {
       if (( REGION_ACTIVE )); then zle kill-region; REGION_ACTIVE=0; else zle backward-kill-line; fi
     }
@@ -175,13 +196,21 @@ public struct ShellIntegration: Sendable {
       if (( REGION_ACTIVE )); then zle kill-region; REGION_ACTIVE=0; else zle _codec_orig_delete-char; fi
     }
 
-    # Plain cursor movement ends a selection, as in a text field.
+    # Plain cursor movement ends a selection, as in a text field. Codec is told when a selection
+    # appears or goes away, so Copy and Cut know where to look.
+    typeset -gi _codec_reported_region=0
     _codec_collapse_on_move() {
-      (( REGION_ACTIVE )) || return 0
-      case $LASTWIDGET in
-        (*forward-char|*backward-char|*forward-word|*backward-word|*beginning-of-line|*end-of-line|*-line-or-*|*history*)
-          REGION_ACTIVE=0 ;;
-      esac
+      if (( REGION_ACTIVE )); then
+        case $LASTWIDGET in
+          (*forward-char|*backward-char|*forward-word|*backward-word|*beginning-of-line|*end-of-line|*-line-or-*|*history*)
+            REGION_ACTIVE=0 ;;
+        esac
+      fi
+      local active=$(( REGION_ACTIVE ? 1 : 0 ))
+      if (( active != _codec_reported_region )); then
+        _codec_reported_region=$active
+        _codec_osc "6973;region;$active" >/dev/tty
+      fi
     }
 
     _codec_setup_editing() {
@@ -196,7 +225,8 @@ public struct ShellIntegration: Sendable {
       for widget in _codec_select_left _codec_select_right _codec_select_word_left _codec_select_word_right \
                     _codec_select_to_start _codec_select_to_end _codec_mark _codec_unmark _codec_step_left \
                     _codec_step_right _codec_select_all _codec_select_word _codec_cut _codec_delete_to_start \
-                    _codec_move_to_start _codec_move_to_end _codec_save_cursor _codec_restore_cursor; do
+                    _codec_move_to_start _codec_move_to_end _codec_save_cursor _codec_restore_cursor \
+                    _codec_set_anchor _codec_to_anchor _codec_copy _codec_refresh_prompt; do
         zle -N $widget
       done
       local map
@@ -210,7 +240,9 @@ public struct ShellIntegration: Sendable {
           $'\e[57004~' _codec_unmark $'\e[57005~' _codec_cut $'\e[57006~' _codec_select_word \
           $'\e[57007~' _codec_select_all $'\e[57008~' _codec_select_to_start $'\e[57009~' _codec_select_to_end \
           $'\e[57010~' _codec_delete_to_start $'\e[57011~' _codec_move_to_start $'\e[57012~' _codec_move_to_end \
-          $'\e[57013~' _codec_save_cursor $'\e[57014~' _codec_restore_cursor
+          $'\e[57013~' _codec_save_cursor $'\e[57014~' _codec_restore_cursor \
+          $'\e[57015~' _codec_set_anchor $'\e[57016~' _codec_to_anchor $'\e[57017~' _codec_copy \
+          $'\e[57018~' _codec_refresh_prompt
         # Forward delete, if nothing else claims it.
         [[ $(bindkey -M $map $'\e[3~') == *undefined-key ]] && bindkey -M $map $'\e[3~' delete-char
       done

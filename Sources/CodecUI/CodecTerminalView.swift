@@ -3,24 +3,34 @@ import Synchronization
 import SwiftTerm
 
 /// SwiftTerm's local-process view, with the bell routed to Codec, a context menu, and the hooks that
-/// let the command line be edited with the mouse.
+/// let Codec take over mouse gestures on the command line and adjust selections.
 final class CodecTerminalView: LocalProcessTerminalView {
+    /// Lines kept above the screen. SwiftTerm's default of 500 is short for a terminal.
+    static let scrollback = 10_000
+
     var onBell: (() -> Void)?
     /// Builds the menu shown on right-click when the running program isn't tracking the mouse.
     var contextMenuProvider: ((NSEvent) -> NSMenu?)?
-    /// A click or drag finished: where it started and ended (window coordinates), its click count,
-    /// and whether it was a drag.
-    var onPointerRelease: ((_ press: NSPoint, _ release: NSPoint, _ clicks: Int, _ dragged: Bool) -> Void)?
-    /// A mouse press began, before the view handles it.
-    var onPointerPress: (() -> Void)?
-    var canCut: (() -> Bool)?
+    /// Offered every press first. Return true to own the gesture: its drags and release then go to
+    /// `onOwnedDrag` and `onOwnedRelease`, and the terminal doesn't see them.
+    var shouldOwnPress: ((NSEvent) -> Bool)?
+    var onOwnedDrag: ((NSEvent) -> Void)?
+    var onOwnedRelease: ((NSEvent) -> Void)?
+    /// A gesture the terminal handled has ended: its click count, whether it dragged, and where it ended.
+    var onRelease: ((_ clicks: Int, _ dragged: Bool, _ point: NSPoint) -> Void)?
+    /// Copy and Cut, when Codec has its own selection to act on. Return false to let the terminal copy.
+    var onCopy: (() -> Bool)?
+    var canCopy: (() -> Bool)?
     var onCut: (() -> Void)?
+    var canCut: (() -> Bool)?
+
     private var relay: BellRelay?
-    private var press: (point: NSPoint, clicks: Int)?
+    private var owningGesture = false
+    private var pressClicks = 1
     private var dragged = false
 
     override init(frame: CGRect) {
-        super.init(frame: frame)
+        super.init(frame: frame, font: nil, options: TerminalOptions(scrollback: Self.scrollback))
         let relay = BellRelay(base: self)
         self.relay = relay
         terminalDelegate = relay
@@ -36,23 +46,70 @@ final class CodecTerminalView: LocalProcessTerminalView {
         return contextMenuProvider?(event) ?? super.menu(for: event)
     }
 
+    // MARK: Gestures
+
     override func mouseDown(with event: NSEvent) {
-        press = (event.locationInWindow, event.clickCount)
+        pressClicks = event.clickCount
         dragged = false
-        onPointerPress?()
+        if shouldOwnPress?(event) == true {
+            owningGesture = true
+            window?.makeFirstResponder(self)
+            return
+        }
+        owningGesture = false
         super.mouseDown(with: event)
     }
 
     override func mouseDragged(with event: NSEvent) {
         dragged = true
-        super.mouseDragged(with: event)
+        if owningGesture {
+            onOwnedDrag?(event)
+        } else {
+            super.mouseDragged(with: event)
+        }
     }
 
     override func mouseUp(with event: NSEvent) {
+        if owningGesture {
+            owningGesture = false
+            onOwnedRelease?(event)
+            return
+        }
         super.mouseUp(with: event)
-        guard let press else { return }
-        self.press = nil
-        onPointerRelease?(press.point, event.locationInWindow, press.clicks, dragged)
+        onRelease?(pressClicks, dragged, event.locationInWindow)
+    }
+
+    /// Selects from one window point to another the way a drag would, through the terminal's own
+    /// mouse handling (SwiftTerm has no public API to set a selection).
+    func selectByDragging(from start: NSPoint, to end: NSPoint) {
+        guard let down = syntheticEvent(.leftMouseDown, at: start),
+              let drag = syntheticEvent(.leftMouseDragged, at: end),
+              let up = syntheticEvent(.leftMouseUp, at: end) else { return }
+        super.mouseDown(with: down)
+        super.mouseDragged(with: drag)
+        super.mouseUp(with: up)
+    }
+
+    /// Extends the current selection to a window point, as a Shift-click does.
+    func extendSelection(to point: NSPoint) {
+        guard let down = syntheticEvent(.leftMouseDown, at: point, modifiers: .shift),
+              let up = syntheticEvent(.leftMouseUp, at: point, modifiers: .shift) else { return }
+        super.mouseDown(with: down)
+        super.mouseUp(with: up)
+    }
+
+    private func syntheticEvent(_ type: NSEvent.EventType, at point: NSPoint,
+                                modifiers: NSEvent.ModifierFlags = []) -> NSEvent? {
+        NSEvent.mouseEvent(with: type, location: point, modifierFlags: modifiers,
+                           timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window?.windowNumber ?? 0,
+                           context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1)
+    }
+
+    // MARK: Copy and Cut
+
+    override func copy(_ sender: Any) {
+        if onCopy?() == true { return }
+        super.copy(sender)
     }
 
     @objc func cut(_ sender: Any?) {
@@ -60,10 +117,15 @@ final class CodecTerminalView: LocalProcessTerminalView {
     }
 
     override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
-        if item.action == #selector(cut(_:)) { return canCut?() ?? false }
-        return super.validateUserInterfaceItem(item)
+        switch item.action {
+        case #selector(cut(_:)):
+            return canCut?() ?? false
+        case #selector(copy(_:)):
+            return selectionActive || canCopy?() == true
+        default:
+            return super.validateUserInterfaceItem(item)
+        }
     }
-
 
     fileprivate func ringBell() {
         onBell?()

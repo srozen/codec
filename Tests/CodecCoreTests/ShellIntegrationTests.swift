@@ -178,7 +178,11 @@ struct ZshIntegrationTests {
         zsh.send("sleep 0.2; false\r")
         #expect(await zsh.wait { zsh.payloads(6973).contains { $0.hasPrefix("done;") } })
 
-        let events = zsh.payloads(6973).compactMap(IntegrationEvent.init(payload:)).filter { $0 != .prompt }
+        let events = zsh.payloads(6973).compactMap(IntegrationEvent.init(payload:)).filter {
+            if case .prompt = $0 { return false }
+            if case .commandLineSelection = $0 { return false }
+            return true
+        }
         #expect(events.first == .commandStarted("sleep 0.2; false"))
         guard case .commandFinished(let code, let duration) = events.last else {
             Issue.record("No finish event in \(events)")
@@ -485,6 +489,27 @@ struct CommandLineEditingTests {
         zsh.send("\r")
         guard await zsh.wait(until: { zsh.payloads(6973).dropFirst(before).contains { $0.hasPrefix("exec;") } }) else { return nil }
         return zsh.payloads(6973).dropFirst(before).first { $0.hasPrefix("exec;") }.map { String($0.dropFirst(5)) }
+    }
+
+    @Test func draggingSelectsFromTheAnchor() async throws {
+        let zsh = try await shell()
+        // Press 5 cells left of the end ("world" starts there), drag right past it, then back to 3.
+        let keys = CommandLineEditing.press(at: -5) + CommandLineEditing.drag(to: 9) + CommandLineEditing.drag(to: 3) + [0x7F]
+        #expect(await run(zsh, typing: "echo hello world", then: keys) == "echo hello ld")
+    }
+
+    @Test func copyAndCutHandTheSelectionToCodec() async throws {
+        let zsh = try await shell()
+        zsh.send("echo hello world")
+        zsh.sendBytes(CommandLineEditing.select(from: -5, to: 0) + Action.copy.sequence)
+        #expect(await zsh.wait { zsh.payloads(6973).contains("clipboard;d29ybGQ=") })
+        #expect(zsh.payloads(6973).contains("region;1"))
+        zsh.sendBytes(CommandLineEditing.select(from: -11, to: -6) + Action.cut.sequence)
+        #expect(await zsh.wait { zsh.payloads(6973).contains("clipboard;aGVsbG8=") })
+        #expect(await zsh.wait { zsh.payloads(6973).last { $0.hasPrefix("region;") } == "region;0" })
+        let before = zsh.payloads(6973).count
+        zsh.send("\r")
+        #expect(await zsh.wait { zsh.payloads(6973).dropFirst(before).contains("exec;echo  world") })
     }
 
     @Test func advertisesClickToMove() async throws {

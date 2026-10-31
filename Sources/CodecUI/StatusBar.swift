@@ -35,7 +35,8 @@ private struct TabStatus: View {
     let theme: CodecTheme
 
     var body: some View {
-        SessionStatus(session: tab.focused.session, theme: theme)
+        SessionStatus(session: tab.focused.session, theme: theme,
+                      onBranchChanged: { [weak pane = tab.focused] in pane?.gitBranchDidChange() })
             .id(ObjectIdentifier(tab.focused))
     }
 }
@@ -43,6 +44,8 @@ private struct TabStatus: View {
 private struct SessionStatus: View {
     @ObservedObject var session: Session
     let theme: CodecTheme
+    var onBranchChanged: () -> Void
+    @State private var choosingBranch = false
 
     var body: some View {
         HStack(spacing: 6) {
@@ -53,8 +56,16 @@ private struct SessionStatus: View {
                 }
                 .help("Open in Finder")
             if let branch = session.gitBranch {
-                Chip(systemImage: "arrow.triangle.branch", text: branch)
-                    .help("Git branch")
+                Button { choosingBranch.toggle() } label: {
+                    Chip(systemImage: "arrow.triangle.branch", text: branch, detail: nil, trailingSymbol: "chevron.up.chevron.down")
+                }
+                .buttonStyle(.plain)
+                .help("Switch branch")
+                .accessibilityLabel("Branch \(branch). Switch branch")
+                .popover(isPresented: $choosingBranch, arrowEdge: .top) {
+                    BranchPicker(repository: GitRepository(directory: URL(fileURLWithPath: session.directory)), theme: theme,
+                                 onSwitched: onBranchChanged, onDismiss: { choosingBranch = false })
+                }
             }
             commandStatus
         }
@@ -84,6 +95,7 @@ private struct Chip: View {
     var detail: String?
     var tint: Color?
     var spinning = false
+    var trailingSymbol: String?
 
     var body: some View {
         HStack(spacing: 5) {
@@ -100,6 +112,11 @@ private struct Chip: View {
                     .font(.system(size: 11).monospacedDigit())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+            }
+            if let trailingSymbol {
+                Image(systemName: trailingSymbol)
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(.horizontal, 8)

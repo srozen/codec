@@ -6,7 +6,12 @@ public enum IntegrationEvent: Equatable, Sendable {
     public static let oscCode = 6973
 
     /// A prompt is showing: the shell is waiting at its command line, with the integration loaded.
-    case prompt
+    /// `lines` is how many lines the prompt takes, its command line included.
+    case prompt(lines: Int)
+    /// The command-line selection (the zsh region) appeared or went away.
+    case commandLineSelection(Bool)
+    /// The shell asks to put this text on the clipboard: what was copied or cut from the command line.
+    case clipboard(String)
     /// A command line was submitted.
     case commandStarted(String)
     /// The command finished.
@@ -15,13 +20,23 @@ public enum IntegrationEvent: Equatable, Sendable {
     /// Parses the payload after `ESC ] 6973 ;`, e.g. `prompt`, `exec;make test` or `done;1;2.5`.
     public init?(payload: String) {
         if payload == "prompt" {
-            self = .prompt
+            self = .prompt(lines: 1)
             return
         }
         let parts = payload.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
         guard parts.count == 2 else { return nil }
         let rest = String(parts[1])
         switch parts[0] {
+        case "prompt":
+            guard let lines = Int(rest), lines >= 1 else { return nil }
+            self = .prompt(lines: lines)
+        case "region":
+            guard rest == "0" || rest == "1" else { return nil }
+            self = .commandLineSelection(rest == "1")
+        case "clipboard":
+            // Base64, so any text survives the trip through an OSC string.
+            guard let data = Data(base64Encoded: rest) else { return nil }
+            self = .clipboard(String(decoding: data, as: UTF8.self))
         case "exec":
             self = .commandStarted(rest)
         case "done":

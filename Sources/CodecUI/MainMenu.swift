@@ -71,6 +71,8 @@ enum MainMenu {
         menu.addItem(.separator())
         menu.addItem(item("Restart Shell", #selector(W.restartShell(_:))))
         menu.addItem(item("Clear Buffer", #selector(W.clearBuffer(_:)), "k"))
+        menu.addItem(.separator())
+        menu.addItem(item("Switch Branch…", #selector(W.switchBranch(_:)), "b", [.command, .shift]))
         return menu
     }
 
@@ -80,6 +82,9 @@ enum MainMenu {
         menu.addItem(item("Copy", #selector(NSText.copy(_:)), "c"))
         menu.addItem(item("Paste", #selector(NSText.paste(_:)), "v"))
         menu.addItem(item("Select All", #selector(NSText.selectAll(_:)), "a"))
+        menu.addItem(.separator())
+        menu.addItem(item("Copy Output of Last Command", #selector(W.copyLastOutput(_:)), "c", [.command, .shift]))
+        menu.addItem(item("Select Output of Last Command", #selector(W.selectLastOutput(_:)), "a", [.command, .shift]))
         menu.addItem(.separator())
         let find = NSMenuItem(title: "Find", action: nil, keyEquivalent: "")
         let findMenu = NSMenu(title: "Find")

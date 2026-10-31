@@ -1,19 +1,29 @@
 import AppKit
+import Synchronization
 import SwiftTerm
 
-/// SwiftTerm's local-process view, with the bell routed to Codec instead of `NSSound.beep()`.
+/// SwiftTerm's local-process view, with the bell routed to Codec and a context menu.
 final class CodecTerminalView: LocalProcessTerminalView {
     var onBell: (() -> Void)?
-    private var relay: BellRelay!
+    /// Builds the menu shown on right-click when the running program isn't tracking the mouse.
+    var contextMenuProvider: ((NSEvent) -> NSMenu?)?
+    private var relay: BellRelay?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        relay = BellRelay(base: self)
+        let relay = BellRelay(base: self)
+        self.relay = relay
         terminalDelegate = relay
     }
 
+    @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not supported")
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        window?.makeFirstResponder(self)
+        return contextMenuProvider?(event) ?? super.menu(for: event)
     }
 
     fileprivate func ringBell() {
@@ -21,9 +31,9 @@ final class CodecTerminalView: LocalProcessTerminalView {
     }
 }
 
-/// `LocalProcessTerminalView` is its own `terminalDelegate` and inherits the default `bell`, which a
-/// subclass can't override. This relay stands in as the delegate, forwards everything to the view,
-/// and keeps the bell for itself.
+/// `LocalProcessTerminalView` is its own `terminalDelegate` and inherits the protocol's default `bell`,
+/// which a subclass can't override. This relay stands in as the delegate, forwards everything to the
+/// view, and keeps the bell for itself.
 @MainActor
 private final class BellRelay: TerminalViewDelegate {
     weak var base: CodecTerminalView?
@@ -99,41 +109,43 @@ private final class BellRelay: TerminalViewDelegate {
     }
 }
 
-/// Counts output batches on SwiftTerm's I/O thread so the main thread can turn them into a signal level.
-final class ActivityCounter: @unchecked Sendable {
-    private let lock = NSLock()
-    private var count = 0
+/// Counts output batches on SwiftTerm's I/O thread so the main thread can tell when output arrived.
+final class ActivityCounter: Sendable {
+    private let count = Mutex(0)
 
     func tick() {
-        lock.lock(); count += 1; lock.unlock()
+        count.withLock { $0 += 1 }
     }
 
+    /// The batches since the last drain.
     func drain() -> Int {
-        lock.lock(); defer { count = 0; lock.unlock() }
-        return count
+        count.withLock { value in
+            defer { value = 0 }
+            return value
+        }
     }
 }
 
-/// Reads the foreground program and working directory of a pty, the way Terminal.app titles its tabs.
-enum ProcessInspector {
-    static func foregroundProcess(ptyFD: Int32) -> pid_t? {
-        guard ptyFD >= 0 else { return nil }
-        let pgid = tcgetpgrp(ptyFD)
-        return pgid > 0 ? pgid : nil
+/// An `NSMenuItem` that runs a closure.
+final class ClosureMenuItem: NSMenuItem {
+    private let handler: () -> Void
+
+    init(_ title: String, key: String = "", modifiers: NSEvent.ModifierFlags = .command,
+         image: String? = nil, enabled: Bool = true, handler: @escaping () -> Void) {
+        self.handler = handler
+        super.init(title: title, action: #selector(fire), keyEquivalent: key)
+        target = self
+        keyEquivalentModifierMask = modifiers
+        isEnabled = enabled
+        if let image { self.image = NSImage(systemSymbolName: image, accessibilityDescription: nil) }
     }
 
-    static func name(of pid: pid_t) -> String? {
-        var buffer = [CChar](repeating: 0, count: 256)
-        guard proc_name(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
-        return String(cString: buffer)
+    @available(*, unavailable)
+    required init(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
     }
 
-    static func workingDirectory(of pid: pid_t) -> String? {
-        var info = proc_vnodepathinfo()
-        let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
-        guard proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, size) == size else { return nil }
-        return withUnsafePointer(to: &info.pvi_cdir.vip_path) {
-            $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
-        }
+    @objc private func fire() {
+        handler()
     }
 }

@@ -29,7 +29,7 @@
 	<key>NSSupportsAutomaticTermination</key>
 	<false/>
 	<key>NSHumanReadableCopyright</key>
-	<string>Kept you waiting, huh?</string>
+	<string>© 2026</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>A program running in Codec wants to control another app.</string>
 	<key>NSDesktopFolderUsageDescription</key>

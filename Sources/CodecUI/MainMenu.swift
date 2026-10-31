@@ -3,6 +3,8 @@ import AppKit
 /// The menu bar, built in code since there is no nib.
 @MainActor
 enum MainMenu {
+    private typealias W = TerminalWindowController
+
     static func build() -> NSMenu {
         let main = NSMenu()
         main.addItem(submenu(appMenu()))
@@ -32,9 +34,13 @@ enum MainMenu {
         return item
     }
 
+    private static func arrow(_ key: Int) -> String {
+        String(Character(UnicodeScalar(key)!))
+    }
+
     private static func appMenu() -> NSMenu {
         let menu = NSMenu(title: "Codec")
-        menu.addItem(item("About Codec", #selector(AppDelegate.showAbout(_:))))
+        menu.addItem(item("About Codec", #selector(NSApplication.orderFrontStandardAboutPanel(_:))))
         menu.addItem(.separator())
         menu.addItem(item("Settings…", #selector(AppDelegate.showSettings(_:)), ","))
         menu.addItem(.separator())
@@ -57,9 +63,14 @@ enum MainMenu {
         menu.addItem(item("New Window", #selector(AppDelegate.newWindow(_:)), "n"))
         menu.addItem(item("New Tab", #selector(AppDelegate.newTab(_:)), "t"))
         menu.addItem(.separator())
-        menu.addItem(item("Close", #selector(NSWindow.performClose(_:)), "w"))
+        menu.addItem(item("Split Right", #selector(W.splitRight(_:)), "d"))
+        menu.addItem(item("Split Down", #selector(W.splitDown(_:)), "d", [.command, .shift]))
         menu.addItem(.separator())
-        menu.addItem(item("Clear Buffer", #selector(ChannelWindowController.clearBuffer(_:)), "k"))
+        menu.addItem(item("Close Pane", #selector(W.closePane(_:)), "w"))
+        menu.addItem(item("Close Window", #selector(NSWindow.performClose(_:)), "w", [.command, .shift]))
+        menu.addItem(.separator())
+        menu.addItem(item("Restart Shell", #selector(W.restartShell(_:))))
+        menu.addItem(item("Clear Buffer", #selector(W.clearBuffer(_:)), "k"))
         return menu
     }
 
@@ -83,14 +94,18 @@ enum MainMenu {
 
     private static func viewMenu() -> NSMenu {
         let menu = NSMenu(title: "View")
-        menu.addItem(item("Bigger", #selector(ChannelWindowController.biggerFont(_:)), "+"))
-        let alternate = item("Bigger", #selector(ChannelWindowController.biggerFont(_:)), "=")
-        alternate.isAlternate = false
+        menu.addItem(item("Command Palette…", #selector(W.showCommandPalette(_:)), "p", [.command, .shift]))
+        menu.addItem(.separator())
+        menu.addItem(item("Jump to Previous Command", #selector(W.previousCommand(_:)), arrow(NSUpArrowFunctionKey)))
+        menu.addItem(item("Jump to Next Command", #selector(W.nextCommand(_:)), arrow(NSDownArrowFunctionKey)))
+        menu.addItem(.separator())
+        menu.addItem(item("Bigger", #selector(W.biggerFont(_:)), "+"))
+        let alternate = item("Bigger", #selector(W.biggerFont(_:)), "=")
         alternate.isHidden = true
         alternate.allowsKeyEquivalentWhenHidden = true
         menu.addItem(alternate)
-        menu.addItem(item("Smaller", #selector(ChannelWindowController.smallerFont(_:)), "-"))
-        menu.addItem(item("Actual Size", #selector(ChannelWindowController.resetFontSize(_:)), "0"))
+        menu.addItem(item("Smaller", #selector(W.smallerFont(_:)), "-"))
+        menu.addItem(item("Actual Size", #selector(W.resetFontSize(_:)), "0"))
         menu.addItem(.separator())
         menu.addItem(item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]))
         return menu
@@ -101,19 +116,34 @@ enum MainMenu {
         menu.addItem(item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"))
         menu.addItem(item("Zoom", #selector(NSWindow.performZoom(_:))))
         menu.addItem(.separator())
-        menu.addItem(item("Show Previous Tab", #selector(NSWindow.selectPreviousTab(_:)), "[", [.command, .shift]))
-        menu.addItem(item("Show Next Tab", #selector(NSWindow.selectNextTab(_:)), "]", [.command, .shift]))
-        menu.addItem(item("Move Tab to New Window", #selector(NSWindow.moveTabToNewWindow(_:))))
-        menu.addItem(item("Merge All Windows", #selector(NSWindow.mergeAllWindows(_:))))
-        menu.addItem(.separator())
-        let channels = NSMenuItem(title: "Tune to Channel", action: nil, keyEquivalent: "")
-        let channelsMenu = NSMenu(title: "Tune to Channel")
+        menu.addItem(item("Next Tab", #selector(W.nextTab(_:)), "]", [.command, .shift]))
+        menu.addItem(item("Previous Tab", #selector(W.previousTab(_:)), "[", [.command, .shift]))
+        let controlTab = item("Next Tab", #selector(W.nextTab(_:)), "\t", .control)
+        controlTab.isHidden = true
+        controlTab.allowsKeyEquivalentWhenHidden = true
+        menu.addItem(controlTab)
+        let controlShiftTab = item("Previous Tab", #selector(W.previousTab(_:)), "\t", [.control, .shift])
+        controlShiftTab.isHidden = true
+        controlShiftTab.allowsKeyEquivalentWhenHidden = true
+        menu.addItem(controlShiftTab)
+        let tabs = NSMenuItem(title: "Go to Tab", action: nil, keyEquivalent: "")
+        let tabsMenu = NSMenu(title: "Go to Tab")
         for n in 1...9 {
-            let title = n == 9 ? "Last Channel" : "Channel \(n)"
-            channelsMenu.addItem(item(title, #selector(AppDelegate.selectChannel(_:)), "\(n)", tag: n))
+            tabsMenu.addItem(item(n == 9 ? "Last Tab" : "Tab \(n)", #selector(W.selectTabByNumber(_:)), "\(n)", tag: n))
         }
-        channels.submenu = channelsMenu
-        menu.addItem(channels)
+        tabs.submenu = tabsMenu
+        menu.addItem(tabs)
+        menu.addItem(.separator())
+        menu.addItem(item("Next Pane", #selector(W.nextPane(_:)), "]"))
+        menu.addItem(item("Previous Pane", #selector(W.previousPane(_:)), "["))
+        let panes = NSMenuItem(title: "Focus Pane", action: nil, keyEquivalent: "")
+        let panesMenu = NSMenu(title: "Focus Pane")
+        panesMenu.addItem(item("Left", #selector(W.focusPaneLeft(_:)), arrow(NSLeftArrowFunctionKey), [.command, .option]))
+        panesMenu.addItem(item("Right", #selector(W.focusPaneRight(_:)), arrow(NSRightArrowFunctionKey), [.command, .option]))
+        panesMenu.addItem(item("Above", #selector(W.focusPaneUp(_:)), arrow(NSUpArrowFunctionKey), [.command, .option]))
+        panesMenu.addItem(item("Below", #selector(W.focusPaneDown(_:)), arrow(NSDownArrowFunctionKey), [.command, .option]))
+        panes.submenu = panesMenu
+        menu.addItem(panes)
         menu.addItem(.separator())
         menu.addItem(item("Bring All to Front", #selector(NSApplication.arrangeInFront(_:))))
         return menu

@@ -158,6 +158,41 @@ struct WindowTests {
         #expect(content.hitTest(content.convert(middle, from: nil))?.isDescendant(of: left.terminal) == true)
     }
 
+    @Test func middleClickClosesATab() throws {
+        let env = try TestEnvironment()
+        defer { env.tearDown() }
+        let controller = makeWindow(env)
+        defer { close(controller) }
+        controller.newTab(nil)
+        controller.window?.layoutIfNeeded()
+        controller.tabBar.layoutSubtreeIfNeeded()
+        #expect(controller.model.tabs.count == 2)
+
+        func catchers(in view: NSView) -> [MiddleClickCatcher.CatcherView] {
+            view.subviews.flatMap { ($0 as? MiddleClickCatcher.CatcherView).map { [$0] } ?? catchers(in: $0) }
+        }
+        let found = catchers(in: controller.tabBar)
+        #expect(found.count == 2)
+        let catcher = try #require(found.first)
+        let window = try #require(controller.window)
+        // At the screen's origin, window coordinates are screen coordinates, which events made from
+        // Core Graphics (the only way to set the middle button) carry.
+        window.setFrameOrigin(.zero)
+        let center = catcher.convert(NSPoint(x: catcher.bounds.midX, y: catcher.bounds.midY), to: nil)
+        let screenHeight = NSScreen.screens.first?.frame.height ?? 0
+        func event(_ type: CGEventType) -> NSEvent {
+            let cg = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: CGPoint(x: center.x, y: screenHeight - center.y),
+                             mouseButton: .center)!
+            return NSEvent(cgEvent: cg)!
+        }
+        let down = event(.otherMouseDown), up = event(.otherMouseUp)
+        try #require(up.buttonNumber == 2)
+        try #require(catcher.bounds.contains(catcher.convert(up.locationInWindow, from: nil)))
+        catcher.otherMouseDown(with: down)
+        catcher.otherMouseUp(with: up)
+        #expect(controller.model.tabs.count == 1)
+    }
+
     @Test func opensWithOneTabInTheRequestedDirectory() throws {
         let env = try TestEnvironment()
         defer { env.tearDown() }

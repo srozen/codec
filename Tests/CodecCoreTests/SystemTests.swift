@@ -135,3 +135,34 @@ struct ProcessInspectorTests {
         #expect(ProcessInspector.workingDirectory(of: -42) == nil)
     }
 }
+
+@Suite("RunningPrograms")
+struct RunningProgramsTests {
+    private let names: [pid_t: String] = [10: "zsh", 11: "npm", 12: "sleep", 13: "gitstatusd-darwin-arm64", 14: "zsh", 15: "npm"]
+
+    @Test func listsWhatClosingWouldEnd() {
+        let lookup = { (pid: pid_t) in names[pid] }
+        // At the prompt with a background job; the shell's own helpers don't count.
+        #expect(RunningPrograms.names(shell: 10, foreground: 10, children: [13, 14, 12], name: lookup) == ["sleep"])
+        // A foreground program comes first; each name once.
+        #expect(RunningPrograms.names(shell: 10, foreground: 11, children: [12, 11, 15], name: lookup) == ["npm", "sleep"])
+        #expect(RunningPrograms.names(shell: 10, foreground: 10, children: [], name: lookup).isEmpty)
+        #expect(RunningPrograms.names(shell: 10, foreground: nil, children: [99], name: lookup).isEmpty)
+    }
+
+    @Test func listsNamesInASentence() {
+        #expect(RunningPrograms.list(["make"]) == "“make”")
+        #expect(RunningPrograms.list(["make", "npm"]) == "“make” and “npm”")
+        #expect(RunningPrograms.list(["make", "npm", "ssh"]) == "“make”, “npm” and “ssh”")
+    }
+
+    @Test func findsChildProcesses() throws {
+        let child = Process()
+        child.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        child.arguments = ["5"]
+        try child.run()
+        defer { child.terminate() }
+        #expect(ProcessInspector.children(of: getpid()).contains(child.processIdentifier))
+        #expect(ProcessInspector.children(of: -1).isEmpty)
+    }
+}

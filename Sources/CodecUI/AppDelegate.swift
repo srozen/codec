@@ -59,10 +59,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, AppCoordinating {
             }
             return .terminateCancel
         }
-        guard windows.contains(where: \.hasRunningJobs) else { return .terminateNow }
+        var programs: [String] = []
+        for window in windows {
+            for program in window.runningPrograms where !programs.contains(program) { programs.append(program) }
+        }
+        guard !programs.isEmpty else { return .terminateNow }
         let alert = NSAlert()
         alert.messageText = "Quit Codec?"
-        alert.informativeText = "Some panes still have programs running. Quitting will terminate them."
+        alert.informativeText = "\(RunningPrograms.list(programs)) \(programs.count == 1 ? "is" : "are") still running. Quitting will terminate \(programs.count == 1 ? "it" : "them")."
         alert.addButton(withTitle: "Quit")
         alert.addButton(withTitle: "Cancel")
         return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel

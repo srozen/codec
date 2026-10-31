@@ -70,6 +70,45 @@ struct TabBar: View {
     }
 }
 
+/// Answers the middle mouse button only; every other click goes through to the views below.
+struct MiddleClickCatcher: NSViewRepresentable {
+    var action: () -> Void
+
+    final class CatcherView: NSView {
+        var action: () -> Void = {}
+        private var pressed = false
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            switch NSApp.currentEvent?.type {
+            case .otherMouseDown, .otherMouseUp, .otherMouseDragged: super.hitTest(point)
+            default: nil
+            }
+        }
+
+        override func otherMouseDown(with event: NSEvent) {
+            pressed = event.buttonNumber == 2
+            if !pressed { super.otherMouseDown(with: event) }
+        }
+
+        override func otherMouseUp(with event: NSEvent) {
+            guard event.buttonNumber == 2 else { return super.otherMouseUp(with: event) }
+            // Like a button: it counts if the release is still over the tab.
+            if pressed, bounds.contains(convert(event.locationInWindow, from: nil)) { action() }
+            pressed = false
+        }
+    }
+
+    func makeNSView(context: Context) -> CatcherView {
+        let view = CatcherView()
+        view.action = action
+        return view
+    }
+
+    func updateNSView(_ view: CatcherView, context: Context) {
+        view.action = action
+    }
+}
+
 @MainActor
 private func titleBarDoubleClicked() {
     guard let window = NSApp.keyWindow else { return }
@@ -153,6 +192,8 @@ private struct TabButton: View {
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: 9))
+        // A middle click closes the tab, as in browsers.
+        .overlay(MiddleClickCatcher { actions.close(tab) })
         .onTapGesture { actions.select(tab) }
         .simultaneousGesture(TapGesture(count: 2).onEnded { actions.beginRenaming(tab) })
         .onHover { hovering = $0 }

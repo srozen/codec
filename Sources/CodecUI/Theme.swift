@@ -1,5 +1,6 @@
 import AppKit
 import SwiftTerm
+import CodecCore
 
 /// A Codec colour scheme.
 struct CodecTheme: Identifiable, Equatable {
@@ -21,6 +22,18 @@ struct CodecTheme: Identifiable, Equatable {
     /// Hairlines between panes and around the bars.
     var divider: NSColor { foreground.withAlphaComponent(isDark ? 0.1 : 0.14) }
     var terminalPalette: [SwiftTerm.Color] { ansi.map(\.terminalColor) }
+
+    /// The pill behind a prompt chip of `color`: that color washed over the background, as `#rrggbb`.
+    func promptChipFill(_ color: PromptConfiguration.Color) -> String {
+        let mixed = background.blended(withFraction: isDark ? 0.18 : 0.16, of: ansi[color.ansiIndex]) ?? background
+        let c = mixed.usingColorSpace(.sRGB) ?? mixed
+        return String(format: "#%02x%02x%02x", Int(round(c.redComponent * 255)), Int(round(c.greenComponent * 255)),
+                      Int(round(c.blueComponent * 255)))
+    }
+
+    var promptChipFills: [PromptConfiguration.Color: String] {
+        Dictionary(uniqueKeysWithValues: PromptConfiguration.Color.allCases.map { ($0, promptChipFill($0)) })
+    }
 
     static let all: [CodecTheme] = [.codec, .arctic, .amber, .daylight]
 
@@ -58,7 +71,7 @@ extension CodecTheme {
         selection: NSColor(hex: 0x22374F),
         ansi: [
             0x0E1520, 0xFF6B7A, 0x7EE0A8, 0xF2D479, 0x6CB6FF, 0xB9A2FF, 0x74E3F0, 0xC3CEDB,
-            0x3C4B5E, 0xFF97A1, 0xA6F0C4, 0xFFE6A3, 0x9CCEFF, 0xD2C4FF, 0xA4F0F7, 0xF0F6FF,
+            0x5A6B82, 0xFF97A1, 0xA6F0C4, 0xFFE6A3, 0x9CCEFF, 0xD2C4FF, 0xA4F0F7, 0xF0F6FF,
         ].map(NSColor.init(hex:))
     )
 
@@ -74,7 +87,7 @@ extension CodecTheme {
         selection: NSColor(hex: 0x5A3A16),
         ansi: [
             0x1E140A, 0xFF6A4D, 0xB8D46A, 0xFFC857, 0x7FA8D9, 0xD98FB0, 0x7FC8B8, 0xE8D4B8,
-            0x5E4A33, 0xFF9478, 0xD2E88F, 0xFFDD8A, 0xA6C4E8, 0xEBB3CC, 0xA6E0D2, 0xFFF4E3,
+            0x7D6649, 0xFF9478, 0xD2E88F, 0xFFDD8A, 0xA6C4E8, 0xEBB3CC, 0xA6E0D2, 0xFFF4E3,
         ].map(NSColor.init(hex:))
     )
 

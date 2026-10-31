@@ -23,12 +23,24 @@ public struct ShellIntegration: Sendable {
 
     public var zshDirectory: URL { directory.appendingPathComponent("zsh") }
     public var zshScript: URL { zshDirectory.appendingPathComponent("codec-integration.zsh") }
+    /// Generated from `PromptConfiguration`; sourced before every prompt, so edits apply to open shells.
+    public var promptFile: URL { zshDirectory.appendingPathComponent("prompt.zsh") }
 
     /// Writes the scripts, replacing older versions.
     public func install(fileManager: FileManager = .default) throws {
         try fileManager.createDirectory(at: zshDirectory, withIntermediateDirectories: true)
         try Self.zshenv.write(to: zshDirectory.appendingPathComponent(".zshenv"), atomically: true, encoding: .utf8)
         try Self.zshHooks.write(to: zshScript, atomically: true, encoding: .utf8)
+        if !fileManager.fileExists(atPath: promptFile.path) {
+            try writePrompt(.default)
+        }
+    }
+
+    /// Writes the prompt open zsh sessions pick up at their next prompt.
+    public func writePrompt(_ configuration: PromptConfiguration,
+                            chipFills: [PromptConfiguration.Color: String] = [:]) throws {
+        try FileManager.default.createDirectory(at: zshDirectory, withIntermediateDirectories: true)
+        try configuration.zshScript(chipFills: chipFills).write(to: promptFile, atomically: true, encoding: .utf8)
     }
 
     /// Whether integration is available for `shell` (a path or a name).
@@ -45,6 +57,7 @@ public struct ShellIntegration: Sendable {
         }
         result["ZDOTDIR"] = zshDirectory.path
         result["CODEC_SHELL_INTEGRATION"] = zshScript.path
+        result["CODEC_PROMPT_FILE"] = promptFile.path
         return result
     }
 
@@ -72,6 +85,9 @@ public struct ShellIntegration: Sendable {
     typeset -gF _codec_started=0
     typeset -gi _codec_running=0
     typeset -gi _codec_status=0
+    # The last command's status and duration, for the prompt; zero when no command ran.
+    typeset -gi _codec_last_status=0
+    typeset -gF _codec_last_duration=0
 
     _codec_osc() { builtin print -rn -- $'\e]'"$1"$'\a' }
 
@@ -82,11 +98,17 @@ public struct ShellIntegration: Sendable {
     _codec_precmd() {
       if (( _codec_running )); then
         _codec_running=0
+        _codec_last_status=$_codec_status
+        _codec_last_duration=$(( EPOCHREALTIME - _codec_started ))
         _codec_osc "133;D;$_codec_status"
-        _codec_osc "6973;done;$_codec_status;$(( EPOCHREALTIME - _codec_started ))"
+        _codec_osc "6973;done;$_codec_status;$_codec_last_duration"
+      else
+        _codec_last_status=0
+        _codec_last_duration=0
       fi
       local dir=${PWD//\%/%25}
       _codec_osc "7;file://${HOST}${dir// /%20}"
+      [[ -n "$CODEC_PROMPT_FILE" && -r "$CODEC_PROMPT_FILE" ]] && source "$CODEC_PROMPT_FILE"
       _codec_osc "133;A"
       [[ "$PS1" == *$'\e]133;B'* ]] || PS1+=$'%{\e]133;B\a%}'
     }

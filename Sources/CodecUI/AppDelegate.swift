@@ -95,15 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, AppCoordinating {
 
     @objc func showSettings(_ sender: Any?) {
         if settingsWindow == nil {
-            let controller = NSHostingController(rootView: SettingsView(preferences: environment.preferences,
-                                                                        sounds: environment.sounds))
-            let window = NSWindow(contentViewController: controller)
-            window.title = "Settings"
-            window.styleMask = [.titled, .closable, .fullSizeContentView]
-            window.toolbarStyle = .preference
-            window.isReleasedWhenClosed = false
-            window.center()
-            settingsWindow = window
+            settingsWindow = SettingsView.makeWindow(preferences: environment.preferences, sounds: environment.sounds)
         }
         settingsWindow?.makeKeyAndOrderFront(nil)
     }

@@ -68,16 +68,18 @@ public enum Formatting {
         return String(format: "%dh %02dm", total / 3600, (total % 3600) / 60)
     }
 
-    /// A rate in bytes per second, scaled to fit a short readout: (`"1.2"`, `"MB/s"`).
+    /// A rate in bytes per second, scaled to fit a three-digit readout: (`"1.2"`, `"MB/s"`).
+    /// The value never needs more than three digits, so readouts keep a fixed width.
     public static func byteRate(_ bytesPerSecond: Double) -> (value: String, unit: String) {
-        let units = ["B/s", "KB/s", "MB/s", "GB/s"]
-        var value = max(0, bytesPerSecond)
+        let units = ["B/s", "KB/s", "MB/s", "GB/s", "TB/s"]
+        var value = bytesPerSecond.isFinite ? max(0, bytesPerSecond) : 0
         var unit = 0
-        while value >= 1000, unit < units.count - 1 {
+        // Scale before rounding would reach 1000, so "999.7 B/s" becomes "1.0 KB/s", not "1000 B/s".
+        while value >= 999.5, unit < units.count - 1 {
             value /= 1000
             unit += 1
         }
-        let text = value < 10 && unit > 0 ? String(format: "%.1f", value) : String(Int(value.rounded()))
+        let text = unit > 0 && value < 9.95 ? String(format: "%.1f", value) : String(Int(min(value, 999).rounded()))
         return (text, units[unit])
     }
 

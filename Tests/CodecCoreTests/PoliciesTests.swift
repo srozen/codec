@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import Synchronization
 @testable import CodecCore
 
 @Suite("ExitBehavior")
@@ -109,13 +110,13 @@ struct PreferencesTests {
         let (defaults, suite) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }
         let preferences = Preferences(defaults: defaults)
-        var posted = 0
+        let posted = Mutex(0)
         let token = NotificationCenter.default.addObserver(forName: Preferences.didChange, object: preferences, queue: nil) { _ in
-            posted += 1
+            posted.withLock { $0 += 1 }
         }
         defer { NotificationCenter.default.removeObserver(token) }
         preferences.blur = false
-        #expect(posted == 1)
+        #expect(posted.withLock { $0 } == 1)
     }
 
     @Test func resolvesTheShell() {
@@ -127,6 +128,18 @@ struct PreferencesTests {
         #expect(preferences.resolvedShell() == "/bin/sh")
         preferences.shellPath = "/no/such/shell"
         #expect(preferences.resolvedShell() == Preferences.loginShell)
+    }
+
+    @Test func persistsThePrompt() {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let first = Preferences(defaults: defaults)
+        #expect(first.prompt == .default)
+        first.prompt.style = .codec
+        first.prompt.symbol = "λ"
+        first.prompt.segments.swapAt(0, 1)
+        let second = Preferences(defaults: defaults)
+        #expect(second.prompt == first.prompt)
     }
 
     @Test func buildsTheAttentionPolicy() {

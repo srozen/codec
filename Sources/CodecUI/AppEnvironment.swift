@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import CodecCore
 
 /// Plays Codec's sound cues.
@@ -34,6 +35,7 @@ final class AppEnvironment {
     /// Nil when the scripts couldn't be installed; panes then run without integration.
     let shellIntegration: ShellIntegration?
     weak var coordinator: (any AppCoordinating)?
+    private var promptSync: AnyCancellable?
 
     init(preferences: Preferences, sounds: any SoundPlaying, notifier: any Notifying,
          systemMonitor: SystemMonitor, shellIntegration: ShellIntegration?) {
@@ -42,6 +44,19 @@ final class AppEnvironment {
         self.notifier = notifier
         self.systemMonitor = systemMonitor
         self.shellIntegration = shellIntegration
+        // Keep the prompt file in step with Settings; open zsh sessions read it at their next prompt.
+        if let shellIntegration {
+            // Chip colors come from the theme, so a theme change rewrites the prompt too.
+            promptSync = preferences.$prompt.combineLatest(preferences.$themeID)
+                .removeDuplicates { $0 == $1 }
+                .sink { configuration, themeID in
+                    do {
+                        try shellIntegration.writePrompt(configuration, chipFills: CodecTheme.named(themeID).promptChipFills)
+                    } catch {
+                        Log.app.error("Couldn't write the prompt: \(error.localizedDescription, privacy: .public)")
+                    }
+                }
+        }
     }
 
     /// The environment of the running app.

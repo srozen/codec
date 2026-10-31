@@ -77,6 +77,28 @@ struct FormattingTests {
         #expect(formatted.unit == unit)
     }
 
+    @Test(arguments: [(999.4, "999", "B/s"), (999.7, "1.0", "KB/s"), (9_960, "10", "KB/s"), (999_600, "1.0", "MB/s")])
+    func scalesBeforeRoundingReachesFourDigits(rate: Double, value: String, unit: String) {
+        let formatted = Formatting.byteRate(rate)
+        #expect(formatted.value == value)
+        #expect(formatted.unit == unit)
+    }
+
+    @Test(arguments: [Double.nan, .infinity, -.infinity])
+    func treatsNonFiniteRatesAsZero(rate: Double) {
+        #expect(Formatting.byteRate(rate).value == "0")
+    }
+
+    /// Readouts have room for three digits; no rate may need more.
+    @Test func byteRatesNeverNeedMoreThanThreeDigits() {
+        var rate = 0.0
+        while rate < 5e12 {
+            let digits = Formatting.byteRate(rate).value.filter(\.isNumber).count
+            #expect(digits <= 3, "\(rate) → \(Formatting.byteRate(rate))")
+            rate = rate * 1.37 + 1
+        }
+    }
+
     @Test func formatsByteCounts() {
         #expect(!Formatting.bytes(16 * 1_073_741_824).isEmpty)
         #expect(Formatting.bytes(16 * 1_073_741_824).contains("16"))

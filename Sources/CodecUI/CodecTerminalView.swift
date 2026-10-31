@@ -72,9 +72,10 @@ final class CodecTerminalView: LocalProcessTerminalView {
     override func mouseDown(with event: NSEvent) {
         pressClicks = event.clickCount
         dragged = false
+        // Clicking anywhere in a pane focuses it; SwiftTerm's own handling doesn't.
+        if window?.firstResponder !== self { window?.makeFirstResponder(self) }
         if shouldOwnPress?(event) == true {
             owningGesture = true
-            window?.makeFirstResponder(self)
             return
         }
         owningGesture = false

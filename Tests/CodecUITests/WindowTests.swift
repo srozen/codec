@@ -120,6 +120,44 @@ struct WindowTests {
         controller.window?.close()
     }
 
+    /// Regression: only the command line took focus; clicks elsewhere landed on the inactive-pane
+    /// dimmer, or reached a terminal that didn't take the keyboard.
+    @Test func clickingAnywhereInAPaneFocusesIt() throws {
+        let env = try TestEnvironment()
+        defer { env.tearDown() }
+        let controller = makeWindow(env)
+        defer { close(controller) }
+        let window = try #require(controller.window)
+        let content = try #require(window.contentView)
+        controller.splitRight(nil)
+        window.layoutIfNeeded()
+        let tab = try #require(controller.model.selected)
+        let (left, right) = (tab.panes[0], tab.panes[1])
+
+        func click(_ pane: Pane, at local: NSPoint) throws {
+            let point = pane.view.convert(local, to: nil)
+            let hit = try #require(content.hitTest(content.convert(point, from: nil)))
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                               windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+                if type == .leftMouseDown { hit.mouseDown(with: event) } else { hit.mouseUp(with: event) }
+            }
+        }
+
+        #expect(tab.focused === right)
+        // The middle of the output, well away from the command line, in a dimmed pane.
+        try click(left, at: NSPoint(x: left.view.bounds.midX, y: left.view.bounds.midY))
+        #expect(tab.focused === left)
+        #expect(window.firstResponder === left.terminal)
+        // The padding around the terminal.
+        try click(right, at: NSPoint(x: 4, y: right.view.bounds.midY))
+        #expect(tab.focused === right)
+        #expect(window.firstResponder === right.terminal)
+        // The dimmer never takes the click from the terminal.
+        let middle = left.view.convert(NSPoint(x: left.view.bounds.midX, y: left.view.bounds.midY), to: nil)
+        #expect(content.hitTest(content.convert(middle, from: nil))?.isDescendant(of: left.terminal) == true)
+    }
+
     @Test func opensWithOneTabInTheRequestedDirectory() throws {
         let env = try TestEnvironment()
         defer { env.tearDown() }

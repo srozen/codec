@@ -17,6 +17,17 @@ public enum GitInfo {
         return nil
     }
 
+    /// The root of the working tree containing `directory`, or nil outside a repository.
+    public static func workTreeRoot(containing directory: URL, fileManager: FileManager = .default) -> URL? {
+        var components = directory.standardizedFileURL.pathComponents
+        while !components.isEmpty {
+            let url = URL(fileURLWithPath: NSString.path(withComponents: components), isDirectory: true)
+            if gitDirectory(in: url, fileManager: fileManager) != nil { return url }
+            components.removeLast()
+        }
+        return nil
+    }
+
     /// The git directory for a working tree root, following the `gitdir:` file used by worktrees and submodules.
     private static func gitDirectory(in directory: URL, fileManager: FileManager) -> URL? {
         let dotGit = directory.appendingPathComponent(".git")

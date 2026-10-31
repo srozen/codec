@@ -23,6 +23,8 @@ final class CodecTerminalView: LocalProcessTerminalView {
     var canCopy: (() -> Bool)?
     var onCut: (() -> Void)?
     var canCut: (() -> Bool)?
+    /// Files dropped on the terminal, from Finder or the file tree.
+    var onDropFiles: (([URL]) -> Void)?
 
     private var relay: BellRelay?
     private var owningGesture = false
@@ -34,6 +36,25 @@ final class CodecTerminalView: LocalProcessTerminalView {
         let relay = BellRelay(base: self)
         self.relay = relay
         terminalDelegate = relay
+        registerForDraggedTypes([.fileURL])
+    }
+
+    // MARK: Dropping files
+
+    private func droppedFiles(_ info: any NSDraggingInfo) -> [URL] {
+        info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+    }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        onDropFiles != nil && !droppedFiles(sender).isEmpty ? .copy : []
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        let urls = droppedFiles(sender)
+        guard let onDropFiles, !urls.isEmpty else { return false }
+        onDropFiles(urls)
+        window?.makeFirstResponder(self)
+        return true
     }
 
     @available(*, unavailable)

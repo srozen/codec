@@ -11,6 +11,7 @@ final class WindowModel: ObservableObject {
     @Published var fullScreen = false
     /// The tab whose name is being edited in the tab bar.
     @Published var renamingTabID: UUID?
+    @Published var fileTreeVisible = false
 
     var selected: TerminalTab? { tabs.first { $0.id == selectedID } }
 }
@@ -23,6 +24,7 @@ struct TabBarActions {
     var close: (TerminalTab) -> Void
     var newTab: () -> Void
     var showPalette: () -> Void
+    var toggleFileTree: () -> Void = {}
     var beginRenaming: (TerminalTab) -> Void
     /// Ends an edit: a new name (blank resets it), or nil to cancel.
     var finishRenaming: (TerminalTab, String?) -> Void
@@ -37,6 +39,8 @@ struct TabBar: View {
 
     var body: some View {
         HStack(spacing: 6) {
+            BarIconButton(systemImage: "sidebar.left", help: model.fileTreeVisible ? "Hide File Tree (⇧⌘E)" : "Show File Tree (⇧⌘E)",
+                          active: model.fileTreeVisible, action: actions.toggleFileTree)
             HStack(spacing: 4) {
                 ForEach(Array(model.tabs.enumerated()), id: \.element.id) { index, tab in
                     TabButton(tab: tab, index: index, selected: tab.id == model.selectedID,
@@ -205,6 +209,7 @@ private struct TabNameEditor: View {
 private struct BarIconButton: View {
     let systemImage: String
     let help: String
+    var active = false
     var action: () -> Void
     @State private var hovering = false
 
@@ -213,11 +218,11 @@ private struct BarIconButton: View {
             Image(systemName: systemImage)
                 .font(.system(size: 12, weight: .medium))
                 .frame(width: 28, height: 28)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(hovering ? 0.08 : 0)))
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(active ? 0.1 : hovering ? 0.08 : 0)))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(active ? .primary : .secondary)
         .onHover { hovering = $0 }
         .help(help)
         .accessibilityLabel(help)

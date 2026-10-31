@@ -9,6 +9,9 @@ public final class Preferences: ObservableObject {
     public static let didChange = Notification.Name("CodecPreferencesDidChange")
 
     private let defaults: UserDefaults
+    /// Where state that isn't a setting is kept (the file tree's width, say): the same store, without
+    /// change notifications.
+    public var stateDefaults: UserDefaults { defaults }
 
     @Published public var themeID: String { didSet { store(themeID, .themeID) } }
     /// Empty means the system monospaced font (SF Mono).

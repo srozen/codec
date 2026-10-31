@@ -38,6 +38,10 @@ final class Session: ObservableObject {
     /// True once shell integration has reported in, so command status is known.
     @Published var integrated = false
     @Published var running: RunningCommand?
+    /// Part of the command line is selected (the zsh region).
+    @Published var commandLineSelection = false
+    /// How many lines the prompt takes, its command line included.
+    var promptLines = 1
     @Published var lastCommand: FinishedCommand?
 
     var abbreviatedDirectory: String {
@@ -62,9 +66,15 @@ final class Session: ObservableObject {
     func apply(_ event: IntegrationEvent, at date: Date = Date()) {
         integrated = true
         switch event {
-        case .prompt:
+        case .prompt(let lines):
+            promptLines = lines
+            commandLineSelection = false
+        case .commandLineSelection(let active):
+            commandLineSelection = active
+        case .clipboard:
             break
         case .commandStarted(let command):
+            commandLineSelection = false
             running = RunningCommand(command: command, started: date)
         case .commandFinished(let exitCode, let duration):
             lastCommand = FinishedCommand(command: running?.command ?? "", exitCode: exitCode, duration: duration)

@@ -152,6 +152,14 @@ private struct ShellSettings: View {
                 Text("Lets Codec track commands in zsh: exit status and duration in the status bar, ⌘↑ / ⌘↓ to jump between commands, and notifications when long commands finish. Your own startup files load unchanged. Applies to new panes.")
                     .foregroundStyle(.secondary)
             }
+            Section {
+                Toggle("Copy text as soon as it’s selected", isOn: $prefs.copyOnSelect)
+            } header: {
+                Text("Selection")
+            } footer: {
+                Text("Double-click selects a whole word, path, URL or address; triple-click selects a line. Hold ⌥ while dragging to select a rectangle. Right-click a command’s output to copy or select all of it.")
+                    .foregroundStyle(.secondary)
+            }
             Section("When the shell exits") {
                 Picker("When the shell exits", selection: $prefs.exitBehavior) {
                     ForEach(ExitBehavior.allCases) { Text($0.label).tag($0) }

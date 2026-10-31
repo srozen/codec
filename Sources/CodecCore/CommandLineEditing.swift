@@ -21,6 +21,14 @@ public enum CommandLineEditing {
         case moveToEnd
         case saveCursor
         case restoreCursor
+        /// Remembers the cursor as the fixed end of a selection being dragged.
+        case setAnchor
+        /// Moves the cursor back to the anchor.
+        case toAnchor
+        /// Sends the selected text to Codec for the clipboard.
+        case copy
+        /// Redraws the prompt with fresh information (after switching branches), keeping what's typed.
+        case refreshPrompt
 
         /// `ESC [ <code> ~`
         public var sequence: [UInt8] { Array("\u{1b}[\(rawValue)~".utf8) }
@@ -51,6 +59,17 @@ public enum CommandLineEditing {
             + Action.restoreCursor.sequence + steps(end)
     }
 
+    /// Puts the cursor at a click, `offset` cells from the cursor, and anchors a possible drag there.
+    public static func press(at offset: Int) -> [UInt8] {
+        Action.unmark.sequence + steps(offset) + Action.setAnchor.sequence
+    }
+
+    /// Selects from the anchor to `offset` cells from it, wherever earlier drag updates left the cursor.
+    public static func drag(to offset: Int) -> [UInt8] {
+        guard offset != 0 else { return Action.toAnchor.sequence + Action.unmark.sequence }
+        return Action.toAnchor.sequence + Action.mark.sequence + steps(offset)
+    }
+
     /// Where a point falls relative to the cursor's cell, in cells.
     public struct Hit: Equatable, Sendable {
         /// Rows below the cursor's row (negative above).
@@ -65,5 +84,10 @@ public enum CommandLineEditing {
         let row = Int(((caret.maxY - point.y) / caret.height).rounded(.down))
         let boundary = Int(((point.x - caret.minX) / caret.width).rounded())
         return Hit(row: row, boundary: boundary)
+    }
+
+    /// Cells from the cursor to a hit, reading wrapped rows of `columns` cells as one line.
+    public static func offset(of hit: Hit, columns: Int) -> Int {
+        hit.row * columns + hit.boundary
     }
 }

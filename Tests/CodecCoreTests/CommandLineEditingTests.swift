@@ -31,6 +31,19 @@ struct CommandLineEditingUnitTests {
                 [.unmark, .saveCursor] + Array(repeating: .stepLeft, count: 5) + [.mark, .restoreCursor, .stepRight, .stepRight])
     }
 
+    @Test func pressAnchorsAndDragsMeasureFromTheAnchor() {
+        #expect(decode(CommandLineEditing.press(at: -2)) == [.unmark, .stepLeft, .stepLeft, .setAnchor])
+        #expect(decode(CommandLineEditing.drag(to: 3)) == [.toAnchor, .mark, .stepRight, .stepRight, .stepRight])
+        #expect(decode(CommandLineEditing.drag(to: -1)) == [.toAnchor, .mark, .stepLeft])
+        #expect(decode(CommandLineEditing.drag(to: 0)) == [.toAnchor, .unmark])
+    }
+
+    @Test func offsetsSpanWrappedRows() {
+        #expect(CommandLineEditing.offset(of: .init(row: 0, boundary: -3), columns: 80) == -3)
+        #expect(CommandLineEditing.offset(of: .init(row: 1, boundary: -70), columns: 80) == 10)
+        #expect(CommandLineEditing.offset(of: .init(row: -1, boundary: 5), columns: 80) == -75)
+    }
+
     @Test func onlyLineMovesFallBackToReadline() {
         #expect(Action.moveToStart.readlineFallback == [0x01])
         #expect(Action.moveToEnd.readlineFallback == [0x05])

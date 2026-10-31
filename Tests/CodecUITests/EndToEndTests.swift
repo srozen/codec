@@ -74,12 +74,15 @@ struct EndToEndTests {
 
         pane.terminal.send(txt: "echo old")
         #expect(await waitUntil { pane.terminal.visibleRowsText(0..<5).joined().contains("echo old") })
-        let caret = window.convertFromScreen(pane.terminal.firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil))
-        let onCommandLine = NSPoint(x: caret.minX - 3 * caret.width, y: caret.midY)
-        let aboveIt = NSPoint(x: caret.minX - 3 * caret.width, y: caret.midY + 3 * caret.height)
-
-        pane.pointerReleased(press: aboveIt, release: aboveIt, clicks: 3, dragged: false)
-        pane.pointerReleased(press: onCommandLine, release: onCommandLine, clicks: 3, dragged: false)
+        let grid = try #require(TerminalGrid(terminal: pane.terminal))
+        func press(at point: NSPoint) -> NSEvent {
+            NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [], timestamp: 0,
+                               windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 3, pressure: 1)!
+        }
+        let onCommandLine = NSPoint(x: grid.caret.minX - 3 * grid.caret.width, y: grid.caret.midY)
+        let aboveIt = NSPoint(x: onCommandLine.x, y: grid.caret.midY + 3 * grid.caret.height)
+        #expect(!pane.beginCommandLineGesture(press(at: aboveIt)))
+        #expect(pane.beginCommandLineGesture(press(at: onCommandLine)))
         pane.terminal.send(txt: "echo new\r")
         #expect(await waitUntil { pane.session.lastCommand != nil })
         #expect(pane.session.lastCommand?.command == "echo new")

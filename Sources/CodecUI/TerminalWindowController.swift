@@ -379,6 +379,21 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
 
     @objc func clearBuffer(_ sender: Any?) { focusedPane?.clearBuffer() }
 
+    @objc func switchBranch(_ sender: Any?) {
+        guard let pane = focusedPane else { return NSSound.beep() }
+        pane.showBranchPicker()
+    }
+
+    @objc func copyLastOutput(_ sender: Any?) {
+        guard let pane = focusedPane, let output = pane.lastOutputRange else { return NSSound.beep() }
+        pane.copyOutput(output)
+    }
+
+    @objc func selectLastOutput(_ sender: Any?) {
+        guard let pane = focusedPane, let output = pane.lastOutputRange else { return NSSound.beep() }
+        pane.selectOutput(output)
+    }
+
     @objc func moveToStartOfCommandLine(_ sender: Any?) { focusedPane?.editCommandLine(.moveToStart) }
     @objc func moveToEndOfCommandLine(_ sender: Any?) { focusedPane?.editCommandLine(.moveToEnd) }
     @objc func selectToStartOfCommandLine(_ sender: Any?) { focusedPane?.editCommandLine(.selectToStart) }
@@ -428,6 +443,15 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
             .init(id: "previous-command", title: "Jump to Previous Command", shortcut: "⌘↑", systemImage: "arrow.up.to.line") { [weak self] in self?.previousCommand(nil) },
             .init(id: "next-command", title: "Jump to Next Command", shortcut: "⌘↓", systemImage: "arrow.down.to.line") { [weak self] in self?.nextCommand(nil) },
             .init(id: "clear", title: "Clear Buffer", shortcut: "⌘K", systemImage: "eraser") { [weak self] in self?.clearBuffer(nil) },
+            .init(id: "copy-output", title: "Copy Output of Last Command", shortcut: "⇧⌘C", systemImage: "doc.on.doc.fill") { [weak self] in
+                self?.copyLastOutput(nil)
+            },
+            .init(id: "select-output", title: "Select Output of Last Command", shortcut: "⇧⌘A", systemImage: "text.line.first.and.arrowtriangle.forward") { [weak self] in
+                self?.selectLastOutput(nil)
+            },
+            .init(id: "switch-branch", title: "Switch Branch…", shortcut: "⇧⌘B", systemImage: "arrow.triangle.branch") { [weak self] in
+                self?.switchBranch(nil)
+            },
             .init(id: "restart", title: "Restart Shell", systemImage: "arrow.clockwise") { [weak self] in self?.restartShell(nil) },
             .init(id: "rename-tab", title: "Rename Tab…", shortcut: "⇧⌘R", systemImage: "pencil") { [weak self] in self?.renameTab(nil) },
             .init(id: "find", title: "Find…", shortcut: "⌘F", systemImage: "magnifyingglass") { [weak self] in

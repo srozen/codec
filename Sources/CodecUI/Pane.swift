@@ -1,5 +1,6 @@
 import AppKit
 import SwiftTerm
+import SwiftUI
 import CodecCore
 
 /// What a pane needs from the window that holds it.
@@ -47,20 +48,51 @@ final class Pane: LocalProcessTerminalViewDelegate {
         terminal.processDelegate = self
         terminal.bellStyle = .sound
         terminal.onBell = { [weak self] in self?.handleBell() }
-        terminal.contextMenuProvider = { [weak self] _ in self?.contextMenu() }
-        terminal.onPointerPress = { [weak self] in self?.hasCommandLineSelection = false }
-        terminal.onPointerRelease = { [weak self] press, release, clicks, dragged in
-            self?.pointerReleased(press: press, release: release, clicks: clicks, dragged: dragged)
+        terminal.contextMenuProvider = { [weak self] event in self?.contextMenu(at: event.locationInWindow) }
+        terminal.shouldOwnPress = { [weak self] event in
+            guard let self else { return false }
+            return self.pressBranch(event) || self.beginCommandLineGesture(event)
         }
-        terminal.canCut = { [weak self] in self?.canCutCommandLineSelection ?? false }
+        terminal.onOwnedDrag = { [weak self] event in self?.continueCommandLineGesture(event) }
+        terminal.onOwnedRelease = { [weak self] _ in
+            guard let self else { return }
+            if self.pressedBranch { self.pressedBranch = false } else { self.endCommandLineGesture() }
+        }
+        terminal.addSubview(branchHotspot)
+        terminal.onRelease = { [weak self] clicks, dragged, point in
+            self?.terminalGestureEnded(clicks: clicks, dragged: dragged, at: point)
+        }
+        terminal.onCopy = { [weak self] in self?.copyCommandLineSelection() ?? false }
+        terminal.canCopy = { [weak self] in self?.hasCommandLineSelection ?? false }
         terminal.onCut = { [weak self] in self?.cutCommandLineSelection() }
+        terminal.canCut = { [weak self] in self?.hasCommandLineSelection ?? false }
         let counter = activity
         terminal.setProcessOutputHandler { counter.tick() }
+        let terminalOnAnyQueue = terminal
         oscObservation = terminal.observeOscEvents { [weak self] event in
-            guard event.code == IntegrationEvent.oscCode,
-                  let parsed = IntegrationEvent(payload: String(decoding: event.payload, as: UTF8.self)) else { return }
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated { self?.handle(parsed) }
+            let payload = String(decoding: event.payload, as: UTF8.self)
+            switch event.code {
+            case 133 where payload == "B":
+                // The prompt ends here; what follows on this row is the command line.
+                let column = event.cursor.col
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { self?.promptEndColumn = column }
+                }
+            case 133 where payload == "C":
+                // Output is about to start. Capture the screen right away, while the command line is
+                // surely still on it; the block is worked out once zsh reports which command it was.
+                let rows = terminalOnAnyQueue.terminalContentSnapshot(region: .history(maximumScrollbackRows: 500))
+                    .map(Pane.screenRows)
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { self?.pendingCommandScreen = rows }
+                }
+            case IntegrationEvent.oscCode:
+                guard let parsed = IntegrationEvent(payload: payload) else { return }
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { self?.handle(parsed) }
+                }
+            default:
+                return
             }
         }
 
@@ -126,6 +158,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
         isShutDown = true
         timer?.invalidate()
         oscObservation?.cancel()
+        branchPopover?.close()
         if terminal.process.running { terminal.terminate() }
         environment.notifier.clear(id: session.id.uuidString)
     }
@@ -155,6 +188,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
         }
         ticks += 1
         if ticks % 4 == 0 { pollProcess() }
+        updateBranchHotspot()
     }
 
     private func pollProcess() {
@@ -180,8 +214,20 @@ final class Pane: LocalProcessTerminalViewDelegate {
     // MARK: - Shell integration
 
     func handle(_ event: IntegrationEvent) {
+        if case .clipboard(let text) = event {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            return
+        }
         let command = session.running?.command ?? ""
         session.apply(event)
+        if case .commandStarted(let started) = event, let screen = pendingCommandScreen {
+            pendingCommandScreen = nil
+            if let block = CommandBlocks.locate(command: started, in: screen.rows, cursorRow: screen.cursorRow,
+                                                promptLines: session.promptLines) {
+                blocks.record(block)
+            }
+        }
         guard case .commandFinished(let exitCode, let duration) = event else { return }
         refreshGitBranch()
         let reaction = preferences.attentionPolicy.reactionToFinishedCommand(
@@ -210,37 +256,72 @@ final class Pane: LocalProcessTerminalViewDelegate {
             && terminal.terminalInputStateSnapshot()?.isAlternateBuffer == false
     }
 
-    /// The last mouse selection was turned into the shell's selection and is still showing.
-    private var hasCommandLineSelection = false
-
-    var canCutCommandLineSelection: Bool {
-        hasCommandLineSelection && terminal.selectionActive && isAtCommandLine
+    /// Part of the command line is selected: zsh's region, the only highlight on the command line.
+    var hasCommandLineSelection: Bool {
+        isAtCommandLine && session.commandLineSelection
     }
 
-    /// Turns a finished drag, double-click or triple-click on the command line into the shell's
-    /// selection. Selections elsewhere (earlier output) stay ordinary terminal selections.
-    func pointerReleased(press: NSPoint, release: NSPoint, clicks: Int, dragged: Bool) {
-        guard isAtCommandLine, let window = view.window else { return }
-        let caretOnScreen = terminal.firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil)
-        guard caretOnScreen != .zero else { return }
-        let caret = window.convertFromScreen(caretOnScreen)
-        guard let start = CommandLineEditing.hit(press, caret: caret),
-              let end = CommandLineEditing.hit(release, caret: caret),
-              start.row == 0, end.row == 0 else { return }
-        let bytes: [UInt8]
-        if dragged {
-            guard terminal.selectionActive, start.boundary != end.boundary else { return }
-            bytes = CommandLineEditing.select(from: start.boundary, to: end.boundary)
-        } else if clicks == 2 {
-            // The first click already moved the cursor there.
-            bytes = CommandLineEditing.Action.selectWord.sequence
-        } else if clicks >= 3 {
-            bytes = CommandLineEditing.Action.selectAll.sequence
-        } else {
-            return
+    /// A gesture Codec owns on the command line: measured against the cursor where the press began,
+    /// since zsh moves the cursor while it runs.
+    private struct CommandLineGesture {
+        var caret: CGRect
+        var columns: Int
+        var anchor: Int
+        var dragOffset = 0
+    }
+
+    private var commandLineGesture: CommandLineGesture?
+
+    /// Takes a plain press on the command line's row: click to place the cursor, drag to select,
+    /// double-click for a word, triple-click for the whole command. Elsewhere, the terminal handles it.
+    func beginCommandLineGesture(_ event: NSEvent) -> Bool {
+        guard isAtCommandLine, event.type == .leftMouseDown,
+              event.modifierFlags.intersection([.shift, .option, .command, .control]).isEmpty,
+              terminal.currentMouseMode == .off,
+              let grid = TerminalGrid(terminal: terminal),
+              let hit = CommandLineEditing.hit(event.locationInWindow, caret: grid.caret), hit.row == 0 else { return false }
+        terminal.selectNone()
+        commandLineGesture = nil
+        switch event.clickCount {
+        case 1:
+            terminal.send(CommandLineEditing.press(at: hit.boundary))
+            commandLineGesture = CommandLineGesture(caret: grid.caret, columns: grid.columns, anchor: hit.boundary)
+        case 2:
+            // The first click put the cursor there.
+            terminal.send(CommandLineEditing.Action.selectWord.sequence)
+        default:
+            terminal.send(CommandLineEditing.Action.selectAll.sequence)
         }
-        terminal.send(bytes)
-        hasCommandLineSelection = true
+        return true
+    }
+
+    func continueCommandLineGesture(_ event: NSEvent) {
+        guard var gesture = commandLineGesture,
+              let hit = CommandLineEditing.hit(event.locationInWindow, caret: gesture.caret) else { return }
+        let offset = CommandLineEditing.offset(of: hit, columns: gesture.columns) - gesture.anchor
+        guard offset != gesture.dragOffset else { return }
+        terminal.send(CommandLineEditing.drag(to: offset))
+        gesture.dragOffset = offset
+        commandLineGesture = gesture
+    }
+
+    func endCommandLineGesture() {
+        commandLineGesture = nil
+        // zsh copies only if something ended up selected.
+        if preferences.copyOnSelect { terminal.send(CommandLineEditing.Action.copy.sequence) }
+    }
+
+    /// Copies the command-line selection. False when the terminal's own selection should be copied.
+    func copyCommandLineSelection() -> Bool {
+        guard !terminal.selectionActive, hasCommandLineSelection else { return false }
+        terminal.send(CommandLineEditing.Action.copy.sequence)
+        return true
+    }
+
+    /// Copies the selected part of the command line and removes it.
+    func cutCommandLineSelection() {
+        guard hasCommandLineSelection else { return }
+        terminal.send(CommandLineEditing.Action.cut.sequence)
     }
 
     /// Runs a command-line editing action. Outside Codec's zsh, falls back to readline's keys where
@@ -254,12 +335,200 @@ final class Pane: LocalProcessTerminalViewDelegate {
         }
     }
 
-    /// Copies the selected part of the command line and removes it.
-    func cutCommandLineSelection() {
-        guard canCutCommandLineSelection else { return }
-        terminal.copy(self)
-        terminal.send(CommandLineEditing.Action.cut.sequence)
-        hasCommandLineSelection = false
+    // MARK: - Selecting text
+
+    /// After the terminal handled a click or drag: widen double-click selections to the whole token,
+    /// and copy the selection when copy-on-select is on.
+    func terminalGestureEnded(clicks: Int, dragged: Bool, at point: NSPoint) {
+        if clicks == 2, !dragged, terminal.currentMouseMode == .off {
+            selectWholeToken(at: point)
+        }
+        if preferences.copyOnSelect, terminal.selectionActive, let text = terminal.getSelection(), !text.isEmpty {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        }
+    }
+
+    /// Selects the path, URL, email, `host:port`… under a point, where the terminal's own word
+    /// selection stops at punctuation.
+    func selectWholeToken(at point: NSPoint) {
+        guard let grid = TerminalGrid(terminal: terminal) else { return }
+        let cell = grid.cell(at: point)
+        guard let line = grid.logicalLine(containing: cell.row),
+              let index = line.cells.firstIndex(where: { $0.row == cell.row && $0.column == cell.column }),
+              let range = SmartSelection.range(in: line.characters, at: index) else { return }
+        let token = String(line.characters[range])
+        guard terminal.getSelection() != token else { return }
+        let first = line.cells[range.lowerBound], last = line.cells[range.upperBound - 1]
+        terminal.selectByDragging(from: grid.center(row: first.row, column: first.column),
+                                  to: grid.trailingEdge(row: last.row, column: last.column))
+    }
+
+    // MARK: - Command output
+
+    /// Where each command's prompt and output begin.
+    private(set) var blocks = CommandBlocks()
+    /// The screen as it was when the newest command's output began.
+    private var pendingCommandScreen: (rows: [ScreenRow], cursorRow: Int)?
+
+    nonisolated static func screenRows(_ snapshot: TerminalContentSnapshot) -> (rows: [ScreenRow], cursorRow: Int) {
+        (snapshot.rows.map { ScreenRow(row: $0.absoluteRow, text: $0.text, isWrapped: $0.isWrapped) }, snapshot.cursorRow)
+    }
+
+    /// Where the newest block ends: the current prompt's first row at the prompt, or past the last line
+    /// while a command runs.
+    private var newestBlockEnd: Int? {
+        guard let snapshot = terminal.terminalContentSnapshot(region: .history(maximumScrollbackRows: 0)) else { return nil }
+        guard session.running == nil, session.integrated else { return snapshot.cursorRow + 1 }
+        let screen = Pane.screenRows(snapshot)
+        return CommandBlocks.promptStart(cursorRow: screen.cursorRow, in: screen.rows, promptLines: session.promptLines)
+    }
+
+    /// The output of the command whose block holds a window point.
+    func outputRange(at point: NSPoint) -> Range<Int>? {
+        guard let grid = TerminalGrid(terminal: terminal), let end = newestBlockEnd,
+              let index = blocks.index(containing: grid.viewportTop + grid.cell(at: point).row) else { return nil }
+        return blocks.outputRange(of: index, end: end)
+    }
+
+    /// The output of the most recent command that has finished.
+    var lastOutputRange: Range<Int>? {
+        guard let last = blocks.blocks.indices.last, let end = newestBlockEnd else { return nil }
+        let index = session.running == nil ? last : last - 1
+        return blocks.outputRange(of: index, end: end)
+    }
+
+    /// The text of some rows, with soft-wrapped lines rejoined and trailing blank space removed.
+    func text(of range: Range<Int>) -> String? {
+        guard let snapshot = terminal.terminalContentSnapshot(
+            region: .history(maximumScrollbackRows: CodecTerminalView.scrollback)) else { return nil }
+        var lines: [String] = []
+        for row in snapshot.rows where range.contains(row.absoluteRow) {
+            let text = row.text.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
+            if row.isWrapped, !lines.isEmpty { lines[lines.count - 1] += text } else { lines.append(text) }
+        }
+        while lines.last?.isEmpty == true { lines.removeLast() }
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+
+    func copyOutput(_ range: Range<Int>) {
+        guard let text = text(of: range) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    /// Selects some rows on screen, scrolling to bring them in when needed.
+    func selectOutput(_ range: Range<Int>) {
+        guard var grid = TerminalGrid(terminal: terminal), !range.isEmpty else { return }
+        let visibleRows = grid.rows.count
+        if !(grid.viewportTop..<(grid.viewportTop + visibleRows)).contains(range.lowerBound) {
+            terminal.scrollTo(row: range.lowerBound - grid.bufferRowOffset)
+            guard let scrolled = TerminalGrid(terminal: terminal) else { return }
+            grid = scrolled
+        }
+        let first = range.lowerBound - grid.viewportTop, last = range.upperBound - 1
+        let lastColumn = grid.columns - 1
+        if last < grid.viewportTop + visibleRows {
+            terminal.selectByDragging(from: grid.center(row: first, column: 0),
+                                      to: grid.trailingEdge(row: last - grid.viewportTop, column: lastColumn))
+            return
+        }
+        // Taller than the screen: start here, then scroll to the end and extend, as Shift-click does.
+        terminal.selectByDragging(from: grid.center(row: first, column: 0), to: grid.trailingEdge(row: first, column: lastColumn))
+        terminal.scrollTo(row: last - grid.bufferRowOffset - visibleRows + 1)
+        guard let end = TerminalGrid(terminal: terminal) else { return }
+        terminal.extendSelection(to: end.trailingEdge(row: last - end.viewportTop, column: lastColumn))
+    }
+
+    // MARK: - Switching branches
+
+    /// Where the prompt ends on the command line's first row, from the 133;B mark zsh draws there.
+    private var promptEndColumn: Int?
+    private var pressedBranch = false
+    private let branchHotspot = BranchHotspot()
+    private var branchPopover: NSPopover?
+    private var branchPopoverClosed: NSObjectProtocol?
+
+    var isShowingBranchPicker: Bool { branchPopover?.isShown == true }
+
+    /// The branch in the prompt on screen, in window coordinates. Only the prompt counts: not what's
+    /// typed after it, nor older prompts, whose directory may be another repository.
+    func promptBranchFrame() -> NSRect? {
+        guard isAtCommandLine, let branch = session.gitBranch, let grid = TerminalGrid(terminal: terminal) else { return nil }
+        let screen = grid.rows.map { ScreenRow(row: $0.absoluteRow, text: $0.text, isWrapped: $0.isWrapped) }
+        let top = grid.viewportTop
+        let start = CommandBlocks.promptStart(cursorRow: top + grid.cursorVisibleRow, in: screen,
+                                              promptLines: session.promptLines) - top
+        let commandRow = start + max(session.promptLines - 1, 0)
+        guard grid.rows.indices.contains(commandRow) else { return nil }
+        for row in max(start, 0)...commandRow {
+            var cells = grid.cells(ofRow: row)
+            if row == commandRow {
+                guard let end = promptEndColumn else { continue }
+                cells = cells.filter { $0.column < end }
+            }
+            guard let range = PromptBranch.range(of: branch, in: cells.map(\.character)) else { continue }
+            let first = cells[range.lowerBound], last = cells[range.upperBound - 1]
+            return grid.frame(row: row, columns: first.column..<(last.column + last.width))
+        }
+        return nil
+    }
+
+    /// A plain click on the prompt's branch opens the branch picker.
+    func pressBranch(_ event: NSEvent) -> Bool {
+        guard event.type == .leftMouseDown,
+              event.modifierFlags.intersection([.shift, .option, .command, .control]).isEmpty,
+              terminal.currentMouseMode == .off,
+              let branch = promptBranchFrame(), branch.contains(event.locationInWindow) else { return false }
+        pressedBranch = true
+        // The first click opened it; the rest of a double-click shouldn't select anything.
+        if event.clickCount == 1 { showBranchPicker(at: branch) }
+        return true
+    }
+
+    /// Opens the branch picker under `anchor` (window coordinates): by default the prompt's branch, or
+    /// the cursor when the prompt doesn't show it.
+    func showBranchPicker(at anchor: NSRect? = nil) {
+        guard session.gitBranch != nil, terminal.window != nil,
+              let rect = anchor ?? promptBranchFrame() ?? TerminalGrid(terminal: terminal)?.caret else { return NSSound.beep() }
+        branchPopover?.close()
+        let popover = NSPopover()
+        popover.behavior = .transient
+        let picker = BranchPicker(
+            repository: GitRepository(directory: URL(fileURLWithPath: session.directory)), theme: preferences.theme,
+            onSwitched: { [weak self] in self?.gitBranchDidChange() },
+            onDismiss: { [weak popover] in popover?.performClose(nil) })
+        let controller = NSHostingController(rootView: picker)
+        controller.sizingOptions = .preferredContentSize
+        popover.contentViewController = controller
+        branchPopoverClosed = NotificationCenter.default.addObserver(
+            forName: NSPopover.didCloseNotification, object: popover, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.branchPickerDidClose() }
+        }
+        branchPopover = popover
+        popover.show(relativeTo: terminal.convert(rect, from: nil), of: terminal, preferredEdge: .minY)
+    }
+
+    private func branchPickerDidClose() {
+        if let branchPopoverClosed { NotificationCenter.default.removeObserver(branchPopoverClosed) }
+        branchPopoverClosed = nil
+        branchPopover = nil
+        terminal.window?.makeFirstResponder(terminal)
+    }
+
+    /// Shows the pointing hand over the prompt's branch while the mouse is over the terminal.
+    private func updateBranchHotspot() {
+        guard let window = terminal.window, session.gitBranch != nil,
+              terminal.bounds.contains(terminal.convert(window.mouseLocationOutsideOfEventStream, from: nil)) else {
+            return branchHotspot.place(at: nil)
+        }
+        branchHotspot.place(at: promptBranchFrame().map { terminal.convert($0, from: nil) })
+    }
+
+    /// The branch changed outside the shell: update the status bar, and the prompt if it's showing.
+    func gitBranchDidChange() {
+        refreshGitBranch()
+        if isAtCommandLine { terminal.send(CommandLineEditing.Action.refreshPrompt.sequence) }
     }
 
     // MARK: - Bell & attention
@@ -315,13 +584,14 @@ final class Pane: LocalProcessTerminalViewDelegate {
 
     // MARK: - Context menu
 
-    func contextMenu() -> NSMenu {
+    /// The pane's context menu, for a right-click at `point` (window coordinates) when there is one.
+    func contextMenu(at point: NSPoint? = nil) -> NSMenu {
         let menu = NSMenu(title: "Pane")
         let selection = terminal.getSelection() ?? ""
         let canPaste = NSPasteboard.general.string(forType: .string) != nil
         let directory = session.directory
 
-        menu.addItem(ClosureMenuItem("Cut", key: "x", image: "scissors", enabled: canCutCommandLineSelection) { [weak self] in
+        menu.addItem(ClosureMenuItem("Cut", key: "x", image: "scissors", enabled: hasCommandLineSelection) { [weak self] in
             self?.cutCommandLineSelection()
         })
         menu.addItem(ClosureMenuItem("Copy", key: "c", image: "doc.on.doc", enabled: !selection.isEmpty) { [weak self] in
@@ -332,6 +602,13 @@ final class Pane: LocalProcessTerminalViewDelegate {
         })
         menu.addItem(ClosureMenuItem("Select All", key: "a") { [weak self] in
             self?.terminal.selectAll()
+        })
+        let output = point.flatMap(outputRange(at:)) ?? lastOutputRange
+        menu.addItem(ClosureMenuItem("Copy Output", image: "doc.on.doc.fill", enabled: output != nil) { [weak self] in
+            if let output { self?.copyOutput(output) }
+        })
+        menu.addItem(ClosureMenuItem("Select Output", image: "text.line.first.and.arrowtriangle.forward", enabled: output != nil) { [weak self] in
+            if let output { self?.selectOutput(output) }
         })
         menu.addItem(.separator())
         menu.addItem(ClosureMenuItem("Split Right", key: "d", image: "rectangle.split.2x1") { [weak self] in
@@ -361,6 +638,12 @@ final class Pane: LocalProcessTerminalViewDelegate {
         menu.addItem(ClosureMenuItem("Copy Path", image: "link", enabled: !directory.isEmpty) {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(directory, forType: .string)
+        })
+        let clicked = point.map { NSRect(x: $0.x, y: $0.y, width: 1, height: 1) }
+        menu.addItem(ClosureMenuItem("Switch Branch…", key: "b", modifiers: [.command, .shift], image: "arrow.triangle.branch",
+                                     enabled: session.gitBranch != nil) { [weak self] in
+            guard let self else { return }
+            self.showBranchPicker(at: self.promptBranchFrame() ?? clicked)
         })
         menu.addItem(.separator())
         menu.addItem(ClosureMenuItem("Close Pane", key: "w", image: "xmark") { [weak self] in

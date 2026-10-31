@@ -30,6 +30,8 @@ public final class Preferences: ObservableObject {
     @Published public var shellPath: String { didSet { store(shellPath, .shellPath) } }
     @Published public var showSystemStats: Bool { didSet { store(showSystemStats, .showSystemStats) } }
     @Published public var prompt: PromptConfiguration { didSet { storePrompt() } }
+    /// Copies text to the clipboard as soon as it's selected.
+    @Published public var copyOnSelect: Bool { didSet { store(copyOnSelect, .copyOnSelect) } }
 
     /// Commands that run at least this long notify you when they finish in the background.
     public let longCommandThreshold: TimeInterval = 10
@@ -37,7 +39,7 @@ public final class Preferences: ObservableObject {
     private enum Key: String {
         case themeID, fontName, fontSize, opacity, blur, scanlines, dimInactivePanes, bell, notifyInBackground,
              codecSounds, paneSounds, soundVolume, optionAsMeta, exitBehavior, shellIntegration, shellPath,
-             showSystemStats, prompt
+             showSystemStats, prompt, copyOnSelect
     }
 
     private static let factoryDefaults: [Key: Any] = [
@@ -58,6 +60,7 @@ public final class Preferences: ObservableObject {
         .shellIntegration: true,
         .shellPath: "",
         .showSystemStats: true,
+        .copyOnSelect: false,
     ]
 
     public init(defaults: UserDefaults) {
@@ -80,6 +83,7 @@ public final class Preferences: ObservableObject {
         shellIntegration = defaults.bool(forKey: Key.shellIntegration.rawValue)
         shellPath = defaults.string(forKey: Key.shellPath.rawValue) ?? ""
         showSystemStats = defaults.bool(forKey: Key.showSystemStats.rawValue)
+        copyOnSelect = defaults.bool(forKey: Key.copyOnSelect.rawValue)
         prompt = defaults.data(forKey: Key.prompt.rawValue)
             .flatMap { try? JSONDecoder().decode(PromptConfiguration.self, from: $0) } ?? .default
     }

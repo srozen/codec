@@ -5,8 +5,18 @@ import Foundation
 @Suite("IntegrationEvent")
 struct IntegrationEventTests {
     @Test func parsesPrompts() {
-        #expect(IntegrationEvent(payload: "prompt") == .prompt)
+        #expect(IntegrationEvent(payload: "prompt") == .prompt(lines: 1))
+        #expect(IntegrationEvent(payload: "prompt;3") == .prompt(lines: 3))
+        #expect(IntegrationEvent(payload: "prompt;0") == nil)
         #expect(IntegrationEvent(payload: "prompted") == nil)
+    }
+
+    @Test func parsesSelectionStateAndClipboard() {
+        #expect(IntegrationEvent(payload: "region;1") == .commandLineSelection(true))
+        #expect(IntegrationEvent(payload: "region;0") == .commandLineSelection(false))
+        #expect(IntegrationEvent(payload: "region;2") == nil)
+        #expect(IntegrationEvent(payload: "clipboard;aMOpbGxvIHdvcmxk") == .clipboard("héllo world"))
+        #expect(IntegrationEvent(payload: "clipboard;not base64!") == nil)
     }
 
     @Test func parsesCommandStart() {

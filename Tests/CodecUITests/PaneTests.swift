@@ -282,3 +282,29 @@ struct PaneContextMenuTests {
         #expect(pane.view.menu(for: event)?.itemTitles.contains("Close Pane") == true)
     }
 }
+
+@Suite("Running programs", .serialized, .timeLimit(.minutes(1)))
+@MainActor
+struct RunningProgramsPaneTests {
+    @Test func countsBackgroundJobsAndForegroundPrograms() async throws {
+        let env = try TestEnvironment()
+        defer { env.tearDown() }
+        let pane = env.makePane(host: FakeHost())
+        defer { pane.shutDown() }
+        #expect(await waitUntil { pane.terminal.process.running })
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(pane.runningPrograms.isEmpty)
+        #expect(!pane.hasRunningJob)
+
+        // In the background: the shell is at its prompt, but closing would still kill it.
+        pane.terminal.send(txt: "sleep 30 &\n")
+        #expect(await waitUntil { pane.runningPrograms == ["sleep"] })
+        #expect(pane.hasRunningJob)
+        pane.terminal.send(txt: "kill %1\n")
+        #expect(await waitUntil { pane.runningPrograms.isEmpty })
+
+        // In the foreground.
+        pane.terminal.send(txt: "sleep 30\n")
+        #expect(await waitUntil { pane.runningPrograms == ["sleep"] })
+    }
+}

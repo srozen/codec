@@ -173,12 +173,16 @@ final class Pane: LocalProcessTerminalViewDelegate {
         environment.notifier.clear(id: session.id.uuidString)
     }
 
-    /// A program other than the shell is in the foreground.
-    var hasRunningJob: Bool {
-        guard session.exitStatus == nil, terminal.process.running,
-              let pid = ProcessInspector.foregroundProcess(ptyFD: terminal.process.childfd) else { return false }
-        return pid != terminal.process.shellPid
+    /// What closing this pane would terminate: the program in the foreground and any background jobs.
+    var runningPrograms: [String] {
+        guard session.exitStatus == nil, terminal.process.running else { return [] }
+        let shell = terminal.process.shellPid
+        return RunningPrograms.names(shell: shell, foreground: ProcessInspector.foregroundProcess(ptyFD: terminal.process.childfd),
+                                     children: ProcessInspector.children(of: shell), name: ProcessInspector.name(of:))
     }
+
+    /// Closing this pane would end something besides the shell.
+    var hasRunningJob: Bool { !runningPrograms.isEmpty }
 
     // MARK: - Polling
 

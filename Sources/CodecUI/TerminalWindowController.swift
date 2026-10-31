@@ -509,20 +509,31 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     /// Asks before closing panes that have programs running in them.
     private func confirmClosing(_ panes: [Pane], what: String, then close: @escaping () -> Void) {
-        let busy = panes.filter(\.hasRunningJob)
-        guard !busy.isEmpty, let window else {
+        var programs: [String] = []
+        for pane in panes {
+            for program in pane.runningPrograms where !programs.contains(program) { programs.append(program) }
+        }
+        guard !programs.isEmpty, let window else {
             close()
             return
         }
         let alert = NSAlert()
         alert.messageText = "Close \(what)?"
-        let names = busy.map { "“\($0.session.processName)”" }.joined(separator: ", ")
-        alert.informativeText = "\(names) \(busy.count == 1 ? "is" : "are") still running and will be terminated."
+        alert.informativeText = "\(RunningPrograms.list(programs)) \(programs.count == 1 ? "is" : "are") still running and will be terminated."
         alert.addButton(withTitle: "Close")
         alert.addButton(withTitle: "Cancel")
         alert.beginSheetModal(for: window) { response in
             if response == .alertFirstButtonReturn { close() }
         }
+    }
+
+    /// Everything the window's panes would terminate if it closed, each program once.
+    var runningPrograms: [String] {
+        var programs: [String] = []
+        for pane in allPanes {
+            for program in pane.runningPrograms where !programs.contains(program) { programs.append(program) }
+        }
+        return programs
     }
 
     var hasRunningJobs: Bool {

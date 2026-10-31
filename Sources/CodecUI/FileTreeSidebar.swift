@@ -210,10 +210,14 @@ final class FileTreeSidebar: NSView {
         let kind = model.status.kind(of: node.relativePath)
         let current = node.isDirectory && node.url.path == model.currentDirectory?.path
         let color: NSColor = kind.map(theme.color(for:)) ?? .labelColor
+        let icon = node.isDirectory
+            ? FileIcons.image(for: FolderType.of(folderNamed: node.name),
+                              state: current ? .current : outline.isItemExpanded(node) ? .open : .closed, theme: theme)
+            : FileIcons.image(for: FileType.of(fileNamed: node.name), theme: theme)
         cell.show(name: node.name,
                   detail: isSearching ? (node.relativePath as NSString).deletingLastPathComponent : nil,
-                  symbol: FileIcons.symbol(for: node),
-                  symbolColor: current ? theme.accent : (kind == .ignored ? .tertiaryLabelColor : .secondaryLabelColor),
+                  icon: icon,
+                  dimmed: kind == .ignored,
                   nameColor: color,
                   bold: current,
                   badge: kind?.badge ?? (node.isDirectory && model.status.containsChanges(node.relativePath) ? "•" : ""),
@@ -312,6 +316,22 @@ extension FileTreeSidebar: NSOutlineViewDataSource, NSOutlineViewDelegate {
         let cell = outlineView.makeView(withIdentifier: FileCell.identifier, owner: nil) as? FileCell ?? FileCell()
         configure(cell, for: node)
         return cell
+    }
+
+    func outlineViewItemDidExpand(_ notification: Notification) {
+        refreshFolderIcon(notification)
+    }
+
+    func outlineViewItemDidCollapse(_ notification: Notification) {
+        refreshFolderIcon(notification)
+    }
+
+    /// Folders show open while expanded.
+    private func refreshFolderIcon(_ notification: Notification) {
+        guard let node = notification.userInfo?["NSObject"] as? FileNode else { return }
+        let row = outline.row(forItem: node)
+        guard row >= 0, let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? FileCell else { return }
+        configure(cell, for: node)
     }
 
     func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> (any NSPasteboardWriting)? {
@@ -439,7 +459,7 @@ final class FileCell: NSTableCellView {
         identifier = Self.identifier
         imageView = icon
         textField = name
-        icon.symbolConfiguration = .init(pointSize: 12, weight: .regular)
+        icon.imageScaling = .scaleNone
         name.lineBreakMode = .byTruncatingMiddle
         detail.lineBreakMode = .byTruncatingHead
         detail.textColor = .tertiaryLabelColor
@@ -473,15 +493,15 @@ final class FileCell: NSTableCellView {
         fatalError("init(coder:) is not supported")
     }
 
-    func show(name text: String, detail folder: String?, symbol: String, symbolColor: NSColor, nameColor: NSColor,
+    func show(name text: String, detail folder: String?, icon image: NSImage, dimmed: Bool, nameColor: NSColor,
               bold: Bool, badge letter: String, badgeColor: NSColor) {
         name.stringValue = text
         name.font = .systemFont(ofSize: 12, weight: bold ? .semibold : .regular)
         name.textColor = nameColor
         detail.stringValue = folder ?? ""
         detail.isHidden = folder?.isEmpty ?? true
-        icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        icon.contentTintColor = symbolColor
+        icon.image = image
+        icon.alphaValue = dimmed ? 0.45 : 1
         badge.stringValue = letter
         badge.textColor = badgeColor
         setAccessibilityLabel(letter.isEmpty || letter == "•" ? text : "\(text), \(letter)")
@@ -556,44 +576,6 @@ private struct HeaderButton: View {
         .onHover { hovering = $0 }
         .help(help)
         .accessibilityLabel(help)
-    }
-}
-
-/// SF Symbols for files, by kind.
-enum FileIcons {
-    @MainActor
-    static func symbol(for node: FileNode) -> String {
-        if node.isDirectory { return "folder" }
-        return symbol(forFileNamed: node.name)
-    }
-
-    static func symbol(forFileNamed name: String) -> String {
-        let lower = name.lowercased()
-        let ext = (lower as NSString).pathExtension
-        switch lower {
-        case "dockerfile", "makefile", "package.swift", "gemfile", "podfile": return "hammer"
-        case "license", "licence", "license.md", "license.txt": return "checkmark.seal"
-        default: break
-        }
-        if lower.hasPrefix("readme") { return "book.closed" }
-        if lower.hasPrefix(".git") || lower.hasPrefix(".env") || lower.hasSuffix("rc") && lower.hasPrefix(".") { return "gearshape" }
-        switch ext {
-        case "swift": return "swift"
-        case "md", "markdown", "txt", "rtf": return "doc.plaintext"
-        case "json", "yaml", "yml", "toml", "plist", "xml", "ini", "conf": return "curlybraces"
-        case "sh", "zsh", "bash", "fish", "command": return "terminal"
-        case "png", "jpg", "jpeg", "gif", "heic", "webp", "svg", "icns", "ico", "tiff": return "photo"
-        case "mp3", "wav", "aiff", "m4a", "flac", "caf": return "waveform"
-        case "mp4", "mov", "m4v", "webm": return "film"
-        case "pdf": return "doc.richtext"
-        case "zip", "gz", "tar", "tgz", "xz", "bz2", "7z", "dmg": return "archivebox"
-        case "lock", "resolved": return "lock"
-        case "log": return "list.bullet.rectangle"
-        case "html", "htm", "css", "scss": return "globe"
-        case "js", "ts", "jsx", "tsx", "py", "rb", "go", "rs", "c", "h", "m", "mm", "cpp", "hpp", "java", "kt", "cs", "php", "lua", "sql":
-            return "chevron.left.forwardslash.chevron.right"
-        default: return "doc"
-        }
     }
 }
 

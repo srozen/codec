@@ -148,6 +148,16 @@ struct FileTreeWindowTests {
         let outline = controller.sidebar.outline
         let names = (0..<outline.numberOfRows).compactMap { (outline.item(atRow: $0) as? FileNode)?.name }
         #expect(names == ["Sources", "App", "main.swift", "Lib.swift", "build.log", "new.txt", "README.md"])
+        let theme = env.preferences.theme
+        func icon(_ name: String) -> NSImage? {
+            let row = (0..<outline.numberOfRows).first { (outline.item(atRow: $0) as? FileNode)?.name == name } ?? -1
+            return (outline.view(atColumn: 0, row: row, makeIfNecessary: true) as? NSTableCellView)?.imageView?.image
+        }
+        #expect(icon("main.swift") === FileIcons.image(for: .swift, theme: theme))
+        #expect(icon("README.md") === FileIcons.image(for: .readme, theme: theme))
+        #expect(icon("Sources") === FileIcons.image(for: .source, state: .open, theme: theme))
+        // The current directory takes the accent.
+        #expect(icon("App") === FileIcons.image(for: .plain, state: .current, theme: theme))
 
         controller.toggleFileTree(nil)
         controller.window?.layoutIfNeeded()

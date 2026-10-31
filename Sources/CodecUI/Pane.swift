@@ -48,6 +48,12 @@ final class Pane: LocalProcessTerminalViewDelegate {
         terminal.bellStyle = .sound
         terminal.onBell = { [weak self] in self?.handleBell() }
         terminal.contextMenuProvider = { [weak self] _ in self?.contextMenu() }
+        terminal.onPointerPress = { [weak self] in self?.hasCommandLineSelection = false }
+        terminal.onPointerRelease = { [weak self] press, release, clicks, dragged in
+            self?.pointerReleased(press: press, release: release, clicks: clicks, dragged: dragged)
+        }
+        terminal.canCut = { [weak self] in self?.canCutCommandLineSelection ?? false }
+        terminal.onCut = { [weak self] in self?.cutCommandLineSelection() }
         let counter = activity
         terminal.setProcessOutputHandler { counter.tick() }
         oscObservation = terminal.observeOscEvents { [weak self] event in
@@ -78,6 +84,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
         env["TERM_PROGRAM_VERSION"] = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
         env["CODEC_PANE_ID"] = session.id.uuidString
         if env["LANG"] == nil { env["LANG"] = "en_US.UTF-8" }
+        env["CODEC_SELECTION_STYLE"] = "bg=" + preferences.theme.selection.hexString
         if preferences.shellIntegration, let integration = environment.shellIntegration {
             env = integration.environment(env, forShell: shell)
         }
@@ -194,6 +201,67 @@ final class Pane: LocalProcessTerminalViewDelegate {
         }
     }
 
+    // MARK: - Editing the command line
+
+    /// The shell is waiting at its prompt with Codec's integration loaded, so its command line can be
+    /// edited like a text field. Never true while a program runs, so editing keys can't reach it.
+    var isAtCommandLine: Bool {
+        session.integrated && session.running == nil && session.exitStatus == nil && !isShutDown
+            && terminal.terminalInputStateSnapshot()?.isAlternateBuffer == false
+    }
+
+    /// The last mouse selection was turned into the shell's selection and is still showing.
+    private var hasCommandLineSelection = false
+
+    var canCutCommandLineSelection: Bool {
+        hasCommandLineSelection && terminal.selectionActive && isAtCommandLine
+    }
+
+    /// Turns a finished drag, double-click or triple-click on the command line into the shell's
+    /// selection. Selections elsewhere (earlier output) stay ordinary terminal selections.
+    func pointerReleased(press: NSPoint, release: NSPoint, clicks: Int, dragged: Bool) {
+        guard isAtCommandLine, let window = view.window else { return }
+        let caretOnScreen = terminal.firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil)
+        guard caretOnScreen != .zero else { return }
+        let caret = window.convertFromScreen(caretOnScreen)
+        guard let start = CommandLineEditing.hit(press, caret: caret),
+              let end = CommandLineEditing.hit(release, caret: caret),
+              start.row == 0, end.row == 0 else { return }
+        let bytes: [UInt8]
+        if dragged {
+            guard terminal.selectionActive, start.boundary != end.boundary else { return }
+            bytes = CommandLineEditing.select(from: start.boundary, to: end.boundary)
+        } else if clicks == 2 {
+            // The first click already moved the cursor there.
+            bytes = CommandLineEditing.Action.selectWord.sequence
+        } else if clicks >= 3 {
+            bytes = CommandLineEditing.Action.selectAll.sequence
+        } else {
+            return
+        }
+        terminal.send(bytes)
+        hasCommandLineSelection = true
+    }
+
+    /// Runs a command-line editing action. Outside Codec's zsh, falls back to readline's keys where
+    /// they mean the same thing, and does nothing in full-screen programs.
+    func editCommandLine(_ action: CommandLineEditing.Action) {
+        if isAtCommandLine {
+            terminal.send(action.sequence)
+        } else if session.exitStatus == nil, terminal.terminalInputStateSnapshot()?.isAlternateBuffer == false,
+                  let fallback = action.readlineFallback {
+            terminal.send(fallback)
+        }
+    }
+
+    /// Copies the selected part of the command line and removes it.
+    func cutCommandLineSelection() {
+        guard canCutCommandLineSelection else { return }
+        terminal.copy(self)
+        terminal.send(CommandLineEditing.Action.cut.sequence)
+        hasCommandLineSelection = false
+    }
+
     // MARK: - Bell & attention
 
     func handleBell() {
@@ -253,6 +321,9 @@ final class Pane: LocalProcessTerminalViewDelegate {
         let canPaste = NSPasteboard.general.string(forType: .string) != nil
         let directory = session.directory
 
+        menu.addItem(ClosureMenuItem("Cut", key: "x", image: "scissors", enabled: canCutCommandLineSelection) { [weak self] in
+            self?.cutCommandLineSelection()
+        })
         menu.addItem(ClosureMenuItem("Copy", key: "c", image: "doc.on.doc", enabled: !selection.isEmpty) { [weak self] in
             self?.terminal.copy(self as Any)
         })

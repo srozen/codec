@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import AppKit
 import CodecCore
 @testable import CodecUI
 
@@ -44,6 +45,59 @@ struct EndToEndTests {
         #expect(pane.session.lastCommand?.exitCode == 0)
         #expect((pane.session.lastCommand?.duration ?? 0) >= 0.3)
         #expect(pane.session.running == nil)
+    }
+
+    /// The command line can be edited at the first prompt, before any command ran, and never while one runs.
+    @Test func knowsWhenTheCommandLineIsEditable() async throws {
+        let env = try TestEnvironment(shell: "/bin/zsh", integration: true)
+        defer { env.tearDown() }
+        let pane = try makeZshPane(env, host: FakeHost())
+        defer { pane.shutDown() }
+        #expect(await waitUntil { pane.isAtCommandLine })
+        pane.terminal.send(txt: "sleep 1\r")
+        #expect(await waitUntil { pane.session.running != nil })
+        #expect(!pane.isAtCommandLine)
+        #expect(await waitUntil { pane.isAtCommandLine })
+    }
+
+    /// A triple-click on the command line selects it, so typing replaces it; one on earlier output doesn't.
+    @Test func tripleClickSelectsTheCommandLine() async throws {
+        let env = try TestEnvironment(shell: "/bin/zsh", integration: true)
+        defer { env.tearDown() }
+        let pane = try makeZshPane(env, host: FakeHost())
+        defer { pane.shutDown() }
+        let window = makeTestWindow()
+        defer { window.close() }
+        window.contentView = pane.view
+        pane.view.layoutSubtreeIfNeeded()
+        #expect(await waitUntil { pane.isAtCommandLine })
+
+        pane.terminal.send(txt: "echo old")
+        #expect(await waitUntil { pane.terminal.visibleRowsText(0..<5).joined().contains("echo old") })
+        let caret = window.convertFromScreen(pane.terminal.firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil))
+        let onCommandLine = NSPoint(x: caret.minX - 3 * caret.width, y: caret.midY)
+        let aboveIt = NSPoint(x: caret.minX - 3 * caret.width, y: caret.midY + 3 * caret.height)
+
+        pane.pointerReleased(press: aboveIt, release: aboveIt, clicks: 3, dragged: false)
+        pane.pointerReleased(press: onCommandLine, release: onCommandLine, clicks: 3, dragged: false)
+        pane.terminal.send(txt: "echo new\r")
+        #expect(await waitUntil { pane.session.lastCommand != nil })
+        #expect(pane.session.lastCommand?.command == "echo new")
+    }
+
+    @Test func editingShortcutsDriveTheShell() async throws {
+        let env = try TestEnvironment(shell: "/bin/zsh", integration: true)
+        defer { env.tearDown() }
+        let pane = try makeZshPane(env, host: FakeHost())
+        defer { pane.shutDown() }
+        #expect(await waitUntil { pane.isAtCommandLine })
+        pane.terminal.send(txt: "cho hi")
+        pane.editCommandLine(.moveToStart)
+        pane.terminal.send(txt: "e")
+        pane.editCommandLine(.moveToEnd)
+        pane.terminal.send(txt: " there\r")
+        #expect(await waitUntil { pane.session.lastCommand != nil })
+        #expect(pane.session.lastCommand?.command == "echo hi there")
     }
 
     @Test func exitClosesThePane() async throws {

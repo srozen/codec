@@ -4,6 +4,11 @@ import Foundation
 
 @Suite("IntegrationEvent")
 struct IntegrationEventTests {
+    @Test func parsesPrompts() {
+        #expect(IntegrationEvent(payload: "prompt") == .prompt)
+        #expect(IntegrationEvent(payload: "prompted") == nil)
+    }
+
     @Test func parsesCommandStart() {
         #expect(IntegrationEvent(payload: "exec;make test") == .commandStarted("make test"))
     }

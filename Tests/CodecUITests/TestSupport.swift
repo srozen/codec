@@ -91,6 +91,17 @@ final class TestEnvironment {
     }
 }
 
+/// A window for hosting views in tests. `isReleasedWhenClosed` is off: AppKit's default (on) makes
+/// `close()` release the window a second time under ARC, which crashes later in an autorelease pool.
+@MainActor
+func makeTestWindow(size: NSSize = NSSize(width: 700, height: 400)) -> NSWindow {
+    _ = NSApplication.shared
+    let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled],
+                          backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    return window
+}
+
 /// Polls `condition` while letting the main queue run, until it holds or `timeout` passes.
 @MainActor
 func waitUntil(timeout: Duration = .seconds(15), _ condition: () -> Bool) async -> Bool {

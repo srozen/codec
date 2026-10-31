@@ -5,13 +5,19 @@ public enum IntegrationEvent: Equatable, Sendable {
     /// The OSC code the integration scripts use.
     public static let oscCode = 6973
 
+    /// A prompt is showing: the shell is waiting at its command line, with the integration loaded.
+    case prompt
     /// A command line was submitted.
     case commandStarted(String)
     /// The command finished.
     case commandFinished(exitCode: Int32, duration: TimeInterval)
 
-    /// Parses the payload after `ESC ] 6973 ;`, e.g. `exec;make test` or `done;1;2.5`.
+    /// Parses the payload after `ESC ] 6973 ;`, e.g. `prompt`, `exec;make test` or `done;1;2.5`.
     public init?(payload: String) {
+        if payload == "prompt" {
+            self = .prompt
+            return
+        }
         let parts = payload.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
         guard parts.count == 2 else { return nil }
         let rest = String(parts[1])

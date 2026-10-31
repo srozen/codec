@@ -144,3 +144,35 @@ struct PromptSampleTests {
         #expect(!sample.time.isEmpty && !sample.date.isEmpty)
     }
 }
+
+@Suite("Main menu")
+@MainActor
+struct MainMenuTests {
+    private func item(_ menu: NSMenu, path: [String]) -> NSMenuItem? {
+        var current: NSMenu? = menu
+        var found: NSMenuItem?
+        for title in path {
+            found = current?.items.first { $0.title == title }
+            current = found?.submenu
+        }
+        return found
+    }
+
+    @Test func offersCommandLineEditingShortcuts() throws {
+        _ = NSApplication.shared
+        let menu = MainMenu.build()
+        let cut = try #require(item(menu, path: ["Edit", "Cut"]))
+        #expect(cut.keyEquivalent == "x" && cut.keyEquivalentModifierMask == .command)
+        let left = String(Character(UnicodeScalar(NSLeftArrowFunctionKey)!))
+        let right = String(Character(UnicodeScalar(NSRightArrowFunctionKey)!))
+        let expected: [(String, String, NSEvent.ModifierFlags)] = [
+            ("Move to Start", left, .command), ("Move to End", right, .command),
+            ("Select to Start", left, [.command, .shift]), ("Select to End", right, [.command, .shift]),
+            ("Delete to Start", "\u{8}", .command),
+        ]
+        for (title, key, modifiers) in expected {
+            let entry = try #require(item(menu, path: ["Edit", "Command Line", title]), "\(title)")
+            #expect(entry.keyEquivalent == key && entry.keyEquivalentModifierMask == modifiers, "\(title)")
+        }
+    }
+}

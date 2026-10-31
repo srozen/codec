@@ -62,6 +62,8 @@ final class Session: ObservableObject {
     func apply(_ event: IntegrationEvent, at date: Date = Date()) {
         integrated = true
         switch event {
+        case .prompt:
+            break
         case .commandStarted(let command):
             running = RunningCommand(command: command, started: date)
         case .commandFinished(let exitCode, let duration):

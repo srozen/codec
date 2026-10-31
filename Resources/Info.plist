@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>Codec</string>
+	<key>CFBundleDisplayName</key>
+	<string>Codec</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.srozen.codec</string>
+	<key>CFBundleExecutable</key>
+	<string>Codec</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>26.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.developer-tools</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSSupportsAutomaticTermination</key>
+	<false/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Kept you waiting, huh?</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>A program running in Codec wants to control another app.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>A program running in Codec wants to access your Desktop folder.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>A program running in Codec wants to access your Documents folder.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>A program running in Codec wants to access your Downloads folder.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>A program running in Codec wants to access removable volumes.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>A program running in Codec wants to access network volumes.</string>
+</dict>
+</plist>

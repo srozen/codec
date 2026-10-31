@@ -21,9 +21,17 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
     private var tabObservers: [UUID: AnyCancellable] = [:]
     private var cancellables: Set<AnyCancellable> = []
     private var firstResponderObservation: NSKeyValueObservation?
+    let fileTree: FileTreeModel
+    private(set) var sidebar: FileTreeSidebar!
+    private var sidebarWidth: NSLayoutConstraint!
+    private var focusedDirectory: AnyCancellable?
+    private weak var followedPane: Pane?
+    private static let fileTreeVisibleKey = "FileTreeVisible"
+    private static let fileTreeWidthKey = "FileTreeWidth"
 
     init(directory: String?, environment: AppEnvironment) {
         self.environment = environment
+        fileTree = FileTreeModel(defaults: environment.preferences.stateDefaults)
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: Self.defaultSize(font: environment.preferences.font())),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -49,6 +57,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
         applyPreferences()
         observeEnvironment()
         addTab(directory: directory)
+        setFileTreeVisible(preferences.stateDefaults.bool(forKey: Self.fileTreeVisibleKey))
     }
 
     @available(*, unavailable)
@@ -81,14 +90,22 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
                 close: { [weak self] in self?.requestClose(tab: $0) },
                 newTab: { [weak self] in self?.newTab(nil) },
                 showPalette: { [weak self] in self?.showCommandPalette(nil) },
+                toggleFileTree: { [weak self] in self?.toggleFileTree(nil) },
                 beginRenaming: { [weak self] in self?.beginRenaming($0) },
                 finishRenaming: { [weak self] in self?.finishRenaming($0, to: $1) })))
         statusBar = PassthroughHostingView(rootView: StatusBar(model: model, preferences: preferences,
                                                                monitor: environment.systemMonitor))
         palette = PassthroughHostingView(rootView: AnyView(EmptyView()))
         palette.capturesMouse = false
+        sidebar = FileTreeSidebar(model: fileTree, theme: preferences.theme)
+        sidebar.actions = fileTreeActions()
+        sidebar.onResize = { [weak self] width in self?.resizeFileTree(to: width) }
+        sidebar.isHidden = true
+        let storedWidth = preferences.stateDefaults.double(forKey: Self.fileTreeWidthKey)
+        sidebarWidth = sidebar.widthAnchor.constraint(equalToConstant: 0)
+        fileTreeWidth = storedWidth > 0 ? min(max(CGFloat(storedWidth), FileTreeSidebar.widthRange.lowerBound), FileTreeSidebar.widthRange.upperBound) : FileTreeSidebar.defaultWidth
 
-        for view in [backdrop, tint, tabBar!, paneContainer, statusBar!, palette!] as [NSView] {
+        for view in [backdrop, tint, tabBar!, sidebar!, paneContainer, statusBar!, palette!] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(view)
         }
@@ -98,8 +115,12 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
                 tabBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
                 tabBar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
                 tabBar.heightAnchor.constraint(equalToConstant: TabBar.height),
+                sidebar.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+                sidebar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+                sidebar.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
+                sidebarWidth,
                 paneContainer.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
-                paneContainer.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+                paneContainer.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
                 paneContainer.trailingAnchor.constraint(equalTo: content.trailingAnchor),
                 paneContainer.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
                 statusBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
@@ -127,6 +148,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
         window?.appearance = theme.appearance
         backdrop.isHidden = !preferences.blur
         tint.layer?.backgroundColor = theme.background.withAlphaComponent(preferences.blur ? preferences.opacity : 1).cgColor
+        sidebar?.applyTheme(theme)
         allPanes.forEach { $0.applyPreferences() }
         installSelectedTab(force: true)
     }
@@ -160,6 +182,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
         }
         focusedPaneCameToFront()
         updateWindowTitle()
+        followFocusedDirectory()
     }
 
     private func updateWindowTitle() {
@@ -177,6 +200,73 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
               let pane = tab.panes.first(where: { view.isDescendant(of: $0.view) }),
               pane !== tab.focused else { return }
         tab.focus(pane)
+    }
+
+    // MARK: - File tree
+
+    private var fileTreeWidth: CGFloat = FileTreeSidebar.defaultWidth
+
+    func setFileTreeVisible(_ visible: Bool) {
+        model.fileTreeVisible = visible
+        preferences.stateDefaults.set(visible, forKey: Self.fileTreeVisibleKey)
+        sidebar.isHidden = !visible
+        sidebarWidth.constant = visible ? fileTreeWidth : 0
+        if visible, let pane = focusedPane { fileTree.follow(pane.session.directory) }
+        fileTree.isActive = visible
+        if visible, let directory = fileTree.currentDirectory { sidebar.reveal(directory) }
+        if !visible, let window, let responder = window.firstResponder as? NSView, responder.isDescendant(of: sidebar) {
+            focusTerminal()
+        }
+    }
+
+    private func resizeFileTree(to width: CGFloat) {
+        // Leave the terminal room for a usable number of columns.
+        let maximum = min(FileTreeSidebar.widthRange.upperBound, (window?.frame.width ?? 1000) - 320)
+        fileTreeWidth = min(max(width, FileTreeSidebar.widthRange.lowerBound), max(maximum, FileTreeSidebar.widthRange.lowerBound))
+        sidebarWidth.constant = fileTreeWidth
+        preferences.stateDefaults.set(Double(fileTreeWidth), forKey: Self.fileTreeWidthKey)
+    }
+
+    /// Keeps the tree on the focused pane's directory.
+    private func followFocusedDirectory() {
+        guard let pane = focusedPane, pane !== followedPane else { return }
+        followedPane = pane
+        focusedDirectory = pane.session.$directory
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] directory in MainActor.assumeIsolated { self?.fileTree.follow(directory) } }
+    }
+
+    private func focusTerminal() {
+        guard let pane = focusedPane else { return }
+        window?.makeFirstResponder(pane.view.preferredResponder)
+    }
+
+    private func fileTreeActions() -> FileTreeActions {
+        FileTreeActions(
+            openInEditor: { [weak self] url in self?.openInEditor(url) },
+            changeDirectory: { [weak self] url in
+                guard let self else { return }
+                if self.focusedPane?.runAtPrompt("cd " + ShellQuoting.quote(url.path)) == true {
+                    self.focusTerminal()
+                } else {
+                    self.addTab(directory: url.path)
+                }
+            },
+            openInNewTab: { [weak self] url in self?.addTab(directory: url.path) },
+            insertPaths: { [weak self] urls in
+                self?.focusedPane?.insertPaths(urls)
+                self?.focusTerminal()
+            },
+            focusTerminal: { [weak self] in self?.focusTerminal() })
+    }
+
+    /// Opens a file in `$EDITOR` (vi without one) in a new pane to the right.
+    func openInEditor(_ url: URL) {
+        guard let pane = focusedPane, let tab = model.tabs.first(where: { $0.layout.contains(pane) }) else { return }
+        let editor = makePane(directory: url.deletingLastPathComponent().path)
+        tab.split(pane, with: editor, axis: .horizontal)
+        editor.terminal.send(txt: "${EDITOR:-vi} " + ShellQuoting.quote("./" + url.lastPathComponent) + "\r")
     }
 
     // MARK: - Tabs & panes
@@ -379,6 +469,11 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
 
     @objc func clearBuffer(_ sender: Any?) { focusedPane?.clearBuffer() }
 
+    @objc func toggleFileTree(_ sender: Any?) {
+        setFileTreeVisible(!model.fileTreeVisible)
+        if model.fileTreeVisible { window?.makeFirstResponder(sidebar.outline) }
+    }
+
     @objc func switchBranch(_ sender: Any?) {
         guard let pane = focusedPane else { return NSSound.beep() }
         pane.showBranchPicker()
@@ -449,6 +544,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, Pane
             .init(id: "select-output", title: "Select Output of Last Command", shortcut: "⇧⌘A", systemImage: "text.line.first.and.arrowtriangle.forward") { [weak self] in
                 self?.selectLastOutput(nil)
             },
+            .init(id: "file-tree", title: model.fileTreeVisible ? "Hide File Tree" : "Show File Tree", shortcut: "⇧⌘E",
+                  systemImage: "sidebar.left") { [weak self] in self?.toggleFileTree(nil) },
             .init(id: "switch-branch", title: "Switch Branch…", shortcut: "⇧⌘B", systemImage: "arrow.triangle.branch") { [weak self] in
                 self?.switchBranch(nil)
             },

@@ -113,6 +113,7 @@ enum MainMenu {
     private static func viewMenu() -> NSMenu {
         let menu = NSMenu(title: "View")
         menu.addItem(item("Command Palette…", #selector(W.showCommandPalette(_:)), "p", [.command, .shift]))
+        menu.addItem(item("Toggle File Tree", #selector(W.toggleFileTree(_:)), "e", [.command, .shift]))
         menu.addItem(.separator())
         menu.addItem(item("Jump to Previous Command", #selector(W.previousCommand(_:)), arrow(NSUpArrowFunctionKey)))
         menu.addItem(item("Jump to Next Command", #selector(W.nextCommand(_:)), arrow(NSDownArrowFunctionKey)))

@@ -120,6 +120,18 @@ public struct GitRepository: Sendable {
         _ = try await run(["switch", "-c", trimmed])
     }
 
+    /// The working tree's state: what's changed, untracked or ignored. Paths are relative to the root.
+    public func status() async throws -> GitStatus {
+        GitStatus(porcelain: try await run(["status", "--porcelain=v1", "-z", "--ignored", "--untracked-files=normal"]))
+    }
+
+    /// Every file git would show: tracked ones and untracked ones that aren't ignored, relative to
+    /// the directory.
+    public func files() async throws -> [String] {
+        try await run(["ls-files", "-z", "--cached", "--others", "--exclude-standard"])
+            .split(separator: "\0").map(String.init)
+    }
+
     /// Whether git accepts `name` as a new branch name.
     public func isValidBranchName(_ name: String) async throws -> Bool {
         guard !name.isEmpty else { return false }

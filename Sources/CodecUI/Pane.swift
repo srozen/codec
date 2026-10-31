@@ -59,6 +59,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
             if self.pressedBranch { self.pressedBranch = false } else { self.endCommandLineGesture() }
         }
         terminal.addSubview(branchHotspot)
+        terminal.onDropFiles = { [weak self] urls in self?.insertPaths(urls) }
         terminal.onRelease = { [weak self] clicks, dragged, point in
             self?.terminalGestureEnded(clicks: clicks, dragged: dragged, at: point)
         }
@@ -523,6 +524,29 @@ final class Pane: LocalProcessTerminalViewDelegate {
             return branchHotspot.place(at: nil)
         }
         branchHotspot.place(at: promptBranchFrame().map { terminal.convert($0, from: nil) })
+    }
+
+    // MARK: - Paths and commands from elsewhere
+
+    /// Types paths for the shell, quoted and separated by spaces: relative to the shell's directory
+    /// when they're under it.
+    func insertPaths(_ urls: [URL]) {
+        guard !urls.isEmpty, session.exitStatus == nil else { return }
+        let base = URL(fileURLWithPath: session.directory).standardizedFileURL.path
+        let words = urls.map { url -> String in
+            let path = url.standardizedFileURL.path
+            return ShellQuoting.quote(path.hasPrefix(base + "/") ? String(path.dropFirst(base.count + 1)) : path)
+        }
+        terminal.send(txt: words.joined(separator: " ") + " ")
+    }
+
+    /// Runs `command` at the prompt in place of whatever was typed. False when the shell is busy.
+    @discardableResult
+    func runAtPrompt(_ command: String) -> Bool {
+        guard isAtCommandLine else { return false }
+        terminal.send(CommandLineEditing.Action.moveToEnd.sequence + CommandLineEditing.Action.deleteToStart.sequence)
+        terminal.send(txt: command + "\r")
+        return true
     }
 
     /// The branch changed outside the shell: update the status bar, and the prompt if it's showing.

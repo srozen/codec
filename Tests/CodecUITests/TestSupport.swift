@@ -81,7 +81,8 @@ final class TestEnvironment {
                                      systemMonitor: SystemMonitor(sampler: sampler, interval: sampler is IdleSampler ? 3600 : 1),
                                      shellIntegration: integration ? shellIntegration : nil,
                                      history: HistoryStore(logURL: directory.appendingPathComponent("history.jsonl")),
-                                     intelFolder: directory.appendingPathComponent("intel"))
+                                     intelFolder: directory.appendingPathComponent("intel"),
+                                     savedPanesFolder: directory.appendingPathComponent("saved-panes"))
         environment.coordinator = coordinator
     }
 

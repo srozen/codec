@@ -90,7 +90,10 @@ private struct AppearanceSettings: View {
                 Toggle("Dim inactive split panes", isOn: $prefs.dimInactivePanes)
                 Toggle("CRT scanlines", isOn: $prefs.scanlines)
                 Toggle("Reopen windows and tabs from last time", isOn: $prefs.restoreWindows)
-                    .help("At launch, opens the windows, tabs and splits you had, each pane in its folder. What ran in them doesn't come back.")
+                    .help("At launch, opens the windows, tabs and splits you had, each pane in its folder. Programs that were running don't come back.")
+                Toggle("With what each pane showed, and its commands", isOn: $prefs.restorePaneContents)
+                    .disabled(!prefs.restoreWindows)
+                    .help("Keeps each pane's scrollback and the Commands sidebar when you quit, in ~/Library/Application Support/Codec, readable only by you.")
             }
 
             Section("Status bar") {

@@ -16,15 +16,21 @@ Split any pane right (⌘D) or down (⇧⌘D); the new pane opens in the same di
 
 - ⌘] / ⌘[ go to the next or previous pane, ⌥⌘ with an arrow to the pane in that direction.
 - Inactive panes dim, so you always know which one has the keyboard (Settings › Appearance › Dim inactive split panes).
-- Drag the line between two panes to resize them.
+- Drag the line between two panes to resize them. Each split keeps its sizes when you switch tabs, when panes are added or closed (a new pane takes half of the one it split from), and when Codec reopens it.
 
 ## Picking up where you left off
 
-Quit Codec and open it again, and your windows come back as you left them: each with its tabs in order, their names, their splits, which tab and pane had focus, and every pane in the folder it was in. If a folder has gone since, the pane opens in the nearest one that's left.
+Quit Codec and open it again, and your windows come back as you left them: each with its tabs in order, their names, their splits at their sizes, which tab and pane had focus, and every pane in the folder it was in. If a folder has gone since, the pane opens in the nearest one that's left.
 
-The programs that were running, and what the panes showed, don't come back: each pane starts a fresh shell. Closing a window yourself forgets it; quitting keeps everything that's open. Codec also saves as you go, so the windows come back even if it didn't get to quit normally.
+Each pane also shows what it showed when you quit, in its colors, under a "Restored" line, and its [Commands sidebar](commands-sidebar.md) still lists the commands it ran, with their output: yesterday's build output is still there. The programs that were running don't come back: each pane starts a fresh shell below.
 
-Turn it off in Settings › Appearance › Reopen windows and tabs from last time.
+Closing a window yourself forgets it; quitting keeps everything that's open. Codec saves the windows as you go, so they come back even if it didn't get to quit normally; what panes showed is kept when you quit.
+
+Settings › Appearance › Window turns both off: Reopen windows and tabs from last time, and With what each pane showed, and its commands. What panes showed is kept in `~/Library/Application Support/Codec/Saved Panes`, readable only by you, and deleted once it's been shown again.
+
+## Reopening a closed tab
+
+Closed a tab by mistake? ⇧⌘T (Shell › Reopen Closed Tab) brings it back, after the current tab: its splits, folders and name, and what its panes showed. It works for the last ten tabs you closed, including the tabs of a window you closed, while Codec is open.
 
 ## Closing safely
 

@@ -5,6 +5,7 @@
 | Keys | Action |
 |---|---|
 | ⌘T / ⌘N | New tab / new window |
+| ⇧⌘T | Reopen the tab closed last |
 | ⌘D / ⇧⌘D | Split right / split down |
 | ⌘W / ⇧⌘W | Close pane / close window |
 | ⌘] / ⌘[ | Next / previous pane |

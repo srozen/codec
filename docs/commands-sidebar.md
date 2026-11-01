@@ -26,6 +26,8 @@ Space or a double-click opens its output in a viewer you can select from and sea
 
 Codec keeps each command's output when it finishes (its first and last few thousand lines), so it's still there after it has left the scrollback or ⌘K cleared it. Such commands show a small box icon; clicking them opens the viewer.
 
+The list survives quitting Codec: when your windows [come back](tabs-and-panes.md#picking-up-where-you-left-off), each pane's commands come back with them, output included, and you can still go to them in the restored scrollback.
+
 ## Filtering
 
 The filter field searches commands and what they printed. A row shows the line that matched, and going to it scrolls to that line. ⚠ shows failed commands only; the bin clears the list (the commands are still tracked, just hidden).

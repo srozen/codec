@@ -2,7 +2,7 @@ import Foundation
 
 /// What a command printed, kept when it finished so it can be read after it has scrolled out of the
 /// scrollback or the buffer was cleared. Very long output keeps its start and its end.
-public struct CapturedOutput: Equatable, Sendable {
+public struct CapturedOutput: Codable, Equatable, Sendable {
     public var text: String
     /// How many lines the command printed, including any left out.
     public var lineCount: Int
@@ -59,7 +59,7 @@ public struct CapturedOutput: Equatable, Sendable {
 
 /// One command run in a pane: what it was, where and when it ran, how it ended, where it is in the
 /// scrollback and what it printed.
-public struct TimelineEntry: Identifiable, Equatable, Sendable {
+public struct TimelineEntry: Identifiable, Codable, Equatable, Sendable {
     public enum Status: Equatable, Sendable {
         case running
         case succeeded
@@ -105,7 +105,7 @@ public struct TimelineEntry: Identifiable, Equatable, Sendable {
 }
 
 /// The commands run in one pane, oldest first.
-public struct CommandTimeline: Equatable, Sendable {
+public struct CommandTimeline: Codable, Equatable, Sendable {
     public private(set) var entries: [TimelineEntry] = []
     private var nextID = 1
     /// Entries past this many are dropped, oldest first.
@@ -199,6 +199,20 @@ public struct CommandTimeline: Equatable, Sendable {
             return entry.command.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
                 || entry.output?.firstLine(matching: query) != nil
         }
+    }
+
+    /// For keeping it with a transcript of the scrollback that starts at `firstRow`: places are
+    /// counted from there, commands that had scrolled out of it lose theirs, and a command still
+    /// running is marked as ended without a report.
+    public func rebased(firstRow: Int) -> CommandTimeline {
+        var copy = self
+        copy.abandonRunning()
+        for index in copy.entries.indices {
+            guard let block = copy.entries[index].block else { continue }
+            copy.entries[index].block = block.prompt >= firstRow
+                ? CommandBlocks.Block(prompt: block.prompt - firstRow, output: block.output - firstRow) : nil
+        }
+        return copy
     }
 
     private mutating func trimOutput() {

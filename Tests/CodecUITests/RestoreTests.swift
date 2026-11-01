@@ -36,7 +36,9 @@ struct RestoreTests {
         let saved = original.savedState
         #expect(saved.selectedTab == 0)
         #expect(saved.tabs.map(\.title) == ["servers", nil])
-        #expect(saved.tabs[0].layout == .split(.horizontal, [.pane(directory: api), .split(.vertical, [.pane(directory: web), .pane(directory: web)])]))
+        #expect(saved.tabs[0].layout == .split(.horizontal, [
+            .pane(directory: api), .split(.vertical, [.pane(directory: web), .pane(directory: web)], sizes: [0.5, 0.5]),
+        ], sizes: [0.5, 0.5]))
         #expect(saved.tabs[0].focusedPane == 0)
         #expect(saved.tabs[1].layout == .pane(directory: docs))
 

@@ -13,6 +13,8 @@ final class WindowModel: ObservableObject {
     @Published var renamingTabID: UUID?
     @Published var fileTreeVisible = false
     @Published var timelineVisible = false
+    /// The left sidebar's tab; `fileTreeVisible` says whether it's showing.
+    @Published var navigatorTab: NavigatorTab = .files
 
     var selected: TerminalTab? { tabs.first { $0.id == selectedID } }
 }
@@ -41,7 +43,7 @@ struct TabBar: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            BarIconButton(systemImage: "sidebar.left", help: model.fileTreeVisible ? "Hide File Tree (⇧⌘E)" : "Show File Tree (⇧⌘E)",
+            BarIconButton(systemImage: "sidebar.left", help: model.fileTreeVisible ? "Hide Sidebar" : "Show Sidebar",
                           active: model.fileTreeVisible, action: actions.toggleFileTree)
             HStack(spacing: 4) {
                 ForEach(Array(model.tabs.enumerated()), id: \.element.id) { index, tab in

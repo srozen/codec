@@ -11,6 +11,8 @@ final class MarkdownPreviewView: NSView, WKNavigationDelegate {
     let document: EditorDocument
     /// Opens a local file the preview links to.
     var openFile: ((URL) -> Void)?
+    /// Run (true) or Insert (false) on one of the document's shell code blocks.
+    var runCode: ((String, Bool) -> Void)?
     private(set) var webView: WKWebView!
     private var theme: CodecTheme
     private var codeFont: NSFont
@@ -67,7 +69,7 @@ final class MarkdownPreviewView: NSView, WKNavigationDelegate {
     }
 
     private var body: String {
-        MarkdownRenderer().html(from: document.text)
+        MarkdownRenderer(runnableShellBlocks: true).html(from: document.text)
     }
 
     private func loadPage() {
@@ -110,7 +112,13 @@ final class MarkdownPreviewView: NSView, WKNavigationDelegate {
             return decisionHandler(.allow)
         }
         decisionHandler(.cancel)
-        if url.scheme == Self.scheme, let file = Self.fileURL(for: url) {
+        if url.scheme == MarkdownRenderer.runScheme {
+            // codec-run:run/N or codec-run:insert/N
+            let parts = (URLComponents(url: url, resolvingAgainstBaseURL: false)?.path ?? "").split(separator: "/")
+            let blocks = MarkdownRenderer.shellBlocks(in: document.text)
+            guard parts.count == 2, let index = Int(parts[1]), blocks.indices.contains(index) else { return }
+            runCode?(blocks[index], parts[0] == "run")
+        } else if url.scheme == Self.scheme, let file = Self.fileURL(for: url) {
             openFile?(file)
         } else if ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") {
             NSWorkspace.shared.open(url)
@@ -174,6 +182,11 @@ final class MarkdownPreviewView: NSView, WKNavigationDelegate {
         pre[data-language] { padding-top: 26px; }
         pre[data-language]::after { content: attr(data-language); position: absolute; top: 6px; right: 10px; font-size: 10px;
               color: \(css(muted)); font-family: -apple-system, sans-serif; text-transform: lowercase; }
+        .run { display: flex; gap: 6px; position: relative; top: 4px; left: 10px; height: 0; z-index: 1; }
+        .run a { font: 600 10.5px -apple-system, sans-serif; color: \(css(theme.accent)); background: \(css(theme.accent.withAlphaComponent(0.13)));
+              padding: 2px 8px; border-radius: 5px; height: 14px; line-height: 14px; }
+        .run a:hover { text-decoration: none; background: \(css(theme.accent.withAlphaComponent(0.24))); }
+        .run + pre { padding-top: 30px; }
         blockquote { margin-left: 0; padding: 0.1em 1em; color: \(css(muted)); border-left: 3px solid \(css(theme.accent.withAlphaComponent(0.6))); }
         ul, ol { padding-left: 1.6em; } li + li { margin-top: 0.2em; } li > ul, li > ol { margin: 0.2em 0 0; }
         ul.tasks { list-style: none; padding-left: 0.4em; } ul.tasks input { margin: 0 0.45em 0 0; accent-color: \(css(theme.accent)); }

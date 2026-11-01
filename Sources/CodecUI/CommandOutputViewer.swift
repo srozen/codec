@@ -10,6 +10,7 @@ final class CommandOutputViewer: NSViewController {
         var insert: () -> Void
         var run: () -> Void
         var close: () -> Void
+        var saveToIntel: () -> Void = {}
     }
 
     let entry: TimelineEntry
@@ -200,6 +201,7 @@ private struct OutputHeader: View {
                     .disabled(!inScrollback)
                 Button("Copy Output", systemImage: "doc.on.doc", action: copy)
                     .disabled(!hasOutput)
+                Button("Save to Intel", systemImage: "bookmark", action: actions.saveToIntel)
                 Spacer(minLength: 8)
                 Button("Insert", systemImage: "text.insert", action: actions.insert)
                     .disabled(!canInsert)

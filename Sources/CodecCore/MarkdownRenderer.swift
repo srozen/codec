@@ -6,16 +6,43 @@ import Foundation
 public struct MarkdownRenderer: Sendable {
     /// Rewrites an image's source, so relative paths can be served to the preview.
     public var resolveImage: @Sendable (String) -> String
+    /// Puts Run and Insert links on shell code blocks: `codec-run:run/N` and `codec-run:insert/N`, N
+    /// counting shell blocks from 0 in the order `shellBlocks(in:)` lists them.
+    public var runnableShellBlocks: Bool
+    private var shellBlocks: ShellBlocks?
 
-    public init(resolveImage: @escaping @Sendable (String) -> String = { $0 }) {
+    public static let runScheme = "codec-run"
+
+    private final class ShellBlocks: @unchecked Sendable {
+        var code: [String] = []
+    }
+
+    public init(runnableShellBlocks: Bool = false, resolveImage: @escaping @Sendable (String) -> String = { $0 }) {
+        self.runnableShellBlocks = runnableShellBlocks
         self.resolveImage = resolveImage
     }
 
     public func html(from markdown: String) -> String {
-        let lines = markdown.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\t", with: "    ")
-            .components(separatedBy: "\n")
+        render(markdown).html
+    }
+
+    /// The HTML, and the shell code blocks in it, in order.
+    public func render(_ markdown: String) -> (html: String, shellBlocks: [String]) {
+        var text = markdown.replacingOccurrences(of: "\r\n", with: "\n")
+        // A YAML header (as Intel files have) is metadata, not part of the document.
+        if let (_, body) = FrontMatter.split(text) { text = body }
+        let lines = text.replacingOccurrences(of: "\t", with: "    ").components(separatedBy: "\n")
+        var renderer = self
+        let collected = ShellBlocks()
+        renderer.shellBlocks = collected
         var slugs: [String: Int] = [:]
-        return blocks(lines[...], tight: false, slugs: &slugs)
+        let html = renderer.blocks(lines[...], tight: false, slugs: &slugs)
+        return (html, collected.code)
+    }
+
+    /// The shell code blocks in a document, in order.
+    public static func shellBlocks(in markdown: String) -> [String] {
+        MarkdownRenderer().render(markdown).shellBlocks
     }
 
     // MARK: Blocks
@@ -149,7 +176,13 @@ public struct MarkdownRenderer: Sendable {
     private func codeBlock(_ code: String, info: String) -> String {
         let language = SourceLanguage.of(fence: info)
         let label = info.split(separator: " ").first.map { " data-language=\"\(Self.escape(String($0)))\"" } ?? ""
-        return "<pre\(label)><code>" + Self.highlighted(code, language: language) + "</code></pre>\n"
+        let pre = "<pre\(label)><code>" + Self.highlighted(code, language: language) + "</code></pre>\n"
+        guard language == .shell, let shellBlocks else { return pre }
+        let index = shellBlocks.code.count
+        shellBlocks.code.append(code)
+        guard runnableShellBlocks else { return pre }
+        return "<div class=\"run\"><a href=\"\(Self.runScheme):run/\(index)\">▶ Run</a>"
+            + "<a href=\"\(Self.runScheme):insert/\(index)\">Insert</a></div>\n" + pre
     }
 
     /// Code as HTML with its tokens wrapped in classed spans.

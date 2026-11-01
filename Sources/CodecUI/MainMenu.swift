@@ -118,6 +118,7 @@ enum MainMenu {
         let menu = NSMenu(title: "View")
         menu.addItem(item("Command Palette…", #selector(W.showCommandPalette(_:)), "p", [.command, .shift]))
         menu.addItem(item("Toggle File Tree", #selector(W.toggleFileTree(_:)), "e", [.command, .shift]))
+        menu.addItem(item("Intel", #selector(W.toggleIntel(_:)), "i", [.command, .shift]))
         menu.addItem(item("Commands", #selector(W.toggleCommandTimeline(_:)), "l", [.command, .shift]))
         menu.addItem(item("Command History…", #selector(W.showCommandHistory(_:)), "y"))
         menu.addItem(item("Toggle Markdown Preview", #selector(W.toggleMarkdownPreview(_:)), "v", [.command, .shift]))

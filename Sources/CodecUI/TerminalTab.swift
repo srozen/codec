@@ -24,6 +24,19 @@ final class TerminalTab: ObservableObject, Identifiable {
         observe(pane)
     }
 
+    /// A tab with panes already arranged, as when it's reopened.
+    init(layout: SplitLayout<Pane>, focused: Pane) {
+        self.layout = layout
+        self.focused = layout.contains(focused) ? focused : layout.leaves[0]
+        layout.leaves.forEach(observe)
+    }
+
+    /// What to save of it, to open it again.
+    var saved: SavedTab {
+        SavedTab(title: customTitle, layout: layout.saved { $0.session.directory },
+                 focusedPane: panes.firstIndex { $0 === focused } ?? 0)
+    }
+
     var panes: [Pane] { layout.leaves }
 
     /// What the tab bar and the window title show.

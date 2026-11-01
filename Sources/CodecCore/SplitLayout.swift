@@ -1,7 +1,7 @@
 import CoreGraphics
 
 /// How a split arranges its children.
-public enum SplitAxis: Sendable, Equatable {
+public enum SplitAxis: String, Sendable, Equatable, Codable {
     /// Children side by side, left to right.
     case horizontal
     /// Children stacked, top to bottom.

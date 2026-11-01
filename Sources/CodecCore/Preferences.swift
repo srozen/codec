@@ -43,6 +43,8 @@ public final class Preferences: ObservableObject {
     @Published public var friendlyCompletion: Bool { didSet { store(friendlyCompletion, .friendlyCompletion) } }
     /// Keeps the commands you run, with where and how they ran, for the history.
     @Published public var recordHistory: Bool { didSet { store(recordHistory, .recordHistory) } }
+    /// Opens the windows, tabs and splits from last time at launch.
+    @Published public var restoreWindows: Bool { didSet { store(restoreWindows, .restoreWindows) } }
 
     /// Commands that run at least this long notify you when they finish in the background.
     public let longCommandThreshold: TimeInterval = 10
@@ -50,7 +52,8 @@ public final class Preferences: ObservableObject {
     private enum Key: String {
         case themeID, fontName, fontSize, opacity, blur, scanlines, dimInactivePanes, bell, notifyInBackground,
              codecSounds, paneSounds, soundVolume, optionAsMeta, exitBehavior, shellIntegration, shellPath,
-             showSystemStats, prompt, copyOnSelect, suggestCommands, historyKeys, friendlyCompletion, recordHistory
+             showSystemStats, prompt, copyOnSelect, suggestCommands, historyKeys, friendlyCompletion, recordHistory,
+             restoreWindows
     }
 
     private static let factoryDefaults: [Key: Any] = [
@@ -76,6 +79,7 @@ public final class Preferences: ObservableObject {
         .historyKeys: true,
         .friendlyCompletion: true,
         .recordHistory: true,
+        .restoreWindows: true,
     ]
 
     public init(defaults: UserDefaults) {
@@ -103,6 +107,7 @@ public final class Preferences: ObservableObject {
         historyKeys = defaults.bool(forKey: Key.historyKeys.rawValue)
         friendlyCompletion = defaults.bool(forKey: Key.friendlyCompletion.rawValue)
         recordHistory = defaults.bool(forKey: Key.recordHistory.rawValue)
+        restoreWindows = defaults.bool(forKey: Key.restoreWindows.rawValue)
         prompt = defaults.data(forKey: Key.prompt.rawValue)
             .flatMap { try? JSONDecoder().decode(PromptConfiguration.self, from: $0) } ?? .default
     }

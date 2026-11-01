@@ -8,7 +8,7 @@ Open Settings with ⌘,. Changes apply as you make them, unless a setting says i
 
 - **Theme**: Codec (green on black, after the codec screen), Arctic, Amber and Daylight. Also in the command palette.
 - **Text**: the font (SF Mono by default, or any monospaced font you have) and its size, 9 to 24 points. ⌘+ / ⌘− / ⌘0 change the size from anywhere.
-- **Window**: blur behind the window, its opacity, dimming inactive split panes, and CRT scanlines.
+- **Window**: blur behind the window, its opacity, dimming inactive split panes, CRT scanlines, and whether Codec [reopens your windows and tabs](tabs-and-panes.md#picking-up-where-you-left-off) at launch.
 - **Status bar**: show or hide the CPU, memory and network meters.
 
 ## Shell

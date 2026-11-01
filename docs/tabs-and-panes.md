@@ -18,6 +18,14 @@ Split any pane right (⌘D) or down (⇧⌘D); the new pane opens in the same di
 - Inactive panes dim, so you always know which one has the keyboard (Settings › Appearance › Dim inactive split panes).
 - Drag the line between two panes to resize them.
 
+## Picking up where you left off
+
+Quit Codec and open it again, and your windows come back as you left them: each with its tabs in order, their names, their splits, which tab and pane had focus, and every pane in the folder it was in. If a folder has gone since, the pane opens in the nearest one that's left.
+
+The programs that were running, and what the panes showed, don't come back: each pane starts a fresh shell. Closing a window yourself forgets it; quitting keeps everything that's open. Codec also saves as you go, so the windows come back even if it didn't get to quit normally.
+
+Turn it off in Settings › Appearance › Reopen windows and tabs from last time.
+
 ## Closing safely
 
 Before a tab, a pane or a window closes, or Codec quits, it checks whether that would end something still running, in the foreground or in the background (`npm run dev &` counts; the shell's own helpers don't), and names what would be terminated before asking.

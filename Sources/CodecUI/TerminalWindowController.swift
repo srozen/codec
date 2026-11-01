@@ -7,6 +7,8 @@ import CodecCore
 final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMenuItemValidation, PaneHost {
     let model = WindowModel()
     var onClose: ((TerminalWindowController) -> Void)?
+    /// Called when something worth saving changed: tabs, splits, directories, the window's frame.
+    var onStateChange: (() -> Void)?
 
     private let environment: AppEnvironment
     private var preferences: Preferences { environment.preferences }
@@ -43,7 +45,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     private static let navigatorTabKey = "NavigatorTab"
     private static let timelineWidthKey = "CommandsWidth"
 
-    init(directory: String?, environment: AppEnvironment) {
+    /// A window with one tab in `directory`, or, given `saved`, the tabs and splits it describes.
+    init(directory: String?, environment: AppEnvironment, restoring saved: SavedWindow? = nil) {
         self.environment = environment
         fileTree = FileTreeModel(defaults: environment.preferences.stateDefaults)
         intel = IntelLibrary(personalFolder: environment.intelFolder)
@@ -71,7 +74,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         buildContent()
         applyPreferences()
         observeEnvironment()
-        addTab(directory: directory)
+        if saved.map(restore) != true { addTab(directory: directory) }
+        observeState()
         model.navigatorTab = preferences.stateDefaults.string(forKey: Self.navigatorTabKey).flatMap(NavigatorTab.init) ?? .files
         setNavigatorVisible(preferences.stateDefaults.bool(forKey: Self.fileTreeVisibleKey))
         setTimelineVisible(preferences.stateDefaults.bool(forKey: Self.timelineVisibleKey))
@@ -648,10 +652,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     // MARK: - Tabs & panes
 
-    private func makePane(directory: String?) -> Pane {
+    private func makePane(directory: String?, sound: Bool = true) -> Pane {
         let pane = Pane(directory: directory, environment: environment)
         pane.host = self
-        if preferences.paneSounds { environment.sounds.play(.lock) }
+        if sound, preferences.paneSounds { environment.sounds.play(.lock) }
         return pane
     }
 
@@ -660,6 +664,12 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     func addTab(directory: String?) {
         let tab = TerminalTab(pane: makePane(directory: directory))
+        let position = model.selected.flatMap { selected in model.tabs.firstIndex { $0 === selected } }.map { $0 + 1 }
+        insert(tab, at: position ?? model.tabs.count)
+        select(tab)
+    }
+
+    private func insert(_ tab: TerminalTab, at position: Int) {
         tab.onLayoutChange = { [weak self, weak tab] in
             guard let self, let tab, tab === self.model.selected else { return }
             self.installSelectedTab()
@@ -669,13 +679,52 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
             .receive(on: RunLoop.main)
             .sink { [weak self, weak tab] _ in
                 MainActor.assumeIsolated {
-                    guard let self, let tab, tab === self.model.selected else { return }
+                    guard let self, let tab else { return }
+                    // Its splits, its name or a pane's directory may have changed.
+                    self.onStateChange?()
+                    guard tab === self.model.selected else { return }
                     self.updateWindowTitle()
                 }
             }
-        let position = model.selected.flatMap { selected in model.tabs.firstIndex { $0 === selected } }.map { $0 + 1 }
-        model.tabs.insert(tab, at: position ?? model.tabs.count)
-        select(tab)
+        model.tabs.insert(tab, at: position)
+    }
+
+    // MARK: Saving and reopening
+
+    /// What to save of the window, to open it again: its frame, and its tabs with their splits,
+    /// names and directories.
+    var savedState: SavedWindow {
+        SavedWindow(frame: model.fullScreen ? nil : window?.frame, tabs: model.tabs.map(\.saved),
+                    selectedTab: model.tabs.firstIndex { $0.id == model.selectedID } ?? 0)
+    }
+
+    /// Opens the tabs `saved` describes, each pane in its directory (or the nearest one that's left).
+    /// Returns false when there was nothing to open.
+    private func restore(_ saved: SavedWindow) -> Bool {
+        for savedTab in saved.tabs {
+            guard let layout = savedTab.layout.build({ directory in
+                self.makePane(directory: SavedWorkspace.existingDirectory(directory), sound: false)
+            }) else { continue }
+            let panes = layout.leaves
+            let tab = TerminalTab(layout: layout, focused: panes[min(max(savedTab.focusedPane, 0), panes.count - 1)])
+            tab.rename(to: savedTab.title)
+            insert(tab, at: model.tabs.count)
+        }
+        guard !model.tabs.isEmpty else { return false }
+        select(model.tabs[min(max(saved.selectedTab, 0), model.tabs.count - 1)])
+        return true
+    }
+
+    private func observeState() {
+        model.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in MainActor.assumeIsolated { self?.onStateChange?() } }
+            .store(in: &cancellables)
+        for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification] {
+            NotificationCenter.default.publisher(for: name, object: window)
+                .sink { [weak self] _ in MainActor.assumeIsolated { self?.onStateChange?() } }
+                .store(in: &cancellables)
+        }
     }
 
     func select(_ tab: TerminalTab) {

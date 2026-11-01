@@ -614,8 +614,10 @@ struct CommandLineEditingTests {
 struct HistoryAndCompletionTests {
     private static let features = ["CODEC_SUGGESTIONS": "1", "CODEC_HISTORY_KEYS": "1", "CODEC_COMPLETION": "1"]
 
+    /// A short prompt comes first: macOS's default one has the host name, and a long one (as CI runners
+    /// have) wraps what's typed onto the next line.
     private func shell(rc: String = "", environment: [String: String] = features, directory: String? = nil) async throws -> ZshHarness {
-        let zsh = try ZshHarness(homeFiles: [".zshrc": rc], directory: directory, environment: environment)
+        let zsh = try ZshHarness(homeFiles: [".zshrc": "PS1='%# '\n" + rc], directory: directory, environment: environment)
         #expect(await zsh.wait { zsh.payloads(133).contains { $0.hasPrefix("A") } })
         return zsh
     }

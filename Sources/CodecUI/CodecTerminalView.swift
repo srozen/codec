@@ -39,6 +39,15 @@ final class CodecTerminalView: LocalProcessTerminalView {
         registerForDraggedTypes([.fileURL])
     }
 
+    /// Regression: a pane moved into a new split has no height for a moment. Passed on, the terminal
+    /// would shrink to no rows and the shell would redraw its prompt into nothing, leaving a prompt of
+    /// several lines on screen twice once it had its real size. The size that follows is the one that
+    /// counts.
+    override func setFrameSize(_ newSize: NSSize) {
+        guard newSize.width >= 1, newSize.height >= 1 else { return }
+        super.setFrameSize(newSize)
+    }
+
     // MARK: Dropping files
 
     private func droppedFiles(_ info: any NSDraggingInfo) -> [URL] {

@@ -323,4 +323,58 @@ struct TimelineTests {
         #expect(controller.timelineSidebar.frame.width == 0)
         #expect(controller.paletteCommands().contains { $0.id == "commands" && $0.title == "Show Commands Sidebar" })
     }
+
+    /// Regression: after a resize, zsh printed a prompt of several lines again below the old one's
+    /// upper lines, leaving them twice on screen.
+    @Test func aResizeRedrawsATallPromptInPlace() async throws {
+        let env = try TestEnvironment(shell: "/bin/zsh", integration: true)
+        defer { env.tearDown() }
+        var prompt = PromptConfiguration.default
+        prompt.style = .codec
+        env.preferences.prompt = prompt
+        let config = env.directory.appendingPathComponent("zdotdir")
+        try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+        try "".write(to: config.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8)
+        setenv("ZDOTDIR", config.path, 1)
+        defer { unsetenv("ZDOTDIR") }
+        let controller = TerminalWindowController(directory: env.directory.path, environment: env.environment)
+        defer { controller.window?.close() }
+        controller.window?.setContentSize(NSSize(width: 900, height: 500))
+        controller.window?.layoutIfNeeded()
+        let pane = try #require(controller.model.selected?.focused)
+        #expect(await waitUntil { pane.isAtCommandLine })
+        #expect(await run("echo resized-later", in: pane))
+        try await Task.sleep(for: .milliseconds(300))
+
+        func screen() -> [String] {
+            pane.terminal.terminalContentSnapshot(region: .history(maximumScrollbackRows: 100))?.rows
+                .map { $0.text.trimmingCharacters(in: .whitespaces) } ?? []
+        }
+        func promptsAfterOutput() -> (contexts: Int, symbols: Int) {
+            let rows = screen()
+            guard let output = rows.lastIndex(of: "resized-later") else { return (0, 0) }
+            let after = rows[(output + 1)...]
+            return (after.filter { $0.hasPrefix(env.directory.lastPathComponent) || $0.contains("codec-ui-tests") }.count,
+                    after.filter { $0.hasPrefix("❯") }.count)
+        }
+        let before = promptsAfterOutput()
+        #expect(before.symbols == 1)
+
+        // Shorter, as when splitting down; then narrower and wider in quick succession, as when dragging.
+        controller.splitDown(nil)
+        controller.window?.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(800))
+        #expect(promptsAfterOutput() == before)
+        for width in [700.0, 560, 820] {
+            controller.window?.setContentSize(NSSize(width: width, height: 500))
+            controller.window?.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        try await Task.sleep(for: .milliseconds(1000))
+        let after = promptsAfterOutput()
+        #expect(after.symbols == 1)
+        // The command and its output are untouched.
+        #expect(screen().contains("❯ echo resized-later") && screen().contains("resized-later"))
+        #expect(pane.isAtCommandLine)
+    }
 }

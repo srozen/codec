@@ -83,6 +83,7 @@ struct PaneContentsTests {
         let contents = try #require(pane.savedContents(at: Date(timeIntervalSince1970: 0)))
         #expect(contents.transcript.contains("plain \u{1B}[0;1;31mbold red\u{1B}[0m and \u{1B}[0;48;5;200mpink"))
         #expect(!contents.transcript.contains("\u{1B}[0m\u{1B}[0m"))
+        #expect(!contents.transcript.contains("\0") && !contents.transcript.contains("pink\u{1B}[0m "))
 
         // A new pane shows it, the same cells, with a line saying it's from before.
         let restored = Pane(directory: env.directory.path, environment: env.environment, restoring: contents)
@@ -94,7 +95,8 @@ struct PaneContentsTests {
         #expect(await waitUntil { restored.terminal.visibleRowsText(0..<10).joined().contains("── Restored ·") })
         func cells(_ pane: Pane) -> [TerminalCellSnapshot]? {
             pane.terminal.terminalContentSnapshot(region: .history(maximumScrollbackRows: 100))?.rows
-                .first { $0.text.contains("bold red") }?.cells.filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
+                .first { $0.text.contains("bold red") }?.cells
+                .filter { !$0.text.unicodeScalars.allSatisfy { $0 == " " || $0 == "\0" } }
         }
         #expect(cells(restored) != nil && cells(restored) == cells(pane))
     }

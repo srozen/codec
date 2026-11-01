@@ -284,6 +284,10 @@ final class Pane: LocalProcessTerminalViewDelegate {
         case .commandText(let text):
             runningCommandText = text
             timeline.updateRunningCommand(text)
+            // The whole command, which may be more than its first line.
+            let usual = usualDuration(of: text)
+            if session.running != nil, session.running?.usual != usual { session.running?.usual = usual }
+            timeline.setRunningUsualDuration(usual)
             return
         case .historyFile(let path):
             environment.history.useShellFile(URL(fileURLWithPath: path))
@@ -315,11 +319,14 @@ final class Pane: LocalProcessTerminalViewDelegate {
                 if let last = blocks.blocks.last, block.prompt <= last.prompt { timeline.forgetBlocks() }
                 blocks.record(block)
             }
+            let usual = usualDuration(of: started)
+            session.running?.usual = usual
             timeline.begin(command: started, directory: session.directory, started: session.running?.started ?? Date(),
-                           block: block)
+                           block: block, usualDuration: usual)
         }
         guard case .commandFinished(let exitCode, let duration) = event else { return }
         let finished = timeline.running
+        let usual = finished?.usualDuration
         timeline.finish(exitCode: exitCode, duration: duration, output: nil)
         // Its output runs up to the next prompt, found once that's drawn.
         if let finished, finished.block != nil, !finished.fullScreen { outputToCapture = finished.id }
@@ -333,9 +340,23 @@ final class Pane: LocalProcessTerminalViewDelegate {
         let reaction = preferences.attentionPolicy.reactionToFinishedCommand(
             duration: duration, paneInFront: host?.isInFront(self) ?? false)
         let program = CommandNames.program(of: command)
+        var outcome = "\(exitCode == 0 ? "Completed" : "Exit status \(exitCode)") after \(Formatting.duration(duration))"
+        if exitCode == 0, let usual {
+            switch UsualDuration.Comparison(duration: duration, usual: usual) {
+            case .asUsual: outcome += ", as usual"
+            case .slower(let ratio): outcome += ", \(UsualDuration.Comparison.slower(ratio).multiplier) its usual \(Formatting.seconds(usual))"
+            case .faster: outcome += ", faster than its usual \(Formatting.seconds(usual))"
+            }
+        }
         perform(reaction,
                 title: exitCode == 0 ? "“\(program)” finished" : "“\(program)” failed",
-                body: "\(exitCode == 0 ? "Completed" : "Exit status \(exitCode)") after \(Formatting.duration(duration)) · \(session.abbreviatedDirectory)")
+                body: "\(outcome) · \(session.abbreviatedDirectory)")
+    }
+
+    /// How long `command` usually takes here, from the history; nil when that's not known, or not shown.
+    func usualDuration(of command: String) -> TimeInterval? {
+        guard preferences.showUsualDuration else { return nil }
+        return UsualDuration.of(command, in: runningDirectory ?? session.directory, history: environment.history.history.entries)
     }
 
     func jumpToCommand(previous: Bool) {

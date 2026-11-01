@@ -14,8 +14,13 @@ final class PaneTimeline: ObservableObject {
     var entries: [TimelineEntry] { value.entries }
     var running: TimelineEntry? { value.running }
 
-    func begin(command: String, directory: String, started: Date, block: CommandBlocks.Block?) {
-        value.begin(command: command, directory: directory, started: started, block: block)
+    func begin(command: String, directory: String, started: Date, block: CommandBlocks.Block?, usualDuration: TimeInterval?) {
+        value.begin(command: command, directory: directory, started: started, block: block, usualDuration: usualDuration)
+    }
+
+    func setRunningUsualDuration(_ usual: TimeInterval?) {
+        guard let running, running.usualDuration != usual else { return }
+        value.setRunningUsualDuration(usual)
     }
 
     func updateRunningCommand(_ command: String) {
@@ -749,6 +754,32 @@ final class TimelineDirectoryCell: NSTableCellView {
     }
 }
 
+/// A thin line filled to a fraction, on a faint track of the same color.
+final class ProgressLine: NSView {
+    private var fraction = 0.0
+    private var tint = NSColor.controlAccentColor
+
+    func show(fraction: Double, tint: NSColor) {
+        let fraction = min(max(fraction.isFinite ? fraction : 0, 0), 1)
+        guard fraction != self.fraction || tint != self.tint else { return }
+        self.fraction = fraction
+        self.tint = tint
+        needsDisplay = true
+    }
+
+    var shownFraction: Double { fraction }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let radius = bounds.height / 2
+        tint.withAlphaComponent(0.18).setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
+        tint.setFill()
+        var filled = bounds
+        filled.size.width *= fraction
+        NSBezierPath(roundedRect: filled, xRadius: radius, yRadius: radius).fill()
+    }
+}
+
 /// One command: its status, the command colored as shell code, when it ran and for how long, and the
 /// last line it printed (or, while filtering, the line that matched).
 final class TimelineCell: NSTableCellView {
@@ -761,6 +792,8 @@ final class TimelineCell: NSTableCellView {
     private let duration = NSTextField(labelWithString: "")
     private let archived = NSImageView()
     private let saveButton = NSButton()
+    /// How far along a running command likely is, from how long it usually takes.
+    private let progress = ProgressLine()
     /// Save to Intel, from the button that shows over the row while the mouse is on it.
     var onSave: (() -> Void)?
     private var hovering = false {
@@ -799,7 +832,8 @@ final class TimelineCell: NSTableCellView {
         archived.contentTintColor = .tertiaryLabelColor
         archived.toolTip = "No longer in the terminal’s scrollback. Codec kept its output: double-click or press Space to see it."
         archived.setContentCompressionResistancePriority(.required, for: .horizontal)
-        for view in [dot, command, time, detail, duration, archived, saveButton] {
+        progress.isHidden = true
+        for view in [dot, command, time, detail, duration, archived, saveButton, progress] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
@@ -815,6 +849,10 @@ final class TimelineCell: NSTableCellView {
             command.trailingAnchor.constraint(lessThanOrEqualTo: time.leadingAnchor, constant: -6),
             time.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             time.firstBaselineAnchor.constraint(equalTo: command.firstBaselineAnchor),
+            progress.leadingAnchor.constraint(equalTo: command.leadingAnchor),
+            progress.trailingAnchor.constraint(equalTo: time.trailingAnchor),
+            progress.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
+            progress.heightAnchor.constraint(equalToConstant: 2),
             detail.leadingAnchor.constraint(equalTo: command.leadingAnchor),
             detail.topAnchor.constraint(equalTo: command.bottomAnchor, constant: 1),
             detail.trailingAnchor.constraint(lessThanOrEqualTo: archived.leadingAnchor, constant: -4),
@@ -867,12 +905,41 @@ final class TimelineCell: NSTableCellView {
         let elapsed = entry.duration ?? Date().timeIntervalSince(entry.started)
         duration.stringValue = Formatting.duration(elapsed)
         duration.textColor = entry.isRunning ? theme.accent : .secondaryLabelColor
+        duration.toolTip = nil
+        progress.isHidden = true
+        // How it compares with how long it usually takes.
+        var usualText: (text: String, over: Bool)?
+        if let usual = entry.usualDuration {
+            if entry.isRunning {
+                let over = elapsed > usual
+                usualText = over ? ("\(Formatting.seconds(elapsed - usual)) over its usual \(Formatting.seconds(usual))", true)
+                                 : ("\(Formatting.seconds(usual - elapsed)) left · usually \(Formatting.seconds(usual))", false)
+                progress.isHidden = false
+                progress.show(fraction: elapsed / usual, tint: over ? theme.warning : theme.accent)
+                if over { duration.textColor = theme.warning }
+            } else if entry.status == .succeeded, let took = entry.duration {
+                let comparison = UsualDuration.Comparison(duration: took, usual: usual)
+                switch comparison {
+                case .asUsual:
+                    duration.toolTip = "As usual: it usually takes \(Formatting.seconds(usual))"
+                case .slower:
+                    duration.stringValue += " · " + comparison.multiplier
+                    duration.textColor = theme.warning
+                    duration.toolTip = "\(comparison.multiplier) its usual \(Formatting.seconds(usual))"
+                case .faster:
+                    duration.toolTip = "Faster than its usual \(Formatting.seconds(usual))"
+                }
+            }
+        }
 
         var detailText: String
         var detailColor = NSColor.secondaryLabelColor
         if let match = entry.output?.firstLine(matching: query) {
             detailText = match.line
             detailColor = .labelColor
+        } else if entry.isRunning, let usualText, !entry.fullScreen {
+            detailText = usualText.text
+            if usualText.over { detailColor = theme.warning }
         } else if entry.isRunning {
             detailText = entry.fullScreen ? "Running full screen…" : "Running…"
         } else if entry.fullScreen {
@@ -923,7 +990,13 @@ final class TimelineCell: NSTableCellView {
         case .succeeded: "succeeded"
         case .failed(let code): code < 0 ? "ended" : "failed with status \(code)"
         }
-        return "\(entry.command), \(status), \(detail)"
+        let timing = entry.isRunning ? nil : [duration.stringValue, duration.toolTip].compactMap { $0 }.joined(separator: ", ")
+        return [entry.command, status, timing, detail].compactMap { $0 }.joined(separator: ", ")
+    }
+
+    /// What the row shows, for tests.
+    var shown: (detail: String, duration: String, durationColor: NSColor?, progress: Double?) {
+        (detail.stringValue, duration.stringValue, duration.textColor, progress.isHidden ? nil : progress.shownFraction)
     }
 }
 

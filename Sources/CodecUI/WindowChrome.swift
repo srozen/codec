@@ -197,6 +197,7 @@ private struct TabButton: View {
                 RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.primary.opacity(0.06))
             }
         }
+        .overlay(alignment: .bottom) { UsualProgressLine(tab: tab, theme: theme) }
         .contentShape(RoundedRectangle(cornerRadius: 9))
         // A middle click closes the tab, as in browsers.
         .overlay(MiddleClickCatcher { actions.close(tab) })
@@ -214,6 +215,42 @@ private struct TabButton: View {
         .help(tab.customTitle == nil ? session.abbreviatedDirectory : "\(tab.automaticTitle) — \(session.abbreviatedDirectory)")
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+/// A thin line along the bottom of a tab whose command has a usual time, filling as it runs, so it can
+/// be read from any other tab. The focused pane's command, or else the first one running.
+private struct UsualProgressLine: View {
+    @ObservedObject var tab: TerminalTab
+    let theme: CodecTheme
+
+    var body: some View {
+        let running = ([tab.focused] + tab.panes).lazy.compactMap(\.session.running).first { $0.usual != nil }
+        if let running, let usual = running.usual {
+            TimelineView(.periodic(from: running.started, by: 1)) { context in
+                let elapsed = context.date.timeIntervalSince(running.started)
+                UsualProgressBar(fraction: elapsed / usual, tint: elapsed > usual ? theme.warningColor : theme.accentColor)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 2)
+            }
+            .accessibilityHidden(true)
+        }
+    }
+}
+
+/// A two-point line filled to `fraction` (up to all of it) in `tint`, on a faint track.
+struct UsualProgressBar: View {
+    let fraction: Double
+    let tint: Color
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule().fill(tint.opacity(0.18))
+                Capsule().fill(tint).frame(width: geometry.size.width * min(max(fraction, 0), 1))
+            }
+        }
+        .frame(height: 2)
     }
 }
 
@@ -279,6 +316,9 @@ private struct BarIconButton: View {
 extension CodecTheme {
     var accentColor: Color { Color(nsColor: accent) }
     var alertColor: Color { Color(nsColor: alert) }
+    /// For something taking longer than it should: the palette's yellow.
+    var warning: NSColor { ansi[3] }
+    var warningColor: Color { Color(nsColor: warning) }
     var backgroundColor: Color { Color(nsColor: background) }
     var foregroundColor: Color { Color(nsColor: foreground) }
     var dividerColor: Color { Color(nsColor: divider) }

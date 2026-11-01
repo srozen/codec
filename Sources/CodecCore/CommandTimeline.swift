@@ -80,6 +80,8 @@ public struct TimelineEntry: Identifiable, Codable, Equatable, Sendable {
     public var output: CapturedOutput?
     /// It switched to the alternate screen (vim, less, htop), so it left nothing in the scrollback.
     public var fullScreen = false
+    /// How long it usually takes, as known when it started; see `UsualDuration`.
+    public var usualDuration: TimeInterval?
 
     public init(id: Int, command: String, screenCommand: String? = nil, directory: String, started: Date,
                 block: CommandBlocks.Block?) {
@@ -129,12 +131,14 @@ public struct CommandTimeline: Codable, Equatable, Sendable {
     /// A command started. Anything still marked running ended without a report (the shell was killed).
     @discardableResult
     public mutating func begin(command: String, screenCommand: String? = nil, directory: String, started: Date,
-                               block: CommandBlocks.Block?) -> Int {
+                               block: CommandBlocks.Block?, usualDuration: TimeInterval? = nil) -> Int {
         abandonRunning()
         let id = nextID
         nextID += 1
-        entries.append(TimelineEntry(id: id, command: command, screenCommand: screenCommand, directory: directory,
-                                     started: started, block: block))
+        var entry = TimelineEntry(id: id, command: command, screenCommand: screenCommand, directory: directory,
+                                  started: started, block: block)
+        entry.usualDuration = usualDuration
+        entries.append(entry)
         if entries.count > limit { entries.removeFirst(entries.count - limit) }
         return id
     }
@@ -143,6 +147,12 @@ public struct CommandTimeline: Codable, Equatable, Sendable {
     public mutating func updateRunningCommand(_ command: String) {
         guard let index = entries.indices.last, entries[index].isRunning, !command.isEmpty else { return }
         entries[index].command = command
+    }
+
+    /// The running command's usual time, once its whole text is known.
+    public mutating func setRunningUsualDuration(_ usual: TimeInterval?) {
+        guard let index = entries.indices.last, entries[index].isRunning else { return }
+        entries[index].usualDuration = usual
     }
 
     public mutating func markRunningFullScreen() {

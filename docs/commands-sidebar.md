@@ -14,6 +14,26 @@ Commands are listed oldest first, under the folder they ran in. Each row has:
 - when it ran and how long it took,
 - the last line it printed (`Build complete!`, `3 tests failed`), or the exit status of a failed one.
 
+## How long it usually takes
+
+Run a command you've run before, and Codec shows how far along it likely is, from how long it took the last few times:
+
+![A test run part way through: progress in the status bar, the tab and the sidebar](images/usual-duration.png)
+
+- **The status bar** shows the time so far against the usual time, "42 s / usually 1m 36s", over a thin line that fills as it runs.
+- **The tab** gets the same line along its bottom, so you can tell from another tab when a build is about done.
+- **The sidebar** shows "54 s left · usually 1m 36s" under the running command.
+- Past the usual time, the line and the times turn yellow: "12 s over its usual 1m 36s". Something may be stuck.
+- Once it's done, a run that was clearly slower says by how much, in yellow: "2m 10s · 1.6×". Hover the time to see the usual one. The notification for a long command says so too: "Completed after 1m 31s, as usual".
+
+The usual time is the median of the last ten runs that worked, of the exact same command, in the same folder (or anywhere, if it hasn't run there three times yet). Codec leaves a command out when it can't tell:
+
+- it has run fewer than three times, or usually takes under 3 seconds,
+- its times are all over the place (`git push`, depending on the network),
+- or it never finishes on its own (`npm run dev`, `ssh`, `vim`): runs you stopped with ⌃C, and failed ones, don't count, as they end early.
+
+Turn it off in Settings › Shell › Show how long commands usually take.
+
 ## Going back to a command
 
 Click a command, or move through the list with ↑ / ↓: the terminal scrolls back to it and marks it, with a bar beside its rows and a tint on its line. Return goes there and gives the terminal the keyboard; Esc goes back to where you were.

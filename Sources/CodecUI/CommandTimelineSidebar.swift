@@ -79,6 +79,8 @@ final class CommandTimelineSidebar: NSView {
     let searchField = NSSearchField()
     /// The user dragged the leading edge to this width.
     var onResize: ((CGFloat) -> Void)?
+    /// Save to Intel, on a command from this pane.
+    var onSaveToIntel: ((TimelineEntry, Pane?) -> Void)?
 
     private(set) weak var pane: Pane?
     private(set) var rows: [Row] = []
@@ -316,7 +318,9 @@ final class CommandTimelineSidebar: NSView {
         case .directory(let directory):
             (view as? TimelineDirectoryCell)?.show((directory as NSString).abbreviatingWithTildeInPath, theme: theme)
         case .entry(let entry):
-            (view as? TimelineCell)?.show(entry, query: query, inScrollback: isInScrollback(entry), theme: theme, codeFont: codeFont)
+            guard let cell = view as? TimelineCell else { return }
+            cell.show(entry, query: query, inScrollback: isInScrollback(entry), theme: theme, codeFont: codeFont)
+            cell.onSave = { [weak self] in self?.saveToIntel(entry) }
         }
     }
 
@@ -367,6 +371,11 @@ final class CommandTimelineSidebar: NSView {
         showOutput(of: entry, row: table.selectedRow)
     }
 
+    func saveToIntel(_ entry: TimelineEntry) {
+        outputPopover?.close()
+        onSaveToIntel?(entry, pane)
+    }
+
     func focusTerminal() {
         guard let pane else { return }
         window?.makeFirstResponder(pane.view.preferredResponder)
@@ -409,7 +418,8 @@ final class CommandTimelineSidebar: NSView {
                     popover?.performClose(nil)
                     self?.insert(entry.command, run: true)
                 },
-                close: { [weak popover] in popover?.performClose(nil) }),
+                close: { [weak popover] in popover?.performClose(nil) },
+                saveToIntel: { [weak self] in self?.saveToIntel(entry) }),
             canInsert: pane.isAtCommandLine)
         popover.contentViewController = viewer
         outputPopover = popover
@@ -531,6 +541,8 @@ extension CommandTimelineSidebar: NSMenuDelegate {
             ClosureMenuItem("Show Output", image: "text.alignleft", enabled: hasOutput) { [weak self] in
                 self?.showOutput(of: entry, row: row)
             },
+            .separator(),
+            ClosureMenuItem("Save to Intel…", image: "bookmark") { [weak self] in self?.saveToIntel(entry) },
             .separator(),
             ClosureMenuItem("Copy Command", image: "doc.on.doc") { [weak self] in self?.copy(entry.command) },
             ClosureMenuItem("Copy Output", image: "doc.on.doc.fill", enabled: hasOutput) { [weak self] in
@@ -680,6 +692,10 @@ final class TimelineRowView: NSTableRowView {
 
     override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
 
+    override var isSelected: Bool {
+        didSet { subviews.compactMap { $0 as? TimelineCell }.forEach { $0.updateSaveButton() } }
+    }
+
     override func drawSelection(in dirtyRect: NSRect) {
         (isEmphasized ? selectionColor : selectionColor.withAlphaComponent(0.6)).setFill()
         NSBezierPath(roundedRect: bounds.insetBy(dx: 6, dy: 0), xRadius: 6, yRadius: 6).fill()
@@ -738,10 +754,25 @@ final class TimelineCell: NSTableCellView {
     private let detail = NSTextField(labelWithString: "")
     private let duration = NSTextField(labelWithString: "")
     private let archived = NSImageView()
+    private let saveButton = NSButton()
+    /// Save to Intel, from the button that shows over the row while the mouse is on it.
+    var onSave: (() -> Void)?
+    private var hovering = false {
+        didSet { updateSaveButton() }
+    }
 
     init() {
         super.init(frame: .zero)
         identifier = Self.identifier
+        saveButton.image = NSImage(systemSymbolName: "bookmark", accessibilityDescription: "Save to Intel")
+        saveButton.symbolConfiguration = .init(pointSize: 10.5, weight: .medium)
+        saveButton.isBordered = false
+        saveButton.bezelStyle = .accessoryBarAction
+        saveButton.contentTintColor = .secondaryLabelColor
+        saveButton.toolTip = "Save to Intel"
+        saveButton.target = self
+        saveButton.action = #selector(save)
+        saveButton.isHidden = true
         dot.wantsLayer = true
         dot.layer?.cornerRadius = 3.5
         for label in [command, detail] {
@@ -762,7 +793,7 @@ final class TimelineCell: NSTableCellView {
         archived.contentTintColor = .tertiaryLabelColor
         archived.toolTip = "No longer in the terminal’s scrollback. Codec kept its output: double-click or press Space to see it."
         archived.setContentCompressionResistancePriority(.required, for: .horizontal)
-        for view in [dot, command, time, detail, duration, archived] {
+        for view in [dot, command, time, detail, duration, archived, saveButton] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
@@ -785,7 +816,33 @@ final class TimelineCell: NSTableCellView {
             archived.centerYAnchor.constraint(equalTo: duration.centerYAnchor),
             duration.trailingAnchor.constraint(equalTo: time.trailingAnchor),
             duration.firstBaselineAnchor.constraint(equalTo: detail.firstBaselineAnchor),
+            // Over the time, while it shows.
+            saveButton.centerYAnchor.constraint(equalTo: time.centerYAnchor),
+            saveButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            saveButton.widthAnchor.constraint(equalToConstant: 22),
+            saveButton.heightAnchor.constraint(equalToConstant: 18),
         ])
+    }
+
+    @objc private func save() {
+        onSave?()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) { hovering = true }
+
+    override func mouseExited(with event: NSEvent) { hovering = false }
+
+    func updateSaveButton() {
+        let selected = (superview as? NSTableRowView)?.isSelected ?? false
+        saveButton.isHidden = !(hovering || selected)
+        time.alphaValue = saveButton.isHidden ? 1 : 0
     }
 
     @available(*, unavailable)
@@ -850,6 +907,7 @@ final class TimelineCell: NSTableCellView {
             dot.layer?.removeAnimation(forKey: "pulse")
         }
         toolTip = entry.command
+        updateSaveButton()
         setAccessibilityLabel(spokenDescription(entry, detail: detailText))
     }
 

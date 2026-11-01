@@ -301,7 +301,7 @@ struct TimelineTests {
 
         let entry = try #require(sidebar.rows.compactMap(\.entry).first)
         #expect(sidebar.contextMenuItems(for: entry, row: 1).map { $0.isSeparatorItem ? "-" : $0.title } == [
-            "Go to Command", "Show Output", "-", "Copy Command", "Copy Output", "Select Output", "-",
+            "Go to Command", "Show Output", "-", "Save to Intel…", "-", "Copy Command", "Copy Output", "Select Output", "-",
             "Insert Command", "Run Again", "-", "Copy Folder Path",
         ])
         sidebar.showOutput(of: entry, row: 1)

@@ -10,6 +10,8 @@ final class EditorPanel: NSView {
     let model: EditorModel
     /// Opens a file linked from a Markdown preview.
     var openFile: ((URL) -> Void)?
+    /// Run (true) or Insert (false) on a shell code block in a Markdown preview.
+    var runCode: ((String, Bool) -> Void)?
     /// The user dragged the trailing edge to this width.
     var onResize: ((CGFloat) -> Void)?
 
@@ -145,6 +147,7 @@ final class EditorPanel: NSView {
             if let preview = cached.preview { return preview }
             let preview = MarkdownPreviewView(document: document, theme: theme, codeFont: font)
             preview.openFile = { [weak self] url in self?.openFile?(url) }
+            preview.runCode = { [weak self] code, run in self?.runCode?(code, run) }
             cached.preview = preview
             return preview
         }

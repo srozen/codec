@@ -36,11 +36,15 @@ final class AppEnvironment {
     let history: HistoryStore
     /// Nil when the scripts couldn't be installed; panes then run without integration.
     let shellIntegration: ShellIntegration?
+    /// Where the user's own Intel is kept; projects keep theirs in `.codec/intel`.
+    let intelFolder: URL
     weak var coordinator: (any AppCoordinating)?
     private var promptSync: AnyCancellable?
 
     init(preferences: Preferences, sounds: any SoundPlaying, notifier: any Notifying,
-         systemMonitor: SystemMonitor, shellIntegration: ShellIntegration?, history: HistoryStore = HistoryStore(logURL: nil)) {
+         systemMonitor: SystemMonitor, shellIntegration: ShellIntegration?, history: HistoryStore = HistoryStore(logURL: nil),
+         intelFolder: URL = IntelLibrary.standardPersonalFolder) {
+        self.intelFolder = intelFolder
         self.preferences = preferences
         self.sounds = sounds
         self.notifier = notifier

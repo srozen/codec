@@ -35,11 +35,18 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     private(set) var timelineSidebar: CommandTimelineSidebar!
     private var timelineWidthConstraint: NSLayoutConstraint!
     private static let timelineVisibleKey = "CommandsVisible"
+    let intel: IntelLibrary
+    private(set) var intelSidebar: IntelSidebar!
+    /// The left sidebar: the Files and Intel tabs above the file tree or the Intel list.
+    private let navigator = NSView()
+    private var navigatorBar: NSHostingView<NavigatorBar>!
+    private static let navigatorTabKey = "NavigatorTab"
     private static let timelineWidthKey = "CommandsWidth"
 
     init(directory: String?, environment: AppEnvironment) {
         self.environment = environment
         fileTree = FileTreeModel(defaults: environment.preferences.stateDefaults)
+        intel = IntelLibrary(personalFolder: environment.intelFolder)
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: Self.defaultSize(font: environment.preferences.font())),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -65,7 +72,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         applyPreferences()
         observeEnvironment()
         addTab(directory: directory)
-        setFileTreeVisible(preferences.stateDefaults.bool(forKey: Self.fileTreeVisibleKey))
+        model.navigatorTab = preferences.stateDefaults.string(forKey: Self.navigatorTabKey).flatMap(NavigatorTab.init) ?? .files
+        setNavigatorVisible(preferences.stateDefaults.bool(forKey: Self.fileTreeVisibleKey))
         setTimelineVisible(preferences.stateDefaults.bool(forKey: Self.timelineVisibleKey))
     }
 
@@ -99,7 +107,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
                 close: { [weak self] in self?.requestClose(tab: $0) },
                 newTab: { [weak self] in self?.newTab(nil) },
                 showPalette: { [weak self] in self?.showCommandPalette(nil) },
-                toggleFileTree: { [weak self] in self?.toggleFileTree(nil) },
+                toggleFileTree: { [weak self] in
+                    guard let self else { return }
+                    self.setNavigatorVisible(!self.model.fileTreeVisible)
+                },
                 toggleTimeline: { [weak self] in self?.toggleCommandTimeline(nil) },
                 beginRenaming: { [weak self] in self?.beginRenaming($0) },
                 finishRenaming: { [weak self] in self?.finishRenaming($0, to: $1) })))
@@ -110,13 +121,37 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         sidebar = FileTreeSidebar(model: fileTree, theme: preferences.theme)
         sidebar.actions = fileTreeActions()
         sidebar.onResize = { [weak self] width in self?.resizeFileTree(to: width) }
+        intelSidebar = IntelSidebar(library: intel, theme: preferences.theme, defaults: preferences.stateDefaults)
+        intelSidebar.actions = intelActions()
+        intelSidebar.onResize = { [weak self] width in self?.resizeFileTree(to: width) }
+        navigatorBar = NSHostingView(rootView: NavigatorBar(model: model, theme: preferences.theme, select: { _ in }))
+        navigatorBar.rootView = makeNavigatorBar()
+        for view in [navigatorBar!, sidebar!, intelSidebar!] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            navigator.addSubview(view)
+        }
+        let below: [NSLayoutConstraint] = [sidebar!, intelSidebar!].flatMap { view -> [NSLayoutConstraint] in [
+            view.topAnchor.constraint(equalTo: navigatorBar.bottomAnchor),
+            view.leadingAnchor.constraint(equalTo: navigator.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: navigator.trailingAnchor),
+            view.bottomAnchor.constraint(equalTo: navigator.bottomAnchor),
+        ] }
+        NSLayoutConstraint.activate(below + [
+            navigatorBar.topAnchor.constraint(equalTo: navigator.topAnchor),
+            navigatorBar.leadingAnchor.constraint(equalTo: navigator.leadingAnchor),
+            navigatorBar.trailingAnchor.constraint(equalTo: navigator.trailingAnchor),
+            navigatorBar.heightAnchor.constraint(equalToConstant: 30),
+        ])
+        navigator.isHidden = true
         sidebar.isHidden = true
+        intelSidebar.isHidden = true
         let storedWidth = preferences.stateDefaults.double(forKey: Self.fileTreeWidthKey)
-        sidebarWidth = sidebar.widthAnchor.constraint(equalToConstant: 0)
+        sidebarWidth = navigator.widthAnchor.constraint(equalToConstant: 0)
         fileTreeWidth = storedWidth > 0 ? min(max(CGFloat(storedWidth), FileTreeSidebar.widthRange.lowerBound), FileTreeSidebar.widthRange.upperBound) : FileTreeSidebar.defaultWidth
 
         timelineSidebar = CommandTimelineSidebar(theme: preferences.theme, codeFont: preferences.font())
         timelineSidebar.onResize = { [weak self] width in self?.resizeTimeline(to: width) }
+        timelineSidebar.onSaveToIntel = { [weak self] entry, pane in self?.saveToIntel(entry, from: pane) }
         timelineSidebar.isHidden = true
         timelineWidthConstraint = timelineSidebar.widthAnchor.constraint(equalToConstant: 0)
         let storedTimelineWidth = preferences.stateDefaults.double(forKey: Self.timelineWidthKey)
@@ -126,12 +161,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
         editorPanel = EditorPanel(model: editor, theme: preferences.theme, font: preferences.font())
         editorPanel.openFile = { [weak self] url in self?.openFile(url, pin: true, focus: false) }
+        editorPanel.runCode = { [weak self] code, run in self?.runFromDocument(code, run: run) }
         editorPanel.onResize = { [weak self] width in self?.resizeEditor(to: width) }
         editorPanel.isHidden = true
         editorWidth = editorPanel.widthAnchor.constraint(equalToConstant: 0)
         editor.confirmClose = { [weak self] document, done in self?.confirmClosing(document, then: done) ?? done(true) }
 
-        for view in [backdrop, tint, tabBar!, sidebar!, editorPanel!, paneContainer, timelineSidebar!, statusBar!, palette!] as [NSView] {
+        for view in [backdrop, tint, tabBar!, navigator, editorPanel!, paneContainer, timelineSidebar!, statusBar!, palette!] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(view)
         }
@@ -150,13 +186,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
             tabBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             tabBar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             tabBar.heightAnchor.constraint(equalToConstant: TabBar.height),
-            sidebar.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
-            sidebar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            sidebar.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
+            navigator.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            navigator.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            navigator.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
             sidebarWidth,
             paneContainer.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
             editorPanel.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
-            editorPanel.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
+            editorPanel.leadingAnchor.constraint(equalTo: navigator.trailingAnchor),
             editorPanel.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
             editorWidth,
             paneContainer.leadingAnchor.constraint(equalTo: editorPanel.trailingAnchor),
@@ -194,6 +230,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         backdrop.isHidden = !preferences.blur
         tint.layer?.backgroundColor = theme.background.withAlphaComponent(preferences.blur ? preferences.opacity : 1).cgColor
         sidebar?.applyTheme(theme)
+        intelSidebar?.applyTheme(theme)
+        if navigatorBar != nil { navigatorBar.rootView = makeNavigatorBar() }
         timelineSidebar?.apply(theme: theme, codeFont: preferences.font())
         editorPanel?.apply(theme: theme, font: preferences.font())
         allPanes.forEach { $0.applyPreferences() }
@@ -254,16 +292,51 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     private var fileTreeWidth: CGFloat = FileTreeSidebar.defaultWidth
 
+    /// Shows the file tree, or hides the left sidebar.
     func setFileTreeVisible(_ visible: Bool) {
+        setNavigatorVisible(visible, tab: visible ? .files : nil)
+    }
+
+    /// Shows or hides the left sidebar, on `tab` when given or the tab it was on.
+    func setNavigatorVisible(_ visible: Bool, tab: NavigatorTab? = nil) {
+        let previous = model.navigatorTab
+        if let tab {
+            model.navigatorTab = tab
+            preferences.stateDefaults.set(tab.rawValue, forKey: Self.navigatorTabKey)
+        }
+        let shown = visible ? model.navigatorTab : nil
         // Before hiding it: AppKit would leave the keyboard with the window, not the terminal.
-        if !visible { giveTerminalTheKeyboard(ifIn: sidebar) }
+        if !visible || shown != previous { giveTerminalTheKeyboard(ifIn: previous == .files ? sidebar : intelSidebar) }
         model.fileTreeVisible = visible
         preferences.stateDefaults.set(visible, forKey: Self.fileTreeVisibleKey)
-        sidebar.isHidden = !visible
+        navigator.isHidden = !visible
+        sidebar.isHidden = shown != .files
+        intelSidebar.isHidden = shown != .intel
         sidebarWidth.constant = visible ? fileTreeWidth : 0
-        if visible, let pane = focusedPane { fileTree.follow(pane.session.directory) }
-        fileTree.isActive = visible
-        if visible, let directory = fileTree.currentDirectory { sidebar.reveal(directory) }
+        if shown == .files, let pane = focusedPane { fileTree.follow(pane.session.directory) }
+        fileTree.isActive = shown == .files
+        if shown == .files, let directory = fileTree.currentDirectory { sidebar.reveal(directory) }
+        if shown == .intel, let pane = focusedPane { intel.follow(pane.session.directory) }
+        intel.isActive = shown == .intel
+        // Now, rather than when the library's change reaches it, so it never shows empty.
+        if shown == .intel { intelSidebar.reload() }
+    }
+
+    private func makeNavigatorBar() -> NavigatorBar {
+        NavigatorBar(model: model, theme: preferences.theme) { [weak self] tab in
+            guard let self else { return }
+            self.setNavigatorVisible(true, tab: tab)
+            self.focusNavigator()
+        }
+    }
+
+    /// Puts the keyboard on the left sidebar's tab.
+    private func focusNavigator() {
+        window?.layoutIfNeeded()
+        switch model.navigatorTab {
+        case .files: window?.makeFirstResponder(sidebar.outline)
+        case .intel: intelSidebar.focusList()
+        }
     }
 
     /// Gives the terminal the keyboard if `view` has it.
@@ -278,6 +351,105 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         fileTreeWidth = min(max(width, FileTreeSidebar.widthRange.lowerBound), max(maximum, FileTreeSidebar.widthRange.lowerBound))
         sidebarWidth.constant = fileTreeWidth
         preferences.stateDefaults.set(Double(fileTreeWidth), forKey: Self.fileTreeWidthKey)
+    }
+
+    // MARK: - Intel
+
+    private func intelActions() -> IntelActions {
+        IntelActions(
+            run: { [weak self] entry in self?.showIntelRun(entry) },
+            open: { [weak self] entry in self?.openFile(entry.url, pin: true, focus: false) },
+            edit: { [weak self] entry in self?.showIntelEditor(entry.item, source: entry.source, replacing: entry) },
+            openFile: { [weak self] entry in
+                guard let self else { return }
+                self.openFile(entry.url, pin: true, focus: true)
+                self.editor.selected?.mode = .source
+            },
+            create: { [weak self] kind, source, folder in self?.newIntel(kind, source: source, folder: folder) },
+            focusTerminal: { [weak self] in self?.focusTerminal() })
+    }
+
+    /// Starts a new script or document, in the user's own Intel or, given, a folder of either library.
+    func newIntel(_ kind: IntelItem.Kind, source: IntelLibrary.Source = .personal, folder: String = "") {
+        if let pane = focusedPane { intel.follow(pane.session.directory) }
+        showIntelEditor(IntelItem(kind: kind, title: ""), source: source, folder: folder, replacing: nil)
+    }
+
+    /// Saves a command from the Commands sidebar as a script.
+    func saveToIntel(_ entry: TimelineEntry, from pane: Pane?) {
+        intel.follow(entry.directory)
+        showIntelEditor(.script(title: "", command: entry.command), source: .personal, replacing: nil,
+                        branch: pane?.session.gitBranch)
+    }
+
+    private(set) var isShowingOverlayForm = false
+
+    /// Shows a form over the window, as the history search is.
+    private func showOverlayForm(_ form: some View) {
+        if model.paletteOpen { hideCommandPalette() }
+        model.paletteOpen = true
+        isShowingOverlayForm = true
+        palette.rootView = AnyView(
+            ZStack(alignment: .top) {
+                Color.black.opacity(0.001)
+                    .onTapGesture { [weak self] in self?.hideCommandPalette() }
+                form
+                    .glassEffect(.regular, in: .rect(cornerRadius: 18))
+                    .shadow(color: .black.opacity(0.3), radius: 30, y: 12)
+                    .padding(.top, TabBar.height + 36)
+            })
+        palette.capturesMouse = true
+        watchOverlayKeys()
+        focusSearchField(in: palette)
+    }
+
+    /// A script's form: fill in its variables, then run or insert it in the focused pane.
+    func showIntelRun(_ entry: IntelLibrary.Entry) {
+        let pane = focusedPane
+        showOverlayForm(IntelRunView(
+            item: entry.item, theme: preferences.theme, codeFont: preferences.font(), canInsert: pane?.isAtCommandLine ?? false,
+            insert: { [weak self, weak pane] command in
+                self?.hideCommandPalette()
+                pane?.replaceCommandLine(with: command, run: false)
+            },
+            run: { [weak self, weak pane] command in
+                self?.hideCommandPalette()
+                pane?.replaceCommandLine(with: command, run: true)
+            },
+            edit: { [weak self] in self?.showIntelEditor(entry.item, source: entry.source, replacing: entry) },
+            dismiss: { [weak self] in self?.hideCommandPalette() }))
+    }
+
+    /// The form to save, create or edit an item.
+    func showIntelEditor(_ item: IntelItem, source: IntelLibrary.Source, folder: String? = nil,
+                         replacing existing: IntelLibrary.Entry?, branch: String? = nil) {
+        intel.reload()
+        let folders = { (source: IntelLibrary.Source) in self.intel.folders(in: source).map(\.path) }
+        showOverlayForm(IntelEditView(
+            item: item, source: source, folder: folder ?? existing?.folder ?? "", isNew: existing == nil, theme: preferences.theme,
+            projectName: intel.projectName, folders: [.personal: folders(.personal), .project: folders(.project)],
+            branch: branch ?? focusedPane?.session.gitBranch,
+            save: { [weak self] item, source, folder in
+                guard let self else { return nil }
+                do {
+                    let url = try self.intel.save(item, to: source, folder: folder, replacing: existing)
+                    self.hideCommandPalette()
+                    if item.kind == .doc, existing == nil {
+                        self.openFile(url, pin: true, focus: true)
+                        self.editor.selected?.mode = .split
+                    }
+                    return nil
+                } catch {
+                    return "Couldn’t save: \(error.localizedDescription)"
+                }
+            },
+            cancel: { [weak self] in self?.hideCommandPalette() }))
+    }
+
+    /// Run or Insert on a code block in a Markdown document.
+    private func runFromDocument(_ code: String, run: Bool) {
+        guard let pane = focusedPane, pane.replaceCommandLine(with: code, run: run) else { return NSSound.beep() }
+        focusTerminal()
     }
 
     // MARK: - Commands sidebar
@@ -323,7 +495,12 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         focusedDirectory = pane.session.$directory
             .removeDuplicates()
             .receive(on: RunLoop.main)
-            .sink { [weak self] directory in MainActor.assumeIsolated { self?.fileTree.follow(directory) } }
+            .sink { [weak self] directory in
+                MainActor.assumeIsolated {
+                    self?.fileTree.follow(directory)
+                    self?.intel.follow(directory)
+                }
+            }
     }
 
     private func focusTerminal() {
@@ -804,6 +981,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
             hideCommandPalette()
             return true
         }
+        // A form has several fields; the keyboard stays in whichever the user chose.
+        if isShowingOverlayForm { return false }
         if let window, let field = Self.firstTextField(in: palette), !Self.isEditing(field, in: window) {
             window.makeFirstResponder(field)
         }
@@ -866,9 +1045,20 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     @objc func clearBuffer(_ sender: Any?) { focusedPane?.clearBuffer() }
 
+    /// ⇧⌘E: shows the file tree, or hides it when it's showing.
     @objc func toggleFileTree(_ sender: Any?) {
-        setFileTreeVisible(!model.fileTreeVisible)
-        if model.fileTreeVisible { window?.makeFirstResponder(sidebar.outline) }
+        toggleNavigator(.files)
+    }
+
+    /// ⇧⌘I: shows Intel, or hides it when it's showing.
+    @objc func toggleIntel(_ sender: Any?) {
+        toggleNavigator(.intel)
+    }
+
+    private func toggleNavigator(_ tab: NavigatorTab) {
+        if model.fileTreeVisible, model.navigatorTab == tab { return setNavigatorVisible(false) }
+        setNavigatorVisible(true, tab: tab)
+        focusNavigator()
     }
 
     @objc func switchBranch(_ sender: Any?) {
@@ -917,6 +1107,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         guard model.paletteOpen else { return }
         model.paletteOpen = false
         isShowingHistoryPanel = false
+        isShowingOverlayForm = false
         palette.capturesMouse = false
         palette.rootView = AnyView(EmptyView())
         stopWatchingOverlayKeys()
@@ -945,8 +1136,16 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
             .init(id: "select-output", title: "Select Output of Last Command", shortcut: "⇧⌘A", systemImage: "text.line.first.and.arrowtriangle.forward") { [weak self] in
                 self?.selectLastOutput(nil)
             },
-            .init(id: "file-tree", title: model.fileTreeVisible ? "Hide File Tree" : "Show File Tree", shortcut: "⇧⌘E",
+            .init(id: "file-tree", title: model.fileTreeVisible && model.navigatorTab == .files ? "Hide File Tree" : "Show File Tree", shortcut: "⇧⌘E",
                   systemImage: "sidebar.left") { [weak self] in self?.toggleFileTree(nil) },
+            .init(id: "intel", title: model.fileTreeVisible && model.navigatorTab == .intel ? "Hide Intel" : "Show Intel", shortcut: "⇧⌘I",
+                  systemImage: "antenna.radiowaves.left.and.right") { [weak self] in self?.toggleIntel(nil) },
+            .init(id: "new-intel-script", title: "New Intel Script…", systemImage: "apple.terminal") { [weak self] in
+                self?.newIntel(.script)
+            },
+            .init(id: "new-intel-doc", title: "New Intel Document…", systemImage: "doc.text") { [weak self] in
+                self?.newIntel(.doc)
+            },
             .init(id: "commands", title: model.timelineVisible ? "Hide Commands Sidebar" : "Show Commands Sidebar", shortcut: "⇧⌘L",
                   systemImage: "sidebar.right") { [weak self] in self?.toggleCommandTimeline(nil) },
             .init(id: "command-history", title: "Search Command History", shortcut: "⌘Y", systemImage: "clock.arrow.circlepath") { [weak self] in
@@ -1006,6 +1205,18 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         if let tab = model.selected, tab.customTitle != nil {
             commands.append(.init(id: "reset-tab-name", title: "Reset Tab Name", systemImage: "arrow.uturn.backward") { [weak self] in
                 self?.finishRenaming(tab, to: "")
+            })
+        }
+        if !intel.isActive {
+            if let pane = focusedPane { intel.follow(pane.session.directory) }
+            intel.reload()
+        }
+        for entry in intel.entries {
+            let script = entry.item.kind == .script
+            commands.append(.init(id: "intel-\(entry.id)", title: "Intel: \(entry.item.title)",
+                                  systemImage: script ? "apple.terminal" : "doc.text") { [weak self] in
+                guard let self else { return }
+                if script { self.showIntelRun(entry) } else { self.openFile(entry.url, pin: true, focus: false) }
             })
         }
         for (index, tab) in model.tabs.enumerated() {

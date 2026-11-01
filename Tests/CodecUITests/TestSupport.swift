@@ -79,7 +79,8 @@ final class TestEnvironment {
         environment = AppEnvironment(preferences: preferences, sounds: sounds, notifier: notifier,
                                      systemMonitor: SystemMonitor(sampler: IdleSampler(), interval: 3600),
                                      shellIntegration: integration ? shellIntegration : nil,
-                                     history: HistoryStore(logURL: directory.appendingPathComponent("history.jsonl")))
+                                     history: HistoryStore(logURL: directory.appendingPathComponent("history.jsonl")),
+                                     intelFolder: directory.appendingPathComponent("intel"))
         environment.coordinator = coordinator
     }
 

@@ -1,122 +1,109 @@
-# Codec
+<p align="center">
+  <img src="docs/images/icon.png" width="128" height="128" alt="Codec's icon">
+</p>
 
-A native macOS terminal: Liquid Glass chrome, tabs and split panes in one window, shell integration that tracks every command, a command palette, and codec-style system meters.
+<h1 align="center">Codec</h1>
 
-## Build, run, test
+<p align="center">
+  <strong>A native macOS terminal that remembers what you did.</strong><br>
+  Every command and its output, your saved scripts and notes, your files and your history, one keystroke away, in a window of Liquid Glass.
+</p>
 
-Requires macOS 26+ and Xcode 26+ (Swift 6).
+<p align="center">
+  <a href="https://github.com/srozen/codec/actions/workflows/ci.yml"><img src="https://github.com/srozen/codec/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/macOS-26%2B-black?logo=apple" alt="macOS 26+">
+  <img src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white" alt="Swift 6">
+</p>
+
+<p align="center">
+  <img src="docs/images/hero.png" alt="Codec with the file tree, a zsh session with Codec's prompt, and the Commands sidebar">
+</p>
+
+You ran a dozen things, went on for a while, and now you need to know what that build printed twenty minutes ago. Or you need the command you ran last Tuesday, in another folder, with a different branch. Codec is a terminal built around that moment: it keeps track of what you run, where and how it went, and puts it back in front of you without leaving the keyboard. It's written in Swift for macOS, with AppKit, SwiftUI and SwiftTerm: no Electron, no account, nothing leaves your Mac.
+
+## Every command, remembered
+
+<img src="docs/images/commands.png" alt="The Commands sidebar with a command's output open">
+
+The **Commands sidebar** (⇧⌘L) lists everything the pane ran, under the folder it ran in: whether it worked, how long it took, the last line it printed. Click one and the terminal scrolls back to it and marks it. Open its output in a viewer you can search, copy from, or run again, even after it has scrolled out of the buffer or ⌘K cleared it. Filter by what commands printed, not just what you typed.
+
+→ [Commands sidebar](docs/commands-sidebar.md)
+
+## Intel: the commands you keep coming back to
+
+<img src="docs/images/intel.png" alt="Intel in the left sidebar, organised in folders, with a script's form open">
+
+Save a command with the blanks left in (`{{branch}}`, `{{env}}`) and run it next time from a form with defaults and choice lists. When you save one from the Commands sidebar, Codec spots the parts that tend to change (the branch, paths, URLs, numbers) and offers them as variables, one click each. Keep notes beside them as Markdown documents whose shell blocks you can **▶ Run** from the page.
+
+Intel is plain Markdown in folders: yours in `~/.codec/intel`, and your team's in the repository's `.codec/intel`, committed and shared like the rest of the code.
+
+→ [Intel](docs/intel.md)
+
+## History that knows where you were
+
+<img src="docs/images/history.png" alt="The history search, grouped by day, with folders, durations and failures">
+
+↑ at the prompt opens a menu of what you've typed before, filtered as you type. ⌃R or ⌘Y opens the full search: every command with the folder it ran in, how long it took, whether it failed, ranked by how well it matches, then by whether it ran here. As you type, the rest of your last matching command waits dimmed after the cursor; → takes it.
+
+→ [The command line](docs/command-line.md)
+
+## Your project beside the shell
+
+<img src="docs/images/editor.png" alt="The file tree colored by git status, and Swift code in the editor">
+
+The **file tree** (⇧⌘E) follows you as you `cd`, colors files by git status, and fuzzy-finds any file in the project. Click a file to read it beside the terminal, highlighted in twenty-odd languages; edit it with the keys you'd expect from a code editor. Markdown renders live, with Run buttons on its shell blocks, so a project's README becomes something you can click through.
+
+→ [Files and editor](docs/files-and-editor.md)
+
+## A command line that behaves like a text field
+
+Click anywhere in the command you're typing to put the cursor there, drag to select part of it, double-click a word, ⌘X it. zsh stays the editor underneath, so your completion, key bindings and plugins keep working. Double-click a path with its line number, a URL or a flag with its value to select all of it at once. Tab completion ignores case, matches inside names, and forgives a typo.
+
+## Splits, branches and a prompt you build
+
+<img src="docs/images/branches.png" alt="Two panes side by side, and the branch switcher open">
+
+Tabs and nested splits in one window. Click the branch in the status bar or in the prompt itself to switch or create branches with a fuzzy search. Build your prompt from chips (directory, branch, changes, duration, exit status, Python environment, Kubernetes context) in a visual editor, or keep your own PS1. Before anything closes, Codec tells you exactly what's still running in it.
+
+→ [Tabs and panes](docs/tabs-and-panes.md) · [Prompt and status bar](docs/prompt-and-status-bar.md)
+
+## Looks the part
+
+<img src="docs/images/themes.png" alt="Codec, Arctic, Amber and Daylight themes">
+
+Four themes (Codec, Arctic, Amber and Daylight) drawn through everything from the prompt chips to the file icons, with blur, opacity and optional CRT scanlines. The status bar's CPU, memory and network meters rise in codec-style bars and seven-segment digits. When a long command finishes in a pane you're not watching, its tab lights up, you get a notification, and, if you like, the codec calls.
+
+→ [Settings](docs/settings.md)
+
+## Get it
+
+Codec needs **macOS 26** or later. Build it with **Xcode 26** or later:
 
 ```bash
-make run       # build build/Codec.app (release) and open it
-make test      # build and run all tests
-make build     # debug build only
+git clone https://github.com/srozen/codec.git
+cd codec
+make run
 ```
 
-`make` builds with two jobs to keep memory use reasonable; override with `make test JOBS=8`. Without make: `scripts/build-app.sh [debug|release]`, `swift test`.
+That builds `build/Codec.app` in release and opens it; drag it to Applications to keep it. Most of what's above relies on Codec's zsh integration, which loads automatically, alongside your own `.zshrc`, unchanged.
 
-### Sounds
+→ [Getting started](docs/getting-started.md)
 
-Put `codec_call.mp3`, `codec_lock.mp3` and `codec_exit.mp3` in `Resources/Sounds/` and the build script bundles them. They're git-ignored, since they're game audio; without them Codec synthesizes similar cues.
-
-## Features
-
-- **Tabs and splits.** Tabs live in the title bar. Split any pane right (⌘D) or down (⇧⌘D); inactive panes dim. New tabs and panes open in the current directory.
-- **Closing safely.** Middle-click a tab to close it. Before a tab, pane or window closes, or Codec quits, it asks if that would end something still running, foreground or background (`npm run dev &` counts; the shell's own helpers don't), and names what would be terminated.
-- **Tab names.** A tab is titled after what's running in it. Double-click it, right-click → Rename Tab…, or press ⇧⌘R to give it a name of your own; clear the name to go back to the automatic title.
-- **An editable command line (zsh).** At the prompt, the command you're typing works like a text field. Click to put the cursor anywhere, drag to select part of it, double-click a word, triple-click the whole line. Typing replaces the selection and ⌫ / ⌦ delete it; ⌘X cuts it, ⌘C copies. ⇧ with arrows (and ⌥, Home, End) extends a selection, ⌘← / ⌘→ jump to either end, ⇧⌘← / ⇧⌘→ select to them, ⌘⌫ deletes to the start. zsh stays the editor, so completion, history and plugins like zsh-autosuggestions keep working; its selection (the region) is what's highlighted, in the theme's selection color.
-- **Text selection.** Double-click selects a whole token: a path with its line and column (`Sources/App/Main.swift:42:7`), a URL, an email address, an IP and port, a flag with its value. Surrounding brackets, quotes and trailing punctuation are left out. Triple-click selects the line, ⌥-drag a rectangular block. Copy on select is a setting (Settings › Shell › Selection). The scrollback keeps 10,000 lines.
-- **Commands sidebar (zsh).** ⇧⌘L, or the sidebar button at the right of the tab bar, lists every command run in the focused pane, oldest first, under the folder it ran in: whether it worked (a green or red dot, pulsing while it runs), when it ran, how long it took, and the last line it printed (`Build complete!`, `3 tests failed`), with the exit status of failed ones. It follows the focused pane, like the file tree. Click a command, or move through the list with ↑/↓, and the terminal scrolls back to it and marks it: a bar beside the command's rows and a tint on its line. Return goes there and gives the terminal the keyboard, Esc goes back. Space or a double-click shows its output in a viewer you can select from and search (⌘F), with Copy Output, Go to Command, Insert and Run Again. Codec keeps each command's output when it finishes (its first and last few thousand lines), so it's still there after it has left the scrollback or ⌘K cleared it; such commands show a small box icon, and clicking them opens the viewer. The filter field searches commands and what they printed: a row shows the line that matched, and going to it scrolls to that line. ⚠ shows failed commands only; the bin clears the list. Right-click for Copy Command / Output, Select Output, Insert Command, Run Again, Copy Folder Path.
-- **Command output (zsh).** Copy or select what a command printed without dragging over it: right-click the output → Copy Output / Select Output, or ⇧⌘C / ⇧⌘A for the last command. Codec finds a command's output from the command line itself, so it stays right however fast the output scrolled by, and after a resize rewraps the lines.
-- **File tree.** ⇧⌘E, or the sidebar button left of the tabs, opens the files of the focused pane's project: its git repository, or its directory outside one. It follows the pane as you `cd`, opens down to the current directory, updates as files change on disk, and colors files by git status (modified, added, untracked, ignored, with a dot on folders holding changes). Files and folders have Codec's own icons, drawn from the theme's palette: a page with a folded corner and a monogram (SW, TS, PY…) or glyph per type (a `>_` for scripts, signal bars for audio, a key for `.env`…), and folders colored by role (sources, tests, docs, assets, scripts), dimmed for build output and dependencies, with the current one in the accent. Type in the filter field to fuzzy-search every file in the project. Click a folder to open it, click a file to view it in the editor, or right-click: Open in Default App, Open in Terminal Editor (`$EDITOR` in a new pane), Change Directory Here, Open in New Tab, Insert Path, Copy Path / Relative Path, Reveal in Finder. Drag files from the tree or from Finder onto a pane to type their quoted paths. Return opens, ⌘C copies paths, Esc goes back to the terminal; drag the edge to resize.
-- **Intel.** Scripts and notes you come back to, in the Intel tab beside Files (⇧⌘I, or the tabs above the left sidebar). A script has a title, a description and a command with `{{variables}}`; a variable can have a description, a default, and a list of choices. Click a script, or pick it in the command palette ("Intel: …"), to fill in its variables in a form that shows the finished command: Return puts it on the command line, ⌘Return runs it. Documents open in the editor, rendered; every Markdown document's shell code blocks get Run and Insert, which act on the focused pane. Save a command from the Commands sidebar with the bookmark on its row (or right-click › Save to Intel…, or the output viewer's button): Codec offers the parts that tend to change (the branch, paths, URLs, numbers, quoted text) as variables, one click each. Intel is plain Markdown files with a small YAML header, so they read well anywhere and can be edited by hand: your own in `~/.codec/intel`, a project's in its repository's `.codec/intel`, to commit and share with the team. The project's come first. Keep them in folders and subfolders: + › New Folder, or right-click a folder to add a script, a document or a folder inside it, rename it, or move it. Drag an item or a folder onto another folder to move it there, Project and Personal alike; → and ← open and close folders, and Codec remembers which are closed. Right-click an item to edit it, open its file, move it between Personal and Project, reveal it or move it to the Trash; + adds a script or a document where the selection is, and the save form picks the folder.
-
-  ````markdown
-  ---
-  title: Deploy a branch
-  description: Pushes it, then deploys
-  kind: script
-  variables:
-    - name: branch
-      default: main
-    - name: env
-      choices: [staging, production]
-  ---
-
-  ```sh
-  git push origin {{branch}} && ./deploy --env {{env}}
-  ```
-  ````
-- **Editor.** Click a file in the tree to see it beside the terminal; the next click replaces it, as a preview tab (in italics). Double-click, press Return, or start typing to keep it in a tab of its own. Code is colored by Codec's own highlighter, from the theme's palette: Swift, JavaScript/TypeScript, Python, Ruby, Go, Rust, C/C++/Objective-C, Java, Kotlin, C#, PHP, Lua, SQL, shell scripts and Dockerfiles, JSON, YAML, TOML/INI, HTML/XML, CSS and Markdown. Editing works as you'd expect from a code editor: line numbers, the current line highlighted, Return keeps indentation (and adds a level after `{` or `:`), Tab and ⇧Tab indent and outdent the selected lines in the file's own style, ⌘/ toggles comments, ⌘F finds, undo is per file. ⌘S saves, ⌘W closes the file while the editor has the keyboard (⌥⌘W from anywhere), and Codec asks before throwing away unsaved changes. If a file changes on disk it reloads, or, when you have edits, asks whether to reload or keep yours. Markdown opens rendered, styled from the theme, with tables, task lists and colored code blocks; switch between Source, Split (live preview beside the source) and Preview with the control in the editor's header or ⇧⌘V. Links open in the browser, links to other files open in the editor. Images and PDFs are shown too; other files offer to open in their app. Drag the editor's edge to resize it.
-- **Branch switcher.** Click the branch in the status bar, or in the prompt itself (it works for your own PS1 too, wherever it shows the branch), or press ⇧⌘B to switch branches: fuzzy-search local branches (most recent first) and remote ones, which become tracking branches. Type a new name to create a branch. If git refuses, say because of uncommitted changes that would be overwritten, its explanation is shown in the popover. The prompt and status bar update straight away.
-- **History as you type (zsh).** The rest of the most recent matching command appears dimmed after the cursor: → or End takes it, ⌥→ one word. (If you use zsh-autosuggestions, it keeps doing this instead.)
-- **History menu and search.** ↑ at the prompt opens a menu just above it, filtered by what you've typed, the newest command nearest the prompt: ↑/↓ to browse, type to narrow it, Return to put the command on the line, ⌘Return to run it. ⌃R at the prompt, or ⌘Y anywhere, opens the full search: every command with where it ran, how long it took, when, and whether it failed, grouped by day, filterable to this folder or to failed commands. Matches rank by how well they match (start of the command, then anywhere, then fuzzy), then by whether they ran in this folder, then by how recent. Right-click a command to copy it or its folder, or remove it from history (⌘⌫). Codec keeps its own record in `~/Library/Application Support/Codec/history.jsonl` and includes your zsh history file, so older commands and those from other terminals are there too. Commands typed with a leading space aren't kept. ↑ and ⌃R are only taken over where they still do zsh's default (an fzf ⌃R stays fzf's); multi-line commands keep ↑ for moving between lines.
-- **Friendlier Tab completion (zsh).** Matching ignores case and finds text inside names, so `dev` completes `Development` and `notes` completes `my-notes.txt`; a typo is forgiven in longer words; ambiguous completions open a menu you can move through with the arrows, in the theme's colors, folders first. Codec loads zsh's completion system if your `.zshrc` doesn't, and never overrides completion styles you set yourself. Each of these can be turned off in Settings › Shell.
-- **Right-click menu.** Copy, Copy Output, Select Output, Paste, Select All, Split Right/Down, Find, Clear Buffer, Restart Shell, Open in Finder, Copy Path, Switch Branch…, Close Pane. Programs that use the mouse (vim, htop, tmux) still get right-clicks.
-- **Shell integration (zsh).** Codec loads a small hook script through `ZDOTDIR`, then your own startup files unchanged. It reports OSC 133 prompt marks, the working directory (OSC 7) and each command's exit status and duration. That gives you:
-  - the status bar: directory (click to open in Finder), git branch (click to switch), and the running or last command with its exit status and time,
-  - ⌘↑ / ⌘↓ to jump between commands in the scrollback,
-  - a notification when a command that ran longer than 10 s finishes in a pane you aren't looking at.
-- **Prompt builder.** Settings › Prompt › Edit Prompt… works like Warp's: pick the Codec prompt or keep your shell's own (PS1), and build the Codec prompt from chips. Click or drag a chip to add it, drag to reorder, × to remove, right-click to recolor. Chips: working directory, git branch (with `*` for uncommitted changes), git changes (`3 • +10 -2`), Python environment, Kubernetes context, last command's duration and exit status, background jobs, user@host, time and date. By default segments are drawn as chips: tinted, rounded pills like the ones in Codec's status bar, colored from your theme, with the directory in bold. The Text style draws them as a phrase instead (`~/code/codec on main* via venv took 3.2s`). Choose one or two lines and the symbol, which turns red after a failed command. Changes apply to open zsh panes at their next prompt. Values from the shell (branch names and the like) are escaped, so they can't run code even with `prompt_subst` on.
-- **System meters.** The right end of the status bar shows CPU, memory and network as codec-style rising bars and seven-segment readouts; bars turn red above 85 %. Click to open Activity Monitor. Can be hidden in Settings.
-- **Command palette.** ⇧⌘P, or the ⌘ button in the tab bar. Fuzzy search over every action, theme and open tab.
-- **Attention.** A bell or a finished long command in a background pane marks its tab, badges the Dock icon and posts a notification; clicking it takes you there. In the focused pane, the bell shows a small "!" at the cursor.
-- **Exits.** A clean `exit` closes the pane. If the shell crashes or is killed, the pane stays with a banner: Return restarts it, Esc closes it.
-- **Themes.** Codec, Arctic, Amber and Daylight, with adjustable blur and opacity.
-
-### Shortcuts
+## Documentation
 
 | | |
 |---|---|
-| ⌘T / ⌘N | New tab / new window |
-| ⌘D / ⇧⌘D | Split right / split down |
-| ⌘W / ⇧⌘W | Close pane / close window |
-| ⌘] / ⌘[ | Next / previous pane |
-| ⌥⌘←→↑↓ | Focus the pane in that direction |
-| ⇧⌘] / ⇧⌘[, ⌃⇥ | Next / previous tab |
-| ⌘1…⌘9 | Go to tab |
-| ⇧⌘R | Rename tab |
-| ⌘↑ / ⌘↓ | Previous / next command |
-| ⇧⌘P | Command palette |
-| ⌘K | Clear buffer |
-| ⇧⌘C / ⇧⌘A | Copy / select the last command's output |
-| ⇧⌘B | Switch branch |
-| ⇧⌘E | Show / hide the file tree |
-| ⇧⌘I | Show / hide Intel |
-| ⇧⌘L | Show / hide the Commands sidebar |
-| ↑, ⌃R (at the prompt), ⌘Y | History menu, history search |
-| →, ⌥→ | Take the suggested command, or its next word |
-| ⌘S, ⌥⌘W | Save / close the file in the editor |
-| ⌘/ | Toggle comment |
-| ⇧⌘V | Markdown: toggle preview |
-| ⌘← / ⌘→, ⇧⌘← / ⇧⌘→, ⌘⌫ | Command line: move to, select to, delete to the start or end |
-| ⌘F, ⌘G, ⇧⌘G | Find |
-| ⌘+ / ⌘− / ⌘0 | Font size |
-| ⌘, | Settings |
+| [Getting started](docs/getting-started.md) | Install, first steps, shell integration, where things are kept |
+| [Tabs and panes](docs/tabs-and-panes.md) | Tabs, splits, closing safely, alerts |
+| [The command line](docs/command-line.md) | Editing, selection, history, completion, command output |
+| [Commands sidebar](docs/commands-sidebar.md) | Going back to earlier commands and their output |
+| [Intel](docs/intel.md) | Saved scripts and notes, folders, the file format |
+| [Files and editor](docs/files-and-editor.md) | File tree, editor, Markdown |
+| [Prompt and status bar](docs/prompt-and-status-bar.md) | Prompt builder, branch switcher, meters |
+| [Settings](docs/settings.md) | Themes, fonts, shell, alerts, sounds |
+| [Keyboard shortcuts](docs/shortcuts.md) | All of them |
+| [Development](docs/development.md) | Architecture, tests, CI, screenshots |
 
-## Architecture
+## Built with
 
-Three targets, compiled in Swift 6 language mode (strict concurrency):
-
-| Target | What's in it |
-|---|---|
-| `CodecCore` | Logic with no UI, all of it unit-tested: the split layout tree and pane geometry, shell integration scripts and environment, integration event parsing, bell and exit policies, preferences, git branch lookup and switching, smart selection, command block tracking, each pane's command timeline and kept output, Intel files and their variables, syntax highlighting, Markdown rendering, file types, command history ranking and storage, process inspection, system sampling. |
-| `CodecUI` | AppKit and SwiftUI: app delegate and menus, window controller, tabs, panes, chrome, palette, settings, sounds, notifications. |
-| `Codec` | The executable; calls `CodecApp.run()`. |
-
-`CodecUI` takes its services through an `AppEnvironment` (preferences, sound player, notifier, system monitor, shell integration, app coordinator), and panes talk to their window through the `PaneHost` protocol. Tests swap in fakes for both.
-
-```
-Sources/CodecCore/   SplitLayout, Commands, ShellIntegration, Policies, Preferences,
-                     GitInfo, ProcessInspector, SystemMonitor, FuzzyMatch
-Sources/CodecUI/     AppDelegate, MainMenu, AppEnvironment, TerminalWindowController, TerminalTab,
-                     Pane, PaneView, CodecTerminalView, WindowChrome, StatusBar, CommandPalette,
-                     SettingsView, Theme, SevenSegment, CodecSound, Notifier, Session, Log
-Sources/Codec/       main.swift
-Tests/CodecCoreTests unit tests, plus zsh integration tests that run a real zsh in a headless terminal
-Tests/CodecUITests   panes, context menu, tabs, window layout and actions, palette, end-to-end zsh tests
-scripts/             build-app.sh (bundles Codec.app), make-icon.swift (renders the icon)
-```
-
-Tests use [Swift Testing](https://developer.apple.com/documentation/testing). CI (`.github/workflows/ci.yml`) builds, runs the tests and bundles the app on every push and pull request.
-
-Terminal emulation is provided by [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm).
+[SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) for terminal emulation, and Swift 6 with strict concurrency, AppKit and SwiftUI for everything else. To find your way around the code, see [Development](docs/development.md).

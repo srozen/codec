@@ -61,7 +61,8 @@ final class TestEnvironment {
     /// - Parameters:
     ///   - shell: The shell panes run. `/bin/sh` keeps most tests fast and free of user configuration.
     ///   - integration: Whether to install and enable zsh integration.
-    init(shell: String = "/bin/sh", integration: Bool = false) throws {
+    ///   - sampler: Where the system meters get their numbers; by default, nowhere.
+    init(shell: String = "/bin/sh", integration: Bool = false, sampler: any SystemSampling = IdleSampler()) throws {
         _ = NSApplication.shared
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("codec-ui-tests-\(UUID().uuidString)", isDirectory: true)
@@ -77,7 +78,7 @@ final class TestEnvironment {
         let shellIntegration = ShellIntegration(directory: directory.appendingPathComponent("integration"))
         if integration { try shellIntegration.install() }
         environment = AppEnvironment(preferences: preferences, sounds: sounds, notifier: notifier,
-                                     systemMonitor: SystemMonitor(sampler: IdleSampler(), interval: 3600),
+                                     systemMonitor: SystemMonitor(sampler: sampler, interval: sampler is IdleSampler ? 3600 : 1),
                                      shellIntegration: integration ? shellIntegration : nil,
                                      history: HistoryStore(logURL: directory.appendingPathComponent("history.jsonl")),
                                      intelFolder: directory.appendingPathComponent("intel"))

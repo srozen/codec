@@ -1,0 +1,46 @@
+# Tabs and panes
+
+![Two panes side by side, with the branch switcher open](images/branches.png)
+
+## Tabs
+
+Tabs live in the title bar. ⌘T opens one in the current directory; ⌘1…⌘9 go to a tab, ⇧⌘] / ⇧⌘[ or ⌃⇥ move between them.
+
+A tab is titled after what's running in it. To name it yourself, double-click it, right-click › Rename Tab…, or press ⇧⌘R. Clear the name to go back to the automatic title.
+
+Middle-click a tab to close it.
+
+## Splits
+
+Split any pane right (⌘D) or down (⇧⌘D); the new pane opens in the same directory. Splits nest as deep as you like.
+
+- ⌘] / ⌘[ go to the next or previous pane, ⌥⌘ with an arrow to the pane in that direction.
+- Inactive panes dim, so you always know which one has the keyboard (Settings › Appearance › Dim inactive split panes).
+- Drag the line between two panes to resize them.
+
+## Closing safely
+
+Before a tab, a pane or a window closes, or Codec quits, it checks whether that would end something still running, in the foreground or in the background (`npm run dev &` counts; the shell's own helpers don't), and names what would be terminated before asking.
+
+## When something needs you
+
+A bell, or a command that ran longer than 10 seconds finishing, in a pane you aren't looking at:
+
+- marks its tab,
+- badges the Dock icon,
+- posts a notification (click it to go there),
+- plays the codec call, if sounds are on.
+
+In the focused pane, the bell shows a small "!" at the cursor. What the bell does is up to you in [Settings › Alerts](settings.md#alerts).
+
+## When the shell exits
+
+A clean `exit` closes the pane. If the shell crashes or is killed, the pane stays, with a banner: Return restarts the shell, Esc closes the pane. Settings › Alerts › When the shell exits can always close the pane or always keep it instead.
+
+## Right-click menu
+
+Right-click in a pane for Copy, Copy Output, Select Output, Paste, Select All, Split Right / Down, Find, Clear Buffer, Restart Shell, Open in Finder, Copy Path, Switch Branch…, Close Pane. Programs that use the mouse (vim, htop, tmux) still get their right-clicks.
+
+## The command palette
+
+⇧⌘P, or the ⌘ button at the right of the tab bar, opens the command palette: every action, theme, open tab and [Intel](intel.md) item, fuzzy-searched.

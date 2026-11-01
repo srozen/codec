@@ -75,9 +75,21 @@ private struct SessionStatus: View {
     private var commandStatus: some View {
         if let running = session.running {
             TimelineView(.periodic(from: running.started, by: 1)) { context in
-                Chip(systemImage: "circle.dotted", text: running.command,
-                     detail: Formatting.duration(context.date.timeIntervalSince(running.started).rounded(.down)),
-                     tint: theme.accentColor, spinning: true)
+                let elapsed = context.date.timeIntervalSince(running.started)
+                if let usual = running.usual {
+                    // How far along it likely is, from how long it usually takes.
+                    let over = elapsed > usual
+                    Chip(systemImage: "circle.dotted", text: running.command,
+                         detail: over ? "\(Formatting.seconds(elapsed)) · \(Formatting.seconds(elapsed - usual)) over"
+                                      : "\(Formatting.seconds(elapsed)) / usually \(Formatting.seconds(usual))",
+                         tint: over ? theme.warningColor : theme.accentColor, spinning: true, progress: elapsed / usual)
+                        .help(over ? "Running \(Formatting.seconds(elapsed - usual)) longer than its usual \(Formatting.seconds(usual))"
+                                   : "About \(Formatting.seconds(usual - elapsed)) left: it usually takes \(Formatting.seconds(usual))")
+                } else {
+                    Chip(systemImage: "circle.dotted", text: running.command,
+                         detail: Formatting.duration(elapsed.rounded(.down)),
+                         tint: theme.accentColor, spinning: true)
+                }
             }
         } else if let last = session.lastCommand, !last.command.isEmpty {
             let failed = last.exitCode != 0
@@ -96,6 +108,8 @@ private struct Chip: View {
     var tint: Color?
     var spinning = false
     var trailingSymbol: String?
+    /// Fills a line along the bottom, in `tint`.
+    var progress: Double?
 
     var body: some View {
         HStack(spacing: 5) {
@@ -123,6 +137,13 @@ private struct Chip: View {
         .frame(height: 20)
         .frame(maxWidth: 320)
         .background(Capsule().fill(Color.primary.opacity(0.07)))
+        .overlay(alignment: .bottom) {
+            if let progress {
+                UsualProgressBar(fraction: progress, tint: tint ?? .accentColor)
+                    .padding(.horizontal, 9)
+                    .padding(.bottom, 1)
+            }
+        }
         .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .combine)
     }

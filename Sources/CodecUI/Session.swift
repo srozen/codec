@@ -8,6 +8,8 @@ final class Session: ObservableObject {
     struct RunningCommand: Equatable {
         var command: String
         var started: Date
+        /// How long it usually takes, when that's known.
+        var usual: TimeInterval?
     }
 
     struct FinishedCommand: Equatable {

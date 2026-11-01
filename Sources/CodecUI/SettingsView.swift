@@ -164,6 +164,8 @@ private struct ShellSettings: View {
                 Toggle("Suggest commands from history as you type", isOn: $prefs.suggestCommands)
                 Toggle("↑ opens the history menu, ⌃R searches history", isOn: $prefs.historyKeys)
                 Toggle("Friendlier Tab completion", isOn: $prefs.friendlyCompletion)
+                Toggle("Show how long commands usually take", isOn: $prefs.showUsualDuration)
+                    .help("While a command you've run before is running, shows how far along it likely is, from how long it took the last few times; once it's done, how it compared.")
             } header: {
                 Text("Command line")
             } footer: {

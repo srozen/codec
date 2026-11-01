@@ -37,9 +37,11 @@ struct ScreenshotTour {
         try fillIntel(personal: env.environment.intelFolder, project: project)
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
 
+        // The test process's windows never hear they're on screen, and the terminal only draws while
+        // its window is visible: for the tour, every window says it is.
+        Self.windowsSayTheyreVisible(true)
+        defer { Self.windowsSayTheyreVisible(false) }
         NSApplication.shared.setActivationPolicy(.regular)
-        NSApplication.shared.finishLaunching()
-        NSApplication.shared.activate()
 
         try await hero(env, project: project)
         try await intel(env, project: project)
@@ -47,7 +49,19 @@ struct ScreenshotTour {
         try await editor(env, project: project)
         try await branches(env, project: project)
         try await themes(env, project: project)
+        try await usualDuration(env, project: project)
     }
+
+    /// Swaps `NSWindow.occlusionState` for one that's always visible, or back.
+    private static func windowsSayTheyreVisible(_ visible: Bool) {
+        guard visible != swapped,
+              let real = class_getInstanceMethod(NSWindow.self, #selector(getter: NSWindow.occlusionState)),
+              let always = class_getInstanceMethod(NSWindow.self, #selector(getter: NSWindow.tourOcclusionState)) else { return }
+        method_exchangeImplementations(real, always)
+        swapped = visible
+    }
+
+    nonisolated(unsafe) private static var swapped = false
 
     // MARK: Shots
 
@@ -132,6 +146,20 @@ struct ScreenshotTour {
         try await capture(controller.window!, as: "branches")
     }
 
+    /// A command that ran before, part way through: its progress toward how long it usually takes.
+    private func usualDuration(_ env: TestEnvironment, project: URL) async throws {
+        let (controller, pane) = try await window(env, project: project, size: NSSize(width: 1180, height: 640))
+        defer { close(controller) }
+        controller.toggleCommandTimeline(nil)
+        try await run("git status --short", in: pane)
+        try await settle(seconds: 0.4)
+        pane.terminal.send(txt: "make test\r")
+        try await waitFor { pane.session.running?.usual != nil }
+        try await settle(seconds: 8)
+        try await capture(controller.window!, as: "usual-duration")
+        try await waitFor { pane.session.running == nil }
+    }
+
     /// The same split window in each theme, in a grid.
     private func themes(_ env: TestEnvironment, project: URL) async throws {
         var images: [NSImage] = []
@@ -174,6 +202,7 @@ struct ScreenshotTour {
         // Over other apps' windows, so they don't hide it.
         window.level = .floating
         window.makeKeyAndOrderFront(nil)
+        NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: window)
         let pane = try #require(controller.model.selected?.focused)
         try await waitFor { pane.isAtCommandLine }
         return (controller, pane)
@@ -196,26 +225,13 @@ struct ScreenshotTour {
         let deadline = Date().addingTimeInterval(30)
         while !condition() {
             try #require(Date() < deadline, "Timed out")
-            try await settle(seconds: 0.05)
+            try await Task.sleep(for: .milliseconds(50))
         }
     }
 
     /// Lets animations, file watchers and the meters catch up.
     private func settle(seconds: Double = 1.2) async throws {
-        let deadline = Date().addingTimeInterval(seconds)
-        while Date() < deadline {
-            Self.runLoop(until: min(deadline, Date().addingTimeInterval(0.02)))
-            await Task.yield()
-        }
-    }
-
-    /// Tests run on the main queue, outside the app's event loop. Without events, a window never
-    /// learns it's visible, and the terminal, which draws from a display link only while its window
-    /// is visible, never draws; this handles them for a moment.
-    private static func runLoop(until date: Date) {
-        while let event = NSApplication.shared.nextEvent(matching: .any, until: date, inMode: .default, dequeue: true) {
-            NSApplication.shared.sendEvent(event)
-        }
+        try await Task.sleep(for: .seconds(seconds))
     }
 
     // MARK: Capturing
@@ -315,7 +331,22 @@ struct ScreenshotTour {
     /// A home folder with a quiet `.zshrc` and a clone of this repository with a few changes and branches.
     private func makeHome(_ home: URL, project: URL) throws {
         try FileManager.default.createDirectory(at: project.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try "export EDITOR=vim\nHISTFILE=~/.zsh_history\nPS1='%~ %# '\n".write(to: home.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8)
+        // `make test` stands in for the test suite: test output for twelve seconds, rather than a real build.
+        let zshrc = #"""
+            export EDITOR=vim
+            HISTFILE=~/.zsh_history
+            PS1='%~ %# '
+            make() {
+              if [[ $1 == test ]]; then
+                local i
+                for i in {1..48}; do print "Test Case 'Suite.test$i' passed (0.$((RANDOM % 9)) seconds)"; sleep 0.25; done
+                print "Executed 48 tests, with 0 failures"
+              else
+                command make "$@"
+              fi
+            }
+            """#
+        try (zshrc + "\n").write(to: home.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8)
         try shell("git clone --quiet '\(Self.repository.path)' '\(project.path)'", in: home)
         try shell("""
             git config user.name 'Solid Snake' && git config user.email snake@example.com && \
@@ -333,6 +364,9 @@ struct ScreenshotTour {
         let site = home.appendingPathComponent("Developer/site").path
         let entries: [(String, String, Double, Int32, TimeInterval)] = [
             ("swift build -c release", project.path, 0.02, 0, 48.2),
+            ("make test", project.path, 0.03, 0, 12.6),
+            ("make test", project.path, 0.2, 0, 13.4),
+            ("make test", project.path, 0.7, 0, 12.9),
             ("swift test --filter IntelTests", project.path, 0.05, 0, 12.4),
             ("git push -u origin feature/onboarding", project.path, 0.1, 0, 2.1),
             ("git rebase -i main", project.path, 0.3, 1, 0.4),
@@ -412,4 +446,9 @@ struct ScreenshotTour {
         try library.save(.script(title: "Run one test suite", command: "swift test --filter {{suite}}"), to: .project)
         try shell("git add .codec && git commit --quiet -m 'Share our Intel'", in: project)
     }
+}
+
+extension NSWindow {
+    /// Stands in for `occlusionState` during the screenshot tour.
+    @objc var tourOcclusionState: NSWindow.OcclusionState { .visible }
 }

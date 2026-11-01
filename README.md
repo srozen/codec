@@ -25,7 +25,7 @@ You ran a dozen things, went on for a while, and now you need to know what that 
 
 <img src="docs/images/commands.png" alt="The Commands sidebar with a command's output open">
 
-The **Commands sidebar** (⇧⌘L) lists everything the pane ran, under the folder it ran in: whether it worked, how long it took, the last line it printed. Click one and the terminal scrolls back to it and marks it. Open its output in a viewer you can search, copy from, or run again, even after it has scrolled out of the buffer, ⌘K cleared it, or you quit and came back the next day. Filter by what commands printed, not just what you typed.
+The **Commands sidebar** (⇧⌘L) lists everything the pane ran, under the folder it ran in: whether it worked, how long it took, the last line it printed. Click one and the terminal scrolls back to it and marks it. Open its output in a viewer you can search, copy from, or run again, even after it has scrolled out of the buffer, ⌘K cleared it, or you quit and came back the next day. Filter by what commands printed, not just what you typed. And for the commands you run again and again, Codec knows how long they usually take: the build's progress shows in the status bar and on its tab while it runs, and it tells you when today's run is slower than usual.
 
 → [Commands sidebar](docs/commands-sidebar.md)
 

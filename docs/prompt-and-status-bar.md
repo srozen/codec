@@ -27,7 +27,7 @@ Along the bottom of the window:
 
 - the **directory**: click to open it in Finder,
 - the **git branch**: click to switch,
-- the **running or last command**, with its exit status and how long it took.
+- the **running or last command**, with its exit status and how long it took; while a command you've run before is running, how far along it likely is ([how long it usually takes](commands-sidebar.md#how-long-it-usually-takes)).
 
 ## System meters
 

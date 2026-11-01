@@ -82,6 +82,25 @@ public struct CommandBlocks: Equatable, Sendable {
         return nil
     }
 
+    /// Replaces every block, after they were found again with `relocate`.
+    public mutating func replace(with blocks: [Block]) {
+        self.blocks = Array(blocks.suffix(limit))
+    }
+
+    /// Finds commands' blocks again after their rows moved, as they do when the terminal rewraps its lines
+    /// on a resize. `commands` are oldest first; each is looked for above the one after it, starting from
+    /// `lastRow`. Nil for a command that isn't on screen anymore.
+    public static func relocate(commands: [String], in rows: [ScreenRow], lastRow: Int, promptLines: Int) -> [Block?] {
+        var found: [Block?] = []
+        var below = lastRow
+        for command in commands.reversed() {
+            let block = locate(command: command, in: rows, cursorRow: below, promptLines: promptLines)
+            if let block { below = block.prompt - 1 }
+            found.append(block)
+        }
+        return found.reversed()
+    }
+
     /// The first row of the prompt whose command line contains `cursorRow`.
     public static func promptStart(cursorRow: Int, in rows: [ScreenRow], promptLines: Int) -> Int {
         guard var position = rows.firstIndex(where: { $0.row == cursorRow }) else { return cursorRow - max(promptLines - 1, 0) }

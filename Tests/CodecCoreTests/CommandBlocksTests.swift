@@ -30,6 +30,22 @@ struct CommandBlocksTests {
         #expect(CommandBlocks.locate(command: "  ", in: screen, cursorRow: 1, promptLines: 1) == nil)
     }
 
+    /// After the terminal rewraps its lines, each command is found again, above the one after it.
+    @Test func relocatesCommandsAfterARewrap() {
+        let screen = rows(["% echo a", "a", "% ls -la /some/long/pa", "th", "x", "% echo a", "a", "% "], from: 30,
+                          wrapped: [33])
+        let found = CommandBlocks.relocate(commands: ["echo a", "ls -la /some/long/path", "echo a", "gone"], in: screen,
+                                           lastRow: 36, promptLines: 1)
+        #expect(found == [.init(prompt: 30, output: 31), .init(prompt: 32, output: 34), .init(prompt: 35, output: 36), nil])
+    }
+
+    @Test func replacesItsBlocks() {
+        var blocks = CommandBlocks(limit: 2)
+        blocks.record(.init(prompt: 10, output: 11))
+        blocks.replace(with: [.init(prompt: 0, output: 1), .init(prompt: 2, output: 3), .init(prompt: 5, output: 6)])
+        #expect(blocks.blocks == [.init(prompt: 2, output: 3), .init(prompt: 5, output: 6)])
+    }
+
     @Test func findsTheCurrentPromptsStart() {
         let screen = rows(["out", "", "chips", "", "❯ long command that", "wraps"], from: 10, wrapped: [15])
         #expect(CommandBlocks.promptStart(cursorRow: 15, in: screen, promptLines: 4) == 11)

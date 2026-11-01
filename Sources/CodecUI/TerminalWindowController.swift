@@ -32,6 +32,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     private static let editorWidthKey = "EditorWidth"
     private static let fileTreeVisibleKey = "FileTreeVisible"
     private static let fileTreeWidthKey = "FileTreeWidth"
+    private(set) var timelineSidebar: CommandTimelineSidebar!
+    private var timelineWidthConstraint: NSLayoutConstraint!
+    private static let timelineVisibleKey = "CommandsVisible"
+    private static let timelineWidthKey = "CommandsWidth"
 
     init(directory: String?, environment: AppEnvironment) {
         self.environment = environment
@@ -62,6 +66,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         observeEnvironment()
         addTab(directory: directory)
         setFileTreeVisible(preferences.stateDefaults.bool(forKey: Self.fileTreeVisibleKey))
+        setTimelineVisible(preferences.stateDefaults.bool(forKey: Self.timelineVisibleKey))
     }
 
     @available(*, unavailable)
@@ -95,6 +100,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
                 newTab: { [weak self] in self?.newTab(nil) },
                 showPalette: { [weak self] in self?.showCommandPalette(nil) },
                 toggleFileTree: { [weak self] in self?.toggleFileTree(nil) },
+                toggleTimeline: { [weak self] in self?.toggleCommandTimeline(nil) },
                 beginRenaming: { [weak self] in self?.beginRenaming($0) },
                 finishRenaming: { [weak self] in self?.finishRenaming($0, to: $1) })))
         statusBar = PassthroughHostingView(rootView: StatusBar(model: model, preferences: preferences,
@@ -109,6 +115,15 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         sidebarWidth = sidebar.widthAnchor.constraint(equalToConstant: 0)
         fileTreeWidth = storedWidth > 0 ? min(max(CGFloat(storedWidth), FileTreeSidebar.widthRange.lowerBound), FileTreeSidebar.widthRange.upperBound) : FileTreeSidebar.defaultWidth
 
+        timelineSidebar = CommandTimelineSidebar(theme: preferences.theme, codeFont: preferences.font())
+        timelineSidebar.onResize = { [weak self] width in self?.resizeTimeline(to: width) }
+        timelineSidebar.isHidden = true
+        timelineWidthConstraint = timelineSidebar.widthAnchor.constraint(equalToConstant: 0)
+        let storedTimelineWidth = preferences.stateDefaults.double(forKey: Self.timelineWidthKey)
+        timelineWidth = storedTimelineWidth > 0
+            ? min(max(CGFloat(storedTimelineWidth), CommandTimelineSidebar.widthRange.lowerBound), CommandTimelineSidebar.widthRange.upperBound)
+            : CommandTimelineSidebar.defaultWidth
+
         editorPanel = EditorPanel(model: editor, theme: preferences.theme, font: preferences.font())
         editorPanel.openFile = { [weak self] url in self?.openFile(url, pin: true, focus: false) }
         editorPanel.onResize = { [weak self] width in self?.resizeEditor(to: width) }
@@ -116,7 +131,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         editorWidth = editorPanel.widthAnchor.constraint(equalToConstant: 0)
         editor.confirmClose = { [weak self] document, done in self?.confirmClosing(document, then: done) ?? done(true) }
 
-        for view in [backdrop, tint, tabBar!, sidebar!, editorPanel!, paneContainer, statusBar!, palette!] as [NSView] {
+        for view in [backdrop, tint, tabBar!, sidebar!, editorPanel!, paneContainer, timelineSidebar!, statusBar!, palette!] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(view)
         }
@@ -136,7 +151,11 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
                 editorPanel.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
                 editorWidth,
                 paneContainer.leadingAnchor.constraint(equalTo: editorPanel.trailingAnchor),
-                paneContainer.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+                paneContainer.trailingAnchor.constraint(equalTo: timelineSidebar.leadingAnchor),
+                timelineSidebar.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+                timelineSidebar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+                timelineSidebar.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
+                timelineWidthConstraint,
                 paneContainer.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
                 statusBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
                 statusBar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
@@ -170,6 +189,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         backdrop.isHidden = !preferences.blur
         tint.layer?.backgroundColor = theme.background.withAlphaComponent(preferences.blur ? preferences.opacity : 1).cgColor
         sidebar?.applyTheme(theme)
+        timelineSidebar?.apply(theme: theme, codeFont: preferences.font())
         editorPanel?.apply(theme: theme, font: preferences.font())
         allPanes.forEach { $0.applyPreferences() }
         installSelectedTab(force: true)
@@ -205,6 +225,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         focusedPaneCameToFront()
         updateWindowTitle()
         followFocusedDirectory()
+        if model.timelineVisible { timelineSidebar.follow(focusedPane) }
     }
 
     private func updateWindowTitle() {
@@ -229,6 +250,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     private var fileTreeWidth: CGFloat = FileTreeSidebar.defaultWidth
 
     func setFileTreeVisible(_ visible: Bool) {
+        // Before hiding it: AppKit would leave the keyboard with the window, not the terminal.
+        if !visible { giveTerminalTheKeyboard(ifIn: sidebar) }
         model.fileTreeVisible = visible
         preferences.stateDefaults.set(visible, forKey: Self.fileTreeVisibleKey)
         sidebar.isHidden = !visible
@@ -236,9 +259,12 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         if visible, let pane = focusedPane { fileTree.follow(pane.session.directory) }
         fileTree.isActive = visible
         if visible, let directory = fileTree.currentDirectory { sidebar.reveal(directory) }
-        if !visible, let window, let responder = window.firstResponder as? NSView, responder.isDescendant(of: sidebar) {
-            focusTerminal()
-        }
+    }
+
+    /// Gives the terminal the keyboard if `view` has it.
+    private func giveTerminalTheKeyboard(ifIn view: NSView) {
+        guard let window, let responder = window.firstResponder as? NSView, responder.isDescendant(of: view) else { return }
+        focusTerminal()
     }
 
     private func resizeFileTree(to width: CGFloat) {
@@ -247,6 +273,42 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         fileTreeWidth = min(max(width, FileTreeSidebar.widthRange.lowerBound), max(maximum, FileTreeSidebar.widthRange.lowerBound))
         sidebarWidth.constant = fileTreeWidth
         preferences.stateDefaults.set(Double(fileTreeWidth), forKey: Self.fileTreeWidthKey)
+    }
+
+    // MARK: - Commands sidebar
+
+    private var timelineWidth: CGFloat = CommandTimelineSidebar.defaultWidth
+
+    func setTimelineVisible(_ visible: Bool) {
+        if !visible { giveTerminalTheKeyboard(ifIn: timelineSidebar) }
+        model.timelineVisible = visible
+        preferences.stateDefaults.set(visible, forKey: Self.timelineVisibleKey)
+        timelineSidebar.isHidden = !visible
+        timelineWidthConstraint.constant = visible ? fittingTimelineWidth : 0
+        timelineSidebar.follow(visible ? focusedPane : nil)
+    }
+
+    /// The sidebar's width, narrower than the user made it when the window can't leave the terminal room
+    /// beside it.
+    private var fittingTimelineWidth: CGFloat {
+        let available = (window?.contentView?.bounds.width ?? 1000) - sidebarWidth.constant - editorWidth.constant - 320
+        return max(min(timelineWidth, available), CommandTimelineSidebar.widthRange.lowerBound)
+    }
+
+    private func resizeTimeline(to width: CGFloat) {
+        let maximum = min(CommandTimelineSidebar.widthRange.upperBound, (window?.frame.width ?? 1000) - sidebarWidth.constant - 320)
+        timelineWidth = min(max(width, CommandTimelineSidebar.widthRange.lowerBound), max(maximum, CommandTimelineSidebar.widthRange.lowerBound))
+        timelineWidthConstraint.constant = timelineWidth
+        preferences.stateDefaults.set(Double(timelineWidth), forKey: Self.timelineWidthKey)
+    }
+
+    /// ⇧⌘L: shows the Commands sidebar with the keyboard on it, or hides it.
+    @objc func toggleCommandTimeline(_ sender: Any?) {
+        setTimelineVisible(!model.timelineVisible)
+        if model.timelineVisible {
+            window?.layoutIfNeeded()
+            timelineSidebar.focusList()
+        }
     }
 
     /// Keeps the tree on the focused pane's directory.
@@ -305,7 +367,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         editorPanel.isHidden = !visible
         if visible {
             let stored = CGFloat(preferences.stateDefaults.double(forKey: Self.editorWidthKey))
-            let available = (window?.contentView?.bounds.width ?? 1000) - sidebarWidth.constant
+            let available = (window?.contentView?.bounds.width ?? 1000) - sidebarWidth.constant - timelineWidthConstraint.constant
             editorWidth.constant = clampedEditorWidth(stored > 0 ? stored : available * 0.5)
         } else {
             editorWidth.constant = 0
@@ -313,7 +375,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     }
 
     private func clampedEditorWidth(_ width: CGFloat) -> CGFloat {
-        let available = (window?.contentView?.bounds.width ?? 1000) - sidebarWidth.constant
+        let available = (window?.contentView?.bounds.width ?? 1000) - sidebarWidth.constant - timelineWidthConstraint.constant
         return max(280, min(width, available - 320))
     }
 
@@ -880,6 +942,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
             },
             .init(id: "file-tree", title: model.fileTreeVisible ? "Hide File Tree" : "Show File Tree", shortcut: "⇧⌘E",
                   systemImage: "sidebar.left") { [weak self] in self?.toggleFileTree(nil) },
+            .init(id: "commands", title: model.timelineVisible ? "Hide Commands Sidebar" : "Show Commands Sidebar", shortcut: "⇧⌘L",
+                  systemImage: "sidebar.right") { [weak self] in self?.toggleCommandTimeline(nil) },
             .init(id: "command-history", title: "Search Command History", shortcut: "⌘Y", systemImage: "clock.arrow.circlepath") { [weak self] in
                 self?.showCommandHistory(nil)
             },

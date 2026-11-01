@@ -6,6 +6,8 @@ import CodecCore
 final class PaneView: NSView {
     let terminal = CodecTerminalView(frame: .zero)
     let scanlines = ScanlineView()
+    /// Marks a command the user went back to.
+    let commandMark = CommandMarkView()
     let overlay: PassthroughHostingView<PaneOverlay>
     private let dimmer = PassthroughView()
     private let keyCatcher = KeyCatcherView()
@@ -28,7 +30,7 @@ final class PaneView: NSView {
         dimmer.wantsLayer = true
         dimmer.alphaValue = 0
 
-        for view in [terminal, scanlines, dimmer, overlay, keyCatcher] as [NSView] {
+        for view in [terminal, scanlines, commandMark, dimmer, overlay, keyCatcher] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
@@ -41,7 +43,7 @@ final class PaneView: NSView {
             keyCatcher.heightAnchor.constraint(equalToConstant: 0),
             keyCatcher.topAnchor.constraint(equalTo: topAnchor),
             keyCatcher.leadingAnchor.constraint(equalTo: leadingAnchor),
-        ] + [scanlines, dimmer, overlay].flatMap { $0.constraintsFilling(self) })
+        ] + [scanlines, commandMark, dimmer, overlay].flatMap { $0.constraintsFilling(self) })
     }
 
     @available(*, unavailable)
@@ -73,6 +75,13 @@ final class PaneView: NSView {
             context.duration = 0.15
             dimmer.animator().alphaValue = dim ? 1 : 0
         }
+    }
+
+    /// Briefly marks a command: a bar in the gutter beside its rows, and a tint over one line of it.
+    /// Both in this view's coordinates.
+    func mark(block: NSRect, line: NSRect, color: NSColor) {
+        commandMark.show(bar: NSRect(x: max(terminal.frame.minX - 9, 2), y: block.minY, width: 3, height: block.height),
+                         line: line.insetBy(dx: -4, dy: 0), color: color)
     }
 
     var isExitBannerVisible: Bool { overlay.capturesMouse }
@@ -123,6 +132,54 @@ final class PassthroughHostingView<Content: View>: NSHostingView<Content> {
 /// A view the mouse goes through, for overlays like the inactive-pane dimmer.
 final class PassthroughView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// The mark over a command the user went back to; it fades after a moment.
+final class CommandMarkView: NSView {
+    private let bar = PassthroughView()
+    private let line = PassthroughView()
+    private var token = 0
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        for view in [line, bar] {
+            view.wantsLayer = true
+            view.layer?.cornerRadius = 1.5
+            view.alphaValue = 0
+            addSubview(view)
+        }
+        line.layer?.cornerRadius = 4
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    var isShowing: Bool { bar.alphaValue > 0 }
+
+    func show(bar barFrame: NSRect, line lineFrame: NSRect, color: NSColor) {
+        token += 1
+        let token = token
+        bar.frame = barFrame
+        line.frame = lineFrame
+        bar.layer?.backgroundColor = color.cgColor
+        line.layer?.backgroundColor = color.withAlphaComponent(0.16).cgColor
+        bar.alphaValue = 1
+        line.alphaValue = 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.token == token else { return }
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.5
+                    self.bar.animator().alphaValue = 0
+                    self.line.animator().alphaValue = 0
+                }
+            }
+        }
+    }
 }
 
 final class ScanlineView: NSView {

@@ -17,8 +17,11 @@ public enum CodecApp {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, AppCoordinating {
     private let environment: AppEnvironment
-    private var windows: [TerminalWindowController] = []
+    private(set) var windows: [TerminalWindowController] = []
     private var settingsWindow: NSWindow?
+    private var pendingSave: DispatchWorkItem?
+    /// Quitting: windows going away now aren't being closed by the user, so they stay saved.
+    private var terminating = false
 
     init(environment: AppEnvironment) {
         self.environment = environment
@@ -36,8 +39,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, AppCoordinating {
                 _ = self?.windows.first { $0.reveal(sessionID: id) }
             }
         }
-        newWindow(nil)
+        if !restoreWindows() { newWindow(nil) }
         NSApp.activate()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        terminating = true
+        saveWindows()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -79,15 +87,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, AppCoordinating {
     }
 
     @objc func newWindow(_ sender: Any?) {
-        let previous = currentWindow?.window
-        let controller = TerminalWindowController(directory: nil, environment: environment)
+        open(makeWindow(restoring: nil))
+    }
+
+    private func makeWindow(restoring saved: SavedWindow?) -> TerminalWindowController {
+        let controller = TerminalWindowController(directory: nil, environment: environment, restoring: saved)
         controller.onClose = { [weak self] closed in
             self?.windows.removeAll { $0 === closed }
             self?.attentionDidChange()
+            self?.scheduleSave()
         }
+        controller.onStateChange = { [weak self] in self?.scheduleSave() }
+        return controller
+    }
+
+    private func open(_ controller: TerminalWindowController, frame: CGRect? = nil) {
+        let previous = currentWindow?.window
         windows.append(controller)
+        scheduleSave()
         guard let window = controller.window else { return }
-        if let previous {
+        if let frame, NSScreen.screens.contains(where: { $0.visibleFrame.intersects(frame) }) {
+            window.setFrame(frame, display: false)
+        } else if let previous {
             let topLeft = NSPoint(x: previous.frame.minX, y: previous.frame.maxY)
             window.setFrameTopLeftPoint(window.cascadeTopLeft(from: topLeft))
         } else if !window.setFrameUsingName("CodecMainWindow") {
@@ -95,6 +116,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, AppCoordinating {
         }
         if windows.count == 1 { window.setFrameAutosaveName("CodecMainWindow") }
         window.makeKeyAndOrderFront(nil)
+    }
+
+    // MARK: - Reopening windows
+
+    /// Opens the windows saved last time, if there are any and Settings allow it. Returns whether
+    /// it opened any.
+    @discardableResult
+    func restoreWindows() -> Bool {
+        guard environment.preferences.restoreWindows,
+              let saved = SavedWorkspace.load(from: environment.preferences.stateDefaults) else { return false }
+        // Back to front, so the front one ends up in front.
+        for savedWindow in saved.windows.reversed() where !savedWindow.tabs.isEmpty {
+            open(makeWindow(restoring: savedWindow), frame: savedWindow.frame)
+        }
+        return !windows.isEmpty
+    }
+
+    /// Saves the windows a moment after they change, once for a burst of changes.
+    private func scheduleSave() {
+        guard !terminating else { return }
+        pendingSave?.cancel()
+        let save = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.saveWindows() } }
+        pendingSave = save
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: save)
+    }
+
+    /// Saves the open windows, front to back.
+    func saveWindows() {
+        pendingSave?.cancel()
+        pendingSave = nil
+        let front = NSApp.orderedWindows
+        let ordered = windows.sorted { a, b in
+            (front.firstIndex { $0 === a.window } ?? .max) < (front.firstIndex { $0 === b.window } ?? .max)
+        }
+        SavedWorkspace(windows: ordered.map(\.savedState)).save(to: environment.preferences.stateDefaults)
     }
 
     /// Reaches here when no window is open to take ⌘T.

@@ -63,7 +63,7 @@ Click anywhere in the command you're typing to put the cursor there, drag to sel
 
 <img src="docs/images/branches.png" alt="Two panes side by side, and the branch switcher open">
 
-Tabs and nested splits in one window. Click the branch in the status bar or in the prompt itself to switch or create branches with a fuzzy search. Build your prompt from chips (directory, branch, changes, duration, exit status, Python environment, Kubernetes context) in a visual editor, or keep your own PS1. Before anything closes, Codec tells you exactly what's still running in it.
+Tabs and nested splits in one window. Click the branch in the status bar or in the prompt itself to switch or create branches with a fuzzy search. Build your prompt from chips (directory, branch, changes, duration, exit status, Python environment, Kubernetes context) in a visual editor, or keep your own PS1. Quit and reopen, and your windows, tabs and splits come back, each pane in its folder. Before anything closes, Codec tells you exactly what's still running in it.
 
 → [Tabs and panes](docs/tabs-and-panes.md) · [Prompt and status bar](docs/prompt-and-status-bar.md)
 

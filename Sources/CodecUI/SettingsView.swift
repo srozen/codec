@@ -89,6 +89,8 @@ private struct AppearanceSettings: View {
                 .disabled(!prefs.blur)
                 Toggle("Dim inactive split panes", isOn: $prefs.dimInactivePanes)
                 Toggle("CRT scanlines", isOn: $prefs.scanlines)
+                Toggle("Reopen windows and tabs from last time", isOn: $prefs.restoreWindows)
+                    .help("At launch, opens the windows, tabs and splits you had, each pane in its folder. What ran in them doesn't come back.")
             }
 
             Section("Status bar") {

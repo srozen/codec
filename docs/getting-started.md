@@ -58,7 +58,7 @@ Turn it off in Settings › Shell › Shell integration; it applies to new panes
 
 | What | Where |
 |---|---|
-| Settings and window state | `~/Library/Preferences` (the app's defaults) |
+| Settings, window state, and the windows and tabs to reopen | `~/Library/Preferences` (the app's defaults) |
 | Command history | `~/Library/Application Support/Codec/history.jsonl`, plus your zsh history file, which Codec reads but never changes |
 | Your Intel | `~/.codec/intel` |
 | A project's Intel | `.codec/intel` in its git repository |

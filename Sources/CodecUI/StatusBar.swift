@@ -10,12 +10,16 @@ struct StatusBar: View {
     @ObservedObject var model: WindowModel
     @ObservedObject var preferences: Preferences
     let monitor: SystemMonitor
+    /// What explains failed commands, if anything.
+    var explainer: (any FailureExplaining)? = nil
+    /// Explains the pane's last command, which failed.
+    var explain: (Pane) -> Void = { _ in }
 
     var body: some View {
         let theme = preferences.theme
         HStack(spacing: 6) {
             if let tab = model.selected {
-                TabStatus(tab: tab, theme: theme)
+                TabStatus(tab: tab, theme: theme, explain: canExplain ? explain : nil)
             }
             Spacer(minLength: 12)
             if preferences.showSystemStats {
@@ -28,16 +32,24 @@ struct StatusBar: View {
             Rectangle().fill(theme.dividerColor).frame(height: 1)
         }
     }
+
+    /// Only where it would work: a Mac without Apple Intelligence gets no button that can't be used.
+    private var canExplain: Bool {
+        preferences.explainFailures && explainer?.availability == .available
+    }
 }
 
 private struct TabStatus: View {
     @ObservedObject var tab: TerminalTab
     let theme: CodecTheme
+    var explain: ((Pane) -> Void)?
 
     var body: some View {
-        SessionStatus(session: tab.focused.session, theme: theme,
-                      onBranchChanged: { [weak pane = tab.focused] in pane?.gitBranchDidChange() })
-            .id(ObjectIdentifier(tab.focused))
+        let pane = tab.focused
+        SessionStatus(session: pane.session, theme: theme,
+                      onBranchChanged: { [weak pane] in pane?.gitBranchDidChange() },
+                      explain: explain.map { explain in { [weak pane] in if let pane { explain(pane) } } })
+            .id(ObjectIdentifier(pane))
     }
 }
 
@@ -45,6 +57,8 @@ private struct SessionStatus: View {
     @ObservedObject var session: Session
     let theme: CodecTheme
     var onBranchChanged: () -> Void
+    /// Explain, beside a failed command; nil when explaining isn't offered.
+    var explain: (() -> Void)?
     @State private var choosingBranch = false
 
     var body: some View {
@@ -97,6 +111,19 @@ private struct SessionStatus: View {
                  text: last.command,
                  detail: failed ? "exit \(last.exitCode) · \(Formatting.duration(last.duration))" : Formatting.duration(last.duration),
                  tint: failed ? theme.alertColor : theme.accentColor)
+            if failed, last.exitCode > 0, let explain {
+                Button(action: explain) {
+                    Label("Explain", systemImage: "sparkles")
+                        .font(.system(size: 11, weight: .medium))
+                        .padding(.horizontal, 8)
+                        .frame(height: 20)
+                        .background(Capsule().fill(theme.accentColor.opacity(0.14)))
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.accentColor)
+                .help("Ask Apple Intelligence, on this Mac, why it failed")
+            }
         }
     }
 }

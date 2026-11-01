@@ -92,6 +92,8 @@ final class CommandTimelineSidebar: NSView {
     var onResize: ((CGFloat) -> Void)?
     /// Save to Intel, on a command from this pane.
     var onSaveToIntel: ((TimelineEntry, Pane?) -> Void)?
+    /// What explains failed commands, if Settings allow it.
+    var explainer: () -> (any FailureExplaining)? = { nil }
 
     private(set) weak var pane: Pane?
     private(set) var rows: [Row] = []
@@ -406,15 +408,18 @@ final class CommandTimelineSidebar: NSView {
     var isShowingOutput: Bool { outputPopover?.isShown == true }
     var outputViewer: CommandOutputViewer? { outputPopover?.contentViewController as? CommandOutputViewer }
 
-    func showOutput(of entry: TimelineEntry, row: Int) {
+    /// Opens the command's output; with `explain`, starts explaining why it failed.
+    func showOutput(of entry: TimelineEntry, row: Int, explain: Bool = false) {
         guard let pane, window != nil else { return }
         outputPopover?.close()
         let popover = NSPopover()
         popover.behavior = .transient
         popover.animates = false
         let inScrollback = pane.rows(of: entry) != nil
+        let output = pane.output(of: entry)
+        let explanation = FailureExplanationModel(entry: entry, output: output, explainer: explainer())
         let viewer = CommandOutputViewer(
-            entry: entry, output: pane.output(of: entry), inScrollback: inScrollback, query: query,
+            entry: entry, output: output, inScrollback: inScrollback, query: query,
             theme: theme, codeFont: codeFont,
             actions: .init(
                 goTo: { [weak self, weak popover] in
@@ -430,13 +435,26 @@ final class CommandTimelineSidebar: NSView {
                     self?.insert(entry.command, run: true)
                 },
                 close: { [weak popover] in popover?.performClose(nil) },
-                saveToIntel: { [weak self] in self?.saveToIntel(entry) }),
-            canInsert: pane.isAtCommandLine)
+                saveToIntel: { [weak self] in self?.saveToIntel(entry) },
+                insertCommand: { [weak self, weak popover] command in
+                    popover?.performClose(nil)
+                    self?.insert(command, run: false)
+                }),
+            canInsert: pane.isAtCommandLine, explanation: explanation)
         popover.contentViewController = viewer
         outputPopover = popover
         let anchor = row >= 0 && row < table.numberOfRows ? table.rect(ofRow: row) : table.visibleRect
         popover.show(relativeTo: anchor, of: table, preferredEdge: .minX)
         viewer.focusText()
+        if explain { explanation.explain() }
+    }
+
+    /// Explain Failure, for a failed command when there's something to explain it with.
+    private func explainItems(for entry: TimelineEntry, row: Int) -> [NSMenuItem] {
+        guard let explainer = explainer(), FailureReport(entry: entry, output: nil) != nil else { return [] }
+        return [ClosureMenuItem("Explain Failure", image: "sparkles", enabled: explainer.availability == .available) { [weak self] in
+            self?.showOutput(of: entry, row: row, explain: true)
+        }]
     }
 
     private func insert(_ command: String, run: Bool) {
@@ -552,6 +570,7 @@ extension CommandTimelineSidebar: NSMenuDelegate {
             ClosureMenuItem("Show Output", image: "text.alignleft", enabled: hasOutput) { [weak self] in
                 self?.showOutput(of: entry, row: row)
             },
+        ] + explainItems(for: entry, row: row) + [
             .separator(),
             ClosureMenuItem("Save to Intel…", image: "bookmark") { [weak self] in self?.saveToIntel(entry) },
             .separator(),

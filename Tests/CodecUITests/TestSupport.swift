@@ -40,6 +40,8 @@ final class FakeHost: PaneHost {
     func showHistory(for pane: Pane, request: IntegrationEvent.HistoryRequest, typed: String) {
         historyRequests.append((request, typed))
     }
+    private(set) var explained: [TimelineEntry] = []
+    func explainFailure(of entry: TimelineEntry, in pane: Pane) { explained.append(entry) }
 }
 
 /// Never reports anything, so tests don't depend on the machine's load.
@@ -62,7 +64,9 @@ final class TestEnvironment {
     ///   - shell: The shell panes run. `/bin/sh` keeps most tests fast and free of user configuration.
     ///   - integration: Whether to install and enable zsh integration.
     ///   - sampler: Where the system meters get their numbers; by default, nowhere.
-    init(shell: String = "/bin/sh", integration: Bool = false, sampler: any SystemSampling = IdleSampler()) throws {
+    ///   - explainer: What explains failed commands; by default, nothing.
+    init(shell: String = "/bin/sh", integration: Bool = false, sampler: any SystemSampling = IdleSampler(),
+         explainer: (any FailureExplaining)? = nil) throws {
         _ = NSApplication.shared
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("codec-ui-tests-\(UUID().uuidString)", isDirectory: true)
@@ -82,7 +86,8 @@ final class TestEnvironment {
                                      shellIntegration: integration ? shellIntegration : nil,
                                      history: HistoryStore(logURL: directory.appendingPathComponent("history.jsonl")),
                                      intelFolder: directory.appendingPathComponent("intel"),
-                                     savedPanesFolder: directory.appendingPathComponent("saved-panes"))
+                                     savedPanesFolder: directory.appendingPathComponent("saved-panes"),
+                                     explainer: explainer)
         environment.coordinator = coordinator
     }
 

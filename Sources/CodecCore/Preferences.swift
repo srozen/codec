@@ -49,6 +49,8 @@ public final class Preferences: ObservableObject {
     @Published public var restorePaneContents: Bool { didSet { store(restorePaneContents, .restorePaneContents) } }
     /// Shows how far along a running command likely is, from how long it usually takes.
     @Published public var showUsualDuration: Bool { didSet { store(showUsualDuration, .showUsualDuration) } }
+    /// Offers to explain a failed command with Apple Intelligence, on this Mac.
+    @Published public var explainFailures: Bool { didSet { store(explainFailures, .explainFailures) } }
 
     /// Commands that run at least this long notify you when they finish in the background.
     public let longCommandThreshold: TimeInterval = 10
@@ -57,7 +59,7 @@ public final class Preferences: ObservableObject {
         case themeID, fontName, fontSize, opacity, blur, scanlines, dimInactivePanes, bell, notifyInBackground,
              codecSounds, paneSounds, soundVolume, optionAsMeta, exitBehavior, shellIntegration, shellPath,
              showSystemStats, prompt, copyOnSelect, suggestCommands, historyKeys, friendlyCompletion, recordHistory,
-             restoreWindows, restorePaneContents, showUsualDuration
+             restoreWindows, restorePaneContents, showUsualDuration, explainFailures
     }
 
     private static let factoryDefaults: [Key: Any] = [
@@ -86,6 +88,7 @@ public final class Preferences: ObservableObject {
         .restoreWindows: true,
         .restorePaneContents: true,
         .showUsualDuration: true,
+        .explainFailures: true,
     ]
 
     public init(defaults: UserDefaults) {
@@ -116,6 +119,7 @@ public final class Preferences: ObservableObject {
         restoreWindows = defaults.bool(forKey: Key.restoreWindows.rawValue)
         restorePaneContents = defaults.bool(forKey: Key.restorePaneContents.rawValue)
         showUsualDuration = defaults.bool(forKey: Key.showUsualDuration.rawValue)
+        explainFailures = defaults.bool(forKey: Key.explainFailures.rawValue)
         prompt = defaults.data(forKey: Key.prompt.rawValue)
             .flatMap { try? JSONDecoder().decode(PromptConfiguration.self, from: $0) } ?? .default
     }

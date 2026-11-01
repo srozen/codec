@@ -24,10 +24,11 @@ public enum FuzzyMatch {
 
     /// `items` matching `query`, best first. Keeps the original order for an empty query.
     public static func rank<T>(_ items: [T], by query: String, key: (T) -> String) -> [T] {
-        items
-            .enumerated()
-            .compactMap { offset, item in score(query, in: key(item)).map { (item, $0, offset) } }
-            .sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.2 < $1.2 }
-            .map(\.0)
+        var scored: [(item: T, score: Int, offset: Int)] = []
+        for (offset, item) in items.enumerated() {
+            if let score = score(query, in: key(item)) { scored.append((item, score, offset)) }
+        }
+        scored.sort { $0.score != $1.score ? $0.score > $1.score : $0.offset < $1.offset }
+        return scored.map(\.item)
     }
 }

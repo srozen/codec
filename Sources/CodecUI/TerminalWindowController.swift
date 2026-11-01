@@ -135,33 +135,38 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
             view.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(view)
         }
-        NSLayoutConstraint.activate(
-            backdrop.constraintsFilling(content) + tint.constraintsFilling(content) + palette.constraintsFilling(content) + [
-                tabBar.topAnchor.constraint(equalTo: content.topAnchor),
-                tabBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-                tabBar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-                tabBar.heightAnchor.constraint(equalToConstant: TabBar.height),
-                sidebar.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
-                sidebar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-                sidebar.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
-                sidebarWidth,
-                paneContainer.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
-                editorPanel.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
-                editorPanel.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
-                editorPanel.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
-                editorWidth,
-                paneContainer.leadingAnchor.constraint(equalTo: editorPanel.trailingAnchor),
-                paneContainer.trailingAnchor.constraint(equalTo: timelineSidebar.leadingAnchor),
-                timelineSidebar.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
-                timelineSidebar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-                timelineSidebar.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
-                timelineWidthConstraint,
-                paneContainer.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
-                statusBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-                statusBar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-                statusBar.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-                statusBar.heightAnchor.constraint(equalToConstant: StatusBar.height),
-            ])
+        // Built in parts with explicit types: as one expression, it takes the type checker too long.
+        let filling: [NSLayoutConstraint] = backdrop.constraintsFilling(content) + tint.constraintsFilling(content)
+            + palette.constraintsFilling(content)
+        let commands: [NSLayoutConstraint] = [
+            timelineSidebar.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            timelineSidebar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            timelineSidebar.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
+            timelineWidthConstraint,
+        ]
+        NSLayoutConstraint.activate(filling + commands)
+        NSLayoutConstraint.activate([
+            tabBar.topAnchor.constraint(equalTo: content.topAnchor),
+            tabBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            tabBar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            tabBar.heightAnchor.constraint(equalToConstant: TabBar.height),
+            sidebar.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            sidebar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            sidebar.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
+            sidebarWidth,
+            paneContainer.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            editorPanel.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            editorPanel.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
+            editorPanel.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
+            editorWidth,
+            paneContainer.leadingAnchor.constraint(equalTo: editorPanel.trailingAnchor),
+            paneContainer.trailingAnchor.constraint(equalTo: timelineSidebar.leadingAnchor),
+            paneContainer.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
+            statusBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            statusBar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            statusBar.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            statusBar.heightAnchor.constraint(equalToConstant: StatusBar.height),
+        ])
         window?.contentView = content
     }
 

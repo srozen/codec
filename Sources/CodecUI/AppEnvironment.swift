@@ -38,13 +38,18 @@ final class AppEnvironment {
     let shellIntegration: ShellIntegration?
     /// Where the user's own Intel is kept; projects keep theirs in `.codec/intel`.
     let intelFolder: URL
+    /// What panes showed, kept between launches.
+    let paneArchive: PaneArchive
+    /// Tabs closed lately, for ⇧⌘T, from any window.
+    let closedTabs = ClosedTabs()
     weak var coordinator: (any AppCoordinating)?
     private var promptSync: AnyCancellable?
 
     init(preferences: Preferences, sounds: any SoundPlaying, notifier: any Notifying,
          systemMonitor: SystemMonitor, shellIntegration: ShellIntegration?, history: HistoryStore = HistoryStore(logURL: nil),
-         intelFolder: URL = IntelLibrary.standardPersonalFolder) {
+         intelFolder: URL = IntelLibrary.standardPersonalFolder, savedPanesFolder: URL = PaneArchive.standardFolder) {
         self.intelFolder = intelFolder
+        paneArchive = PaneArchive(folder: savedPanesFolder)
         self.preferences = preferences
         self.sounds = sounds
         self.notifier = notifier

@@ -18,23 +18,64 @@ final class TerminalTab: ObservableObject, Identifiable {
     var onLayoutChange: (() -> Void)?
     private var sessionObservers: [ObjectIdentifier: AnyCancellable] = [:]
 
+    /// A split, told apart from the others by its axis and the first pane of each of its children.
+    struct SplitKey: Hashable {
+        let axis: SplitAxis
+        let anchors: [ObjectIdentifier]
+
+        init?(_ node: SplitLayout<Pane>) {
+            guard let axis = node.axis else { return nil }
+            self.axis = axis
+            anchors = node.childAnchors.map(ObjectIdentifier.init)
+        }
+    }
+
+    /// How each split shares its length between its children, as the user left it.
+    private(set) var shares: [SplitKey: [Double]] = [:]
+
     init(pane: Pane) {
         layout = .leaf(pane)
         focused = pane
         observe(pane)
     }
 
-    /// A tab with panes already arranged, as when it's reopened.
-    init(layout: SplitLayout<Pane>, focused: Pane) {
+    /// A tab with panes already arranged, as when it's reopened, with its splits' sizes.
+    init(layout: SplitLayout<Pane>, focused: Pane, shares: [SplitKey: [Double]] = [:]) {
         self.layout = layout
         self.focused = layout.contains(focused) ? focused : layout.leaves[0]
+        self.shares = shares
         layout.leaves.forEach(observe)
     }
 
-    /// What to save of it, to open it again.
-    var saved: SavedTab {
-        SavedTab(title: customTitle, layout: layout.saved { $0.session.directory },
+    /// What to save of it, to open it again; `contents` names what each pane showed, when it was kept.
+    func saved(contents: (Pane) -> String? = { _ in nil }) -> SavedTab {
+        SavedTab(title: customTitle,
+                 layout: layout.saved(directory: { $0.session.directory }, contents: contents, sizes: { self.shares(for: $0) }),
                  focusedPane: panes.firstIndex { $0 === focused } ?? 0)
+    }
+
+    // MARK: Split sizes
+
+    /// A split's sizes: as it was left, or carried over from the split it was before panes came or
+    /// went, or even.
+    func shares(for node: SplitLayout<Pane>) -> [Double] {
+        guard let key = SplitKey(node) else { return [] }
+        if let known = shares[key] { return known }
+        let anchors = Set(key.anchors)
+        let closest = shares.filter { $0.key.axis == key.axis }
+            .map { (entry: $0, common: anchors.intersection($0.key.anchors).count) }
+            .filter { $0.common > 0 }
+            .max { $0.common < $1.common }
+        guard let closest else { return SplitShares.even(key.anchors.count) }
+        return SplitShares.carry(closest.entry.value, from: closest.entry.key.anchors, to: key.anchors)
+    }
+
+    /// The user dragged a divider, or the split was laid out.
+    private func split(_ key: SplitKey, resizedTo new: [Double]) {
+        if let old = shares[key], old.count == new.count, zip(old, new).allSatisfy({ abs($0 - $1) < 0.002 }) { return }
+        shares[key] = new
+        // So the window saves it.
+        objectWillChange.send()
     }
 
     var panes: [Pane] { layout.leaves }
@@ -105,8 +146,9 @@ final class TerminalTab: ObservableObject, Identifiable {
         }
     }
 
-    /// Builds the view hierarchy for the current layout.
+    /// Builds the view hierarchy for the current layout, each split at the size it was left at.
     func makeView(divider: NSColor) -> NSView {
+        var current: [SplitKey: [Double]] = [:]
         func build(_ node: SplitLayout<Pane>) -> NSView {
             switch node {
             case .leaf(let pane):
@@ -118,31 +160,75 @@ final class TerminalTab: ObservableObject, Identifiable {
                 split.dividerStyle = .thin
                 split.divider = divider
                 children.map(build).forEach(split.addArrangedSubview)
+                if let key = SplitKey(node) {
+                    let shares = shares(for: node)
+                    current[key] = shares
+                    split.shares = shares
+                    split.onResize = { [weak self] shares in self?.split(key, resizedTo: shares) }
+                }
                 return split
             }
         }
-        return build(layout)
+        let root = build(layout)
+        // Splits that are gone are forgotten.
+        shares = current
+        return root
     }
 }
 
-/// A split view with a hairline divider that spreads its panes evenly the first time it's laid out.
-final class PaneSplitView: NSSplitView {
+/// A split view with a hairline divider that sizes its panes by `shares` (evenly without) the first
+/// time it's laid out, and reports their shares when they change.
+final class PaneSplitView: NSSplitView, NSSplitViewDelegate {
     var divider: NSColor = .separatorColor
+    /// Each pane's fraction of the length, adding up to 1.
+    var shares: [Double]?
+    var onResize: (([Double]) -> Void)?
     private var distributed = false
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        delegate = self
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
 
     override var dividerColor: NSColor { divider }
     override var dividerThickness: CGFloat { 1 }
 
+    private var length: CGFloat { isVertical ? bounds.width : bounds.height }
+
     override func layout() {
         super.layout()
         guard !distributed, arrangedSubviews.count > 1 else { return }
-        let total = isVertical ? bounds.width : bounds.height
-        guard total > 0 else { return }
+        let count = arrangedSubviews.count
+        let available = length - dividerThickness * CGFloat(count - 1)
+        guard available > 0 else { return }
+        let fractions = shares.flatMap { $0.count == count ? $0 : nil } ?? SplitShares.even(count)
+        // Before moving dividers, which lays the view out again.
         distributed = true
-        let count = CGFloat(arrangedSubviews.count)
-        let share = (total - dividerThickness * (count - 1)) / count
-        for index in 0..<(arrangedSubviews.count - 1) {
-            setPosition(share * CGFloat(index + 1) + dividerThickness * CGFloat(index), ofDividerAt: index)
+        var position: CGFloat = 0
+        for index in 0..<(count - 1) {
+            position += available * CGFloat(fractions[index])
+            setPosition(position.rounded(), ofDividerAt: index)
+            position += dividerThickness
         }
+        reportShares()
+    }
+
+    func splitViewDidResizeSubviews(_ notification: Notification) {
+        guard distributed else { return }
+        reportShares()
+    }
+
+    private func reportShares() {
+        let sizes = arrangedSubviews.map { isVertical ? $0.frame.width : $0.frame.height }
+        let total = sizes.reduce(0, +)
+        guard total > 0, sizes.allSatisfy({ $0 > 0 }) else { return }
+        let measured = sizes.map { Double($0 / total) }
+        shares = measured
+        onResize?(measured)
     }
 }

@@ -62,6 +62,7 @@ enum MainMenu {
         let menu = NSMenu(title: "Shell")
         menu.addItem(item("New Window", #selector(AppDelegate.newWindow(_:)), "n"))
         menu.addItem(item("New Tab", #selector(AppDelegate.newTab(_:)), "t"))
+        menu.addItem(item("Reopen Closed Tab", #selector(AppDelegate.reopenClosedTab(_:)), "t", [.command, .shift]))
         menu.addItem(.separator())
         menu.addItem(item("Split Right", #selector(W.splitRight(_:)), "d"))
         menu.addItem(item("Split Down", #selector(W.splitDown(_:)), "d", [.command, .shift]))

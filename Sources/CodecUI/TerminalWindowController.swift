@@ -45,8 +45,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     private static let navigatorTabKey = "NavigatorTab"
     private static let timelineWidthKey = "CommandsWidth"
 
-    /// A window with one tab in `directory`, or, given `saved`, the tabs and splits it describes.
-    init(directory: String?, environment: AppEnvironment, restoring saved: SavedWindow? = nil) {
+    /// A window with one tab in `directory`, or, given `saved`, the tabs and splits it describes, with
+    /// the panes' kept contents `contents` finds by name.
+    init(directory: String?, environment: AppEnvironment, restoring saved: SavedWindow? = nil,
+         contents: @escaping (String) -> SavedPaneContents? = { _ in nil }) {
         self.environment = environment
         fileTree = FileTreeModel(defaults: environment.preferences.stateDefaults)
         intel = IntelLibrary(personalFolder: environment.intelFolder)
@@ -74,7 +76,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         buildContent()
         applyPreferences()
         observeEnvironment()
-        if saved.map(restore) != true { addTab(directory: directory) }
+        if saved.map({ restore($0, contents: contents) }) != true { addTab(directory: directory) }
         observeState()
         model.navigatorTab = preferences.stateDefaults.string(forKey: Self.navigatorTabKey).flatMap(NavigatorTab.init) ?? .files
         setNavigatorVisible(preferences.stateDefaults.bool(forKey: Self.fileTreeVisibleKey))
@@ -638,6 +640,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         case #selector(saveDocument(_:)): return editor.selected.map { $0.isEditable && $0.kind != .otherEncoding } ?? false
         case #selector(closeFile(_:)): return editor.selected != nil
         case #selector(toggleMarkdownPreview(_:)): return editor.selected?.kind == .markdown
+        case #selector(reopenClosedTab(_:)): return !environment.closedTabs.isEmpty
         default: return true
         }
     }
@@ -652,8 +655,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     // MARK: - Tabs & panes
 
-    private func makePane(directory: String?, sound: Bool = true) -> Pane {
-        let pane = Pane(directory: directory, environment: environment)
+    private func makePane(directory: String?, sound: Bool = true, contents: SavedPaneContents? = nil) -> Pane {
+        let pane = Pane(directory: directory, environment: environment, restoring: contents)
         pane.host = self
         if sound, preferences.paneSounds { environment.sounds.play(.lock) }
         return pane
@@ -693,26 +696,61 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     /// What to save of the window, to open it again: its frame, and its tabs with their splits,
     /// names and directories.
-    var savedState: SavedWindow {
-        SavedWindow(frame: model.fullScreen ? nil : window?.frame, tabs: model.tabs.map(\.saved),
+    var savedState: SavedWindow { savedState(naming: { _ in nil }) }
+
+    /// `savedState`, with each pane whose contents are being kept named by `naming`.
+    func savedState(naming: (Pane) -> String?) -> SavedWindow {
+        SavedWindow(frame: model.fullScreen ? nil : window?.frame, tabs: model.tabs.map { $0.saved(contents: naming) },
                     selectedTab: model.tabs.firstIndex { $0.id == model.selectedID } ?? 0)
     }
 
-    /// Opens the tabs `saved` describes, each pane in its directory (or the nearest one that's left).
-    /// Returns false when there was nothing to open.
-    private func restore(_ saved: SavedWindow) -> Bool {
+    /// Opens the tabs `saved` describes. Returns false when there was nothing to open.
+    private func restore(_ saved: SavedWindow, contents: (String) -> SavedPaneContents?) -> Bool {
         for savedTab in saved.tabs {
-            guard let layout = savedTab.layout.build({ directory in
-                self.makePane(directory: SavedWorkspace.existingDirectory(directory), sound: false)
-            }) else { continue }
-            let panes = layout.leaves
-            let tab = TerminalTab(layout: layout, focused: panes[min(max(savedTab.focusedPane, 0), panes.count - 1)])
-            tab.rename(to: savedTab.title)
+            guard let tab = makeTab(from: savedTab, contents: contents) else { continue }
             insert(tab, at: model.tabs.count)
         }
         guard !model.tabs.isEmpty else { return false }
         select(model.tabs[min(max(saved.selectedTab, 0), model.tabs.count - 1)])
         return true
+    }
+
+    /// A tab as `saved` describes it: its splits at their sizes, each pane in its directory (or the
+    /// nearest one that's left) showing its kept contents, its name, its focused pane.
+    private func makeTab(from saved: SavedTab, contents: (String) -> SavedPaneContents?) -> TerminalTab? {
+        var shares: [TerminalTab.SplitKey: [Double]] = [:]
+        guard let layout = saved.layout.build({ directory, name in
+            self.makePane(directory: SavedWorkspace.existingDirectory(directory), sound: false, contents: name.flatMap(contents))
+        }, sizes: { node, sizes in
+            if let key = TerminalTab.SplitKey(node) { shares[key] = sizes }
+        }) else { return nil }
+        let panes = layout.leaves
+        let tab = TerminalTab(layout: layout, focused: panes[min(max(saved.focusedPane, 0), panes.count - 1)], shares: shares)
+        tab.rename(to: saved.title)
+        return tab
+    }
+
+    // MARK: Reopening closed tabs
+
+    /// Keeps a tab that's closing, with what its panes show, to reopen it with ⇧⌘T.
+    private func rememberClosed(_ tab: TerminalTab) {
+        var contents: [String: SavedPaneContents] = [:]
+        let saved = tab.saved { pane in
+            guard let kept = pane.savedContents() else { return nil }
+            let name = pane.session.id.uuidString
+            contents[name] = kept
+            return name
+        }
+        environment.closedTabs.push(.init(tab: saved, contents: contents))
+    }
+
+    /// ⇧⌘T: opens the tab closed last, after the current one.
+    @objc func reopenClosedTab(_ sender: Any?) {
+        guard let closed = environment.closedTabs.pop(),
+              let tab = makeTab(from: closed.tab, contents: { closed.contents[$0] }) else { return NSSound.beep() }
+        let position = model.selected.flatMap { selected in model.tabs.firstIndex { $0 === selected } }.map { $0 + 1 }
+        insert(tab, at: position ?? model.tabs.count)
+        select(tab)
     }
 
     private func observeState() {
@@ -759,6 +797,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     private func removeTab(_ tab: TerminalTab) {
         guard let index = model.tabs.firstIndex(where: { $0 === tab }) else { return }
+        rememberClosed(tab)
         tab.panes.forEach { $0.shutDown() }
         tabObservers[tab.id] = nil
         if model.renamingTabID == tab.id { model.renamingTabID = nil }
@@ -1166,6 +1205,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     func paletteCommands() -> [PaletteCommand] {
         var commands: [PaletteCommand] = [
             .init(id: "new-tab", title: "New Tab", shortcut: "⌘T", systemImage: "plus.square") { [weak self] in self?.newTab(nil) },
+            .init(id: "reopen-tab", title: "Reopen Closed Tab", shortcut: "⇧⌘T", systemImage: "arrow.uturn.backward.square") { [weak self] in
+                self?.reopenClosedTab(nil)
+            },
             .init(id: "new-window", title: "New Window", shortcut: "⌘N", systemImage: "macwindow.badge.plus") { [weak self] in
                 self?.environment.coordinator?.newWindow()
             },
@@ -1325,6 +1367,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     func windowWillClose(_ notification: Notification) {
         if let monitor = overlayKeyMonitor { NSEvent.removeMonitor(monitor) }
         overlayKeyMonitor = nil
+        // Its tabs can come back with ⇧⌘T, the one that was in front last.
+        let selected = model.selected
+        for tab in model.tabs where tab !== selected { rememberClosed(tab) }
+        if let selected { rememberClosed(selected) }
         allPanes.forEach { $0.shutDown() }
         cancellables.removeAll()
         tabObservers.removeAll()

@@ -38,7 +38,8 @@ final class Pane: LocalProcessTerminalViewDelegate {
     private var oscObservation: TerminalOscObservation?
     private(set) var isShutDown = false
 
-    init(directory: String?, environment: AppEnvironment) {
+    /// A pane with a shell in `directory`, showing first what it showed last time when there's `contents`.
+    init(directory: String?, environment: AppEnvironment, restoring contents: SavedPaneContents? = nil) {
         self.environment = environment
         fontSize = CGFloat(environment.preferences.fontSize)
         baseFontSize = fontSize
@@ -106,7 +107,42 @@ final class Pane: LocalProcessTerminalViewDelegate {
 
         applyPreferences()
         session.directory = directory ?? NSHomeDirectory()
+        if let contents { restore(contents) }
         start()
+    }
+
+    // MARK: - Keeping what it showed
+
+    /// What the pane shows (its scrollback, up to the prompt it's at) and the commands it ran, to show
+    /// them again later. Nil when there's nothing.
+    func savedContents(at date: Date = Date()) -> SavedPaneContents? {
+        var transcript = ""
+        var firstRow = 0
+        // A full-screen program has the screen: its scrollback isn't what's showing.
+        if terminal.terminalInputStateSnapshot()?.isAlternateBuffer == false,
+           let snapshot = terminal.terminalContentSnapshot(region: .history(maximumScrollbackRows: CodecTerminalView.scrollback)) {
+            let end = newestBlockEnd ?? snapshot.cursorRow + 1
+            var rows = snapshot.rows.filter { $0.absoluteRow < end }
+            while let last = rows.last, last.text.trimmingCharacters(in: .whitespaces).isEmpty { rows.removeLast() }
+            firstRow = rows.first?.absoluteRow ?? end
+            transcript = TerminalTranscript.text(of: rows)
+        }
+        guard !transcript.isEmpty || !timeline.entries.isEmpty else { return nil }
+        return SavedPaneContents(transcript: transcript, timeline: timeline.value.rebased(firstRow: firstRow),
+                                 listStart: timeline.listStart, saved: date)
+    }
+
+    /// Shows what the pane showed last time, with a line to tell it from what comes next, and takes up
+    /// its commands. Their rows are found again from the text once the terminal has its real width.
+    private func restore(_ contents: SavedPaneContents) {
+        if !contents.transcript.isEmpty {
+            terminal.feed(text: contents.transcript)
+            let when = contents.saved.formatted(date: .abbreviated, time: .shortened)
+            terminal.feed(text: "\u{1B}[2m── Restored · \(when) ──\u{1B}[0m\r\n")
+        }
+        timeline.restore(contents.timeline, listStart: contents.listStart)
+        blocks.replace(with: contents.timeline.entries.compactMap(\.block))
+        rowsMayHaveMoved = true
     }
 
     // MARK: - Process

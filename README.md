@@ -25,7 +25,7 @@ You ran a dozen things, went on for a while, and now you need to know what that 
 
 <img src="docs/images/commands.png" alt="The Commands sidebar with a command's output open">
 
-The **Commands sidebar** (⇧⌘L) lists everything the pane ran, under the folder it ran in: whether it worked, how long it took, the last line it printed. Click one and the terminal scrolls back to it and marks it. Open its output in a viewer you can search, copy from, or run again, even after it has scrolled out of the buffer or ⌘K cleared it. Filter by what commands printed, not just what you typed.
+The **Commands sidebar** (⇧⌘L) lists everything the pane ran, under the folder it ran in: whether it worked, how long it took, the last line it printed. Click one and the terminal scrolls back to it and marks it. Open its output in a viewer you can search, copy from, or run again, even after it has scrolled out of the buffer, ⌘K cleared it, or you quit and came back the next day. Filter by what commands printed, not just what you typed.
 
 → [Commands sidebar](docs/commands-sidebar.md)
 
@@ -63,7 +63,7 @@ Click anywhere in the command you're typing to put the cursor there, drag to sel
 
 <img src="docs/images/branches.png" alt="Two panes side by side, and the branch switcher open">
 
-Tabs and nested splits in one window. Click the branch in the status bar or in the prompt itself to switch or create branches with a fuzzy search. Build your prompt from chips (directory, branch, changes, duration, exit status, Python environment, Kubernetes context) in a visual editor, or keep your own PS1. Quit and reopen, and your windows, tabs and splits come back, each pane in its folder. Before anything closes, Codec tells you exactly what's still running in it.
+Tabs and nested splits in one window. Click the branch in the status bar or in the prompt itself to switch or create branches with a fuzzy search. Build your prompt from chips (directory, branch, changes, duration, exit status, Python environment, Kubernetes context) in a visual editor, or keep your own PS1. Quit and reopen, and your windows, tabs and splits come back, each pane in its folder, showing what it showed, with its commands. Closed a tab by mistake? ⇧⌘T. Before anything closes, Codec tells you exactly what's still running in it.
 
 → [Tabs and panes](docs/tabs-and-panes.md) · [Prompt and status bar](docs/prompt-and-status-bar.md)
 

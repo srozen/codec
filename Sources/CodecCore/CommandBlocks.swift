@@ -20,7 +20,7 @@ public struct ScreenRow: Equatable, Sendable {
 /// zsh reported, its prompt starts `promptLines - 1` rows above, and the output starts below it. So it
 /// doesn't matter how far output has run by the time Codec looks.
 public struct CommandBlocks: Equatable, Sendable {
-    public struct Block: Equatable, Sendable {
+    public struct Block: Codable, Equatable, Sendable {
         /// The first row of the command's prompt.
         public var prompt: Int
         /// The first row after the command line, where output begins.

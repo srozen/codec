@@ -45,7 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, AppCoordinating {
 
     func applicationWillTerminate(_ notification: Notification) {
         terminating = true
-        saveWindows()
+        saveWindows(keepingContents: environment.preferences.restorePaneContents)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -90,8 +90,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, AppCoordinating {
         open(makeWindow(restoring: nil))
     }
 
-    private func makeWindow(restoring saved: SavedWindow?) -> TerminalWindowController {
-        let controller = TerminalWindowController(directory: nil, environment: environment, restoring: saved)
+    private func makeWindow(restoring saved: SavedWindow?,
+                            contents: @escaping (String) -> SavedPaneContents? = { _ in nil }) -> TerminalWindowController {
+        let controller = TerminalWindowController(directory: nil, environment: environment, restoring: saved, contents: contents)
         controller.onClose = { [weak self] closed in
             self?.windows.removeAll { $0 === closed }
             self?.attentionDidChange()
@@ -120,17 +121,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, AppCoordinating {
 
     // MARK: - Reopening windows
 
-    /// Opens the windows saved last time, if there are any and Settings allow it. Returns whether
-    /// it opened any.
+    /// Opens the windows saved last time, if there are any and Settings allow it, with what their
+    /// panes showed if that was kept. Returns whether it opened any.
     @discardableResult
     func restoreWindows() -> Bool {
-        guard environment.preferences.restoreWindows,
-              let saved = SavedWorkspace.load(from: environment.preferences.stateDefaults) else { return false }
+        let preferences = environment.preferences
+        let archive = environment.paneArchive
+        // Kept contents are read once: after this, they're in the panes.
+        defer { archive.keepOnly([]) }
+        guard preferences.restoreWindows, let saved = SavedWorkspace.load(from: preferences.stateDefaults) else { return false }
+        let contents: (String) -> SavedPaneContents? = preferences.restorePaneContents ? archive.load : { _ in nil }
         // Back to front, so the front one ends up in front.
         for savedWindow in saved.windows.reversed() where !savedWindow.tabs.isEmpty {
-            open(makeWindow(restoring: savedWindow), frame: savedWindow.frame)
+            open(makeWindow(restoring: savedWindow, contents: contents), frame: savedWindow.frame)
         }
         return !windows.isEmpty
+    }
+
+    /// ⇧⌘T with no window in front: reopens the tab closed last in a window that's open, or in one of
+    /// its own.
+    @objc func reopenClosedTab(_ sender: Any?) {
+        if let window = currentWindow ?? windows.last { return window.reopenClosedTab(sender) }
+        guard let closed = environment.closedTabs.pop() else { return NSSound.beep() }
+        open(makeWindow(restoring: SavedWindow(frame: nil, tabs: [closed.tab], selectedTab: 0), contents: { closed.contents[$0] }))
     }
 
     /// Saves the windows a moment after they change, once for a burst of changes.
@@ -142,15 +155,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, AppCoordinating {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: save)
     }
 
-    /// Saves the open windows, front to back.
-    func saveWindows() {
+    /// Saves the open windows, front to back; with `keepingContents`, what each pane shows too (when
+    /// quitting, as that takes a moment).
+    func saveWindows(keepingContents: Bool = false) {
         pendingSave?.cancel()
         pendingSave = nil
         let front = NSApp.orderedWindows
         let ordered = windows.sorted { a, b in
             (front.firstIndex { $0 === a.window } ?? .max) < (front.firstIndex { $0 === b.window } ?? .max)
         }
-        SavedWorkspace(windows: ordered.map(\.savedState)).save(to: environment.preferences.stateDefaults)
+        let archive = environment.paneArchive
+        var kept: Set<String> = []
+        let saved = ordered.map { window in
+            window.savedState { pane in
+                guard keepingContents, let contents = pane.savedContents() else { return nil }
+                let name = pane.session.id.uuidString
+                do {
+                    try archive.save(contents, as: name)
+                } catch {
+                    Log.app.error("Couldn't keep a pane's contents: \(error.localizedDescription, privacy: .public)")
+                    return nil
+                }
+                kept.insert(name)
+                return name
+            }
+        }
+        SavedWorkspace(windows: saved).save(to: environment.preferences.stateDefaults)
+        if keepingContents { archive.keepOnly(kept) }
     }
 
     /// Reaches here when no window is open to take ⌘T.

@@ -45,6 +45,8 @@ public final class Preferences: ObservableObject {
     @Published public var recordHistory: Bool { didSet { store(recordHistory, .recordHistory) } }
     /// Opens the windows, tabs and splits from last time at launch.
     @Published public var restoreWindows: Bool { didSet { store(restoreWindows, .restoreWindows) } }
+    /// With them, what each pane showed and the commands it ran.
+    @Published public var restorePaneContents: Bool { didSet { store(restorePaneContents, .restorePaneContents) } }
 
     /// Commands that run at least this long notify you when they finish in the background.
     public let longCommandThreshold: TimeInterval = 10
@@ -53,7 +55,7 @@ public final class Preferences: ObservableObject {
         case themeID, fontName, fontSize, opacity, blur, scanlines, dimInactivePanes, bell, notifyInBackground,
              codecSounds, paneSounds, soundVolume, optionAsMeta, exitBehavior, shellIntegration, shellPath,
              showSystemStats, prompt, copyOnSelect, suggestCommands, historyKeys, friendlyCompletion, recordHistory,
-             restoreWindows
+             restoreWindows, restorePaneContents
     }
 
     private static let factoryDefaults: [Key: Any] = [
@@ -80,6 +82,7 @@ public final class Preferences: ObservableObject {
         .friendlyCompletion: true,
         .recordHistory: true,
         .restoreWindows: true,
+        .restorePaneContents: true,
     ]
 
     public init(defaults: UserDefaults) {
@@ -108,6 +111,7 @@ public final class Preferences: ObservableObject {
         friendlyCompletion = defaults.bool(forKey: Key.friendlyCompletion.rawValue)
         recordHistory = defaults.bool(forKey: Key.recordHistory.rawValue)
         restoreWindows = defaults.bool(forKey: Key.restoreWindows.rawValue)
+        restorePaneContents = defaults.bool(forKey: Key.restorePaneContents.rawValue)
         prompt = defaults.data(forKey: Key.prompt.rawValue)
             .flatMap { try? JSONDecoder().decode(PromptConfiguration.self, from: $0) } ?? .default
     }

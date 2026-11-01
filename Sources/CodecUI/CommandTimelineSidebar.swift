@@ -66,6 +66,12 @@ final class PaneTimeline: ObservableObject {
         guard let last = value.entries.last else { return }
         listStart = last.id + 1
     }
+
+    /// Takes up the commands of an earlier session of the pane.
+    func restore(_ timeline: CommandTimeline, listStart: Int) {
+        value = timeline
+        self.listStart = listStart
+    }
 }
 
 /// The Commands sidebar, on the right of the window: every command run in the focused pane, with how

@@ -138,7 +138,9 @@ final class Pane: LocalProcessTerminalViewDelegate {
         if !contents.transcript.isEmpty {
             terminal.feed(text: contents.transcript)
             let when = contents.saved.formatted(date: .abbreviated, time: .shortened)
-            terminal.feed(text: "\u{1B}[2m── Restored · \(when) ──\u{1B}[0m\r\n")
+            // A blank line before the shell's first prompt. It also takes the hit when the terminal is
+            // rewrapped for its real width just after the prompt, which can pull the prompt up a row.
+            terminal.feed(text: "\u{1B}[2m── Restored · \(when) ──\u{1B}[0m\r\n\r\n")
         }
         timeline.restore(contents.timeline, listStart: contents.listStart)
         blocks.replace(with: contents.timeline.entries.compactMap(\.block))

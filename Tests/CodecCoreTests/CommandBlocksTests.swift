@@ -50,6 +50,11 @@ struct CommandBlocksTests {
         let screen = rows(["out", "", "chips", "", "❯ long command that", "wraps"], from: 10, wrapped: [15])
         #expect(CommandBlocks.promptStart(cursorRow: 15, in: screen, promptLines: 4) == 11)
         #expect(CommandBlocks.promptStart(cursorRow: 99, in: screen, promptLines: 2) == 98)
+        // A line of the prompt too long for one row.
+        let narrow = rows(["out", "", "~/a/very/long/", "path main", "", "❯ ls"], from: 0, wrapped: [3])
+        #expect(CommandBlocks.promptStart(cursorRow: 5, in: narrow, promptLines: 4) == 1)
+        // Its start already gone from the rows given.
+        #expect(CommandBlocks.promptStart(cursorRow: 5, in: narrow, promptLines: 7) == -2)
     }
 
     @Test func outputRunsToTheNextPromptOrTheGivenEnd() {

@@ -105,7 +105,14 @@ public struct CommandBlocks: Equatable, Sendable {
     public static func promptStart(cursorRow: Int, in rows: [ScreenRow], promptLines: Int) -> Int {
         guard var position = rows.firstIndex(where: { $0.row == cursorRow }) else { return cursorRow - max(promptLines - 1, 0) }
         while position > 0, rows[position].isWrapped { position -= 1 }
-        return rows[position].row - max(promptLines - 1, 0)
+        // Up a line at a time: a long line of the prompt can take more than one row.
+        var remaining = max(promptLines - 1, 0)
+        while remaining > 0, position > 0 {
+            position -= 1
+            while position > 0, rows[position].isWrapped { position -= 1 }
+            remaining -= 1
+        }
+        return rows[position].row - remaining
     }
 
     private static func trimmingTrailingSpace(_ text: String) -> Substring {

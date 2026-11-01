@@ -86,8 +86,7 @@ enum TerminalTranscript {
             var cells = row.cells.filter { $0.width > 0 }
             // Blank cells at the end, unless the line goes on to the next row and needs them to wrap there.
             if !continues {
-                while let last = cells.last, last.text.trimmingCharacters(in: .whitespaces).isEmpty,
-                      last.attribute.bg == Attribute.empty.bg, !last.attribute.style.contains(.inverse) {
+                while let last = cells.last, isBlank(last.text), !paintsBackground(last.attribute) {
                     cells.removeLast()
                 }
             }
@@ -96,7 +95,7 @@ enum TerminalTranscript {
                     result += sgr(cell.attribute)
                     current = cell.attribute
                 }
-                result += cell.text.isEmpty ? " " : cell.text
+                result += isBlank(cell.text) ? " " : cell.text
             }
             if !continues {
                 if current != .empty {
@@ -108,6 +107,20 @@ enum TerminalTranscript {
         }
         if current != .empty { result += "\u{1B}[0m" }
         return result
+    }
+
+    /// A cell nothing was written to holds a NUL; one that was erased, a space.
+    private static func isBlank(_ text: String) -> Bool {
+        text.unicodeScalars.allSatisfy { $0 == "\0" || $0 == " " }
+    }
+
+    /// Whether a blank cell with `attribute` shows anything: a background color, or the inverse.
+    private static func paintsBackground(_ attribute: Attribute) -> Bool {
+        if attribute.style.contains(.inverse) { return true }
+        switch attribute.bg {
+        case .defaultColor, .defaultInvertedColor: return false
+        case .ansi256, .trueColor: return true
+        }
     }
 
     /// The sequence that switches to `attribute` from anything.

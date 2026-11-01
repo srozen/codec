@@ -159,8 +159,11 @@ struct FileTreeWindowTests {
         // The current directory takes the accent.
         #expect(icon("App") === FileIcons.image(for: .plain, state: .current, theme: theme))
 
+        // Closing it from the tree gives the terminal back the keyboard.
+        #expect(controller.window?.firstResponder === controller.sidebar.outline)
         controller.toggleFileTree(nil)
         controller.window?.layoutIfNeeded()
+        #expect(controller.window?.firstResponder === controller.model.selected?.focused.terminal)
         #expect(controller.sidebar.frame.width == 0)
         #expect(!controller.fileTree.isActive)
         #expect(controller.paletteCommands().contains { $0.id == "file-tree" && $0.title == "Show File Tree" })

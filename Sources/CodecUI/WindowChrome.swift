@@ -12,6 +12,7 @@ final class WindowModel: ObservableObject {
     /// The tab whose name is being edited in the tab bar.
     @Published var renamingTabID: UUID?
     @Published var fileTreeVisible = false
+    @Published var timelineVisible = false
 
     var selected: TerminalTab? { tabs.first { $0.id == selectedID } }
 }
@@ -25,6 +26,7 @@ struct TabBarActions {
     var newTab: () -> Void
     var showPalette: () -> Void
     var toggleFileTree: () -> Void = {}
+    var toggleTimeline: () -> Void = {}
     var beginRenaming: (TerminalTab) -> Void
     /// Ends an edit: a new name (blank resets it), or nil to cancel.
     var finishRenaming: (TerminalTab, String?) -> Void
@@ -52,6 +54,8 @@ struct TabBar: View {
             BarIconButton(systemImage: "plus", help: "New Tab (⌘T)", action: actions.newTab)
             Spacer(minLength: 24)
             BarIconButton(systemImage: "command", help: "Command Palette (⇧⌘P)", action: actions.showPalette)
+            BarIconButton(systemImage: "sidebar.right", help: model.timelineVisible ? "Hide Commands (⇧⌘L)" : "Show Commands (⇧⌘L)",
+                          active: model.timelineVisible, action: actions.toggleTimeline)
         }
         .padding(.leading, model.fullScreen ? 10 : 84)
         .padding(.trailing, 10)

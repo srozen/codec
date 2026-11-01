@@ -21,6 +21,8 @@ protocol PaneHost: AnyObject {
 @MainActor
 final class Pane: LocalProcessTerminalViewDelegate {
     let session = Session()
+    /// Every command run here, for the Commands sidebar.
+    let timeline = PaneTimeline()
     let view: PaneView
     var terminal: CodecTerminalView { view.terminal }
     weak var host: (any PaneHost)?
@@ -79,7 +81,10 @@ final class Pane: LocalProcessTerminalViewDelegate {
                 // The prompt ends here; what follows on this row is the command line.
                 let column = event.cursor.col
                 DispatchQueue.main.async {
-                    MainActor.assumeIsolated { self?.promptEndColumn = column }
+                    MainActor.assumeIsolated {
+                        self?.promptEndColumn = column
+                        self?.promptWasDrawn()
+                    }
                 }
             case 133 where payload == "C":
                 // Output is about to start. Capture the screen right away, while the command line is
@@ -139,6 +144,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
         session.processName = name
         session.exitStatus = nil
         session.running = nil
+        timeline.abandonRunning()
         terminal.startProcess(
             executable: shell,
             args: [],
@@ -202,6 +208,10 @@ final class Pane: LocalProcessTerminalViewDelegate {
         }
         ticks += 1
         if ticks % 4 == 0 { pollProcess() }
+        if session.running != nil, timeline.running?.fullScreen == false,
+           terminal.terminalInputStateSnapshot()?.isAlternateBuffer == true {
+            timeline.markRunningFullScreen()
+        }
         updateBranchHotspot()
     }
 
@@ -235,6 +245,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
             return
         case .commandText(let text):
             runningCommandText = text
+            timeline.updateRunningCommand(text)
             return
         case .historyFile(let path):
             environment.history.useShellFile(URL(fileURLWithPath: path))
@@ -251,14 +262,29 @@ final class Pane: LocalProcessTerminalViewDelegate {
         let command = session.running?.command ?? ""
         let started = session.running?.started
         session.apply(event)
-        if case .commandStarted(let started) = event, let screen = pendingCommandScreen {
-            pendingCommandScreen = nil
-            if let block = CommandBlocks.locate(command: started, in: screen.rows, cursorRow: screen.cursorRow,
-                                                promptLines: session.promptLines) {
+        if case .commandStarted(let started) = event {
+            var block: CommandBlocks.Block?
+            if let screen = pendingCommandScreen {
+                pendingCommandScreen = nil
+                block = CommandBlocks.locate(command: started, in: screen.rows, cursorRow: screen.cursorRow,
+                                             promptLines: session.promptLines)
+            }
+            if let block {
+                // The new command isn't listed yet: the ones before it are above its prompt.
+                relocateBlocksIfNeeded(above: block.prompt)
+                captureFinishedOutput(end: block.prompt)
+                // Rows only grow; going back means the scrollback was cleared under the older commands.
+                if let last = blocks.blocks.last, block.prompt <= last.prompt { timeline.forgetBlocks() }
                 blocks.record(block)
             }
+            timeline.begin(command: started, directory: session.directory, started: session.running?.started ?? Date(),
+                           block: block)
         }
         guard case .commandFinished(let exitCode, let duration) = event else { return }
+        let finished = timeline.running
+        timeline.finish(exitCode: exitCode, duration: duration, output: nil)
+        // Its output runs up to the next prompt, found once that's drawn.
+        if let finished, finished.block != nil, !finished.fullScreen { outputToCapture = finished.id }
         if preferences.recordHistory {
             environment.history.record(HistoryEntry(
                 command: runningCommandText ?? command, date: started ?? Date().addingTimeInterval(-duration),
@@ -422,6 +448,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
 
     /// The output of the command whose block holds a window point.
     func outputRange(at point: NSPoint) -> Range<Int>? {
+        relocateBlocksIfNeeded()
         guard let grid = TerminalGrid(terminal: terminal), let end = newestBlockEnd,
               let index = blocks.index(containing: grid.viewportTop + grid.cell(at: point).row) else { return nil }
         return blocks.outputRange(of: index, end: end)
@@ -429,6 +456,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
 
     /// The output of the most recent command that has finished.
     var lastOutputRange: Range<Int>? {
+        relocateBlocksIfNeeded()
         guard let last = blocks.blocks.indices.last, let end = newestBlockEnd else { return nil }
         let index = session.running == nil ? last : last - 1
         return blocks.outputRange(of: index, end: end)
@@ -436,15 +464,23 @@ final class Pane: LocalProcessTerminalViewDelegate {
 
     /// The text of some rows, with soft-wrapped lines rejoined and trailing blank space removed.
     func text(of range: Range<Int>) -> String? {
-        guard let snapshot = terminal.terminalContentSnapshot(
-            region: .history(maximumScrollbackRows: CodecTerminalView.scrollback)) else { return nil }
+        var lines = self.lines(of: range).lines
+        while lines.last?.isEmpty == true { lines.removeLast() }
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+
+    /// The lines in some rows, soft-wrapped ones rejoined, and whether the first rows had already left
+    /// the scrollback. Copies only as much of the scrollback as the rows need.
+    func lines(of range: Range<Int>) -> (lines: [String], lostEarlier: Bool) {
+        guard !range.isEmpty, let live = terminal.terminalContentSnapshot(region: .history(maximumScrollbackRows: 0)),
+              let snapshot = terminal.terminalContentSnapshot(region: .history(maximumScrollbackRows: min(
+                  max(live.liveTopRow - range.lowerBound, 0), CodecTerminalView.scrollback))) else { return ([], false) }
         var lines: [String] = []
         for row in snapshot.rows where range.contains(row.absoluteRow) {
             let text = row.text.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
             if row.isWrapped, !lines.isEmpty { lines[lines.count - 1] += text } else { lines.append(text) }
         }
-        while lines.last?.isEmpty == true { lines.removeLast() }
-        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+        return (lines, snapshot.capturedRange.lowerBound > range.lowerBound)
     }
 
     func copyOutput(_ range: Range<Int>) {
@@ -474,6 +510,138 @@ final class Pane: LocalProcessTerminalViewDelegate {
         terminal.scrollTo(row: last - grid.bufferRowOffset - visibleRows + 1)
         guard let end = TerminalGrid(terminal: terminal) else { return }
         terminal.extendSelection(to: end.trailingEdge(row: last - end.viewportTop, column: lastColumn))
+    }
+
+    // MARK: - Going back to a command
+
+    /// The command that finished, whose output is kept once the prompt after it is on screen.
+    private var outputToCapture: Int?
+
+    /// The prompt is drawn (zsh just printed its 133;B mark), so the finished command's output can be
+    /// told from it.
+    private func promptWasDrawn() {
+        guard outputToCapture != nil else { return }
+        relocateBlocksIfNeeded()
+        guard let end = newestBlockEnd else { return }
+        captureFinishedOutput(end: end)
+    }
+
+    /// Keeps what the command that just finished printed, up to `end`: the first row of the prompt after it.
+    private func captureFinishedOutput(end: Int) {
+        guard let id = outputToCapture else { return }
+        outputToCapture = nil
+        guard let block = timeline.value.entry(id: id)?.block, end > block.output else { return }
+        let (lines, lostEarlier) = lines(of: block.output..<end)
+        let output = CapturedOutput(lines: lines, lostEarlier: lostEarlier)
+        if !output.isEmpty { timeline.setOutput(output, of: id) }
+    }
+
+    /// The rows a command's prompt, command line and output take up, while they're still in the scrollback
+    /// as they were: nil once they've scrolled out of it, the buffer was cleared, or a full-screen program
+    /// has the screen.
+    func rows(of entry: TimelineEntry) -> Range<Int>? {
+        relocateBlocksIfNeeded()
+        guard let entry = timeline.value.entry(id: entry.id) else { return nil }
+        if let rows = rowsAsRecorded(of: entry) { return rows }
+        // The rows may have moved without word of a resize: look once more before giving up on it.
+        rowsMayHaveMoved = true
+        relocateBlocksIfNeeded()
+        guard let moved = timeline.value.entry(id: entry.id), moved.block != entry.block,
+              let rows = rowsAsRecorded(of: moved) else {
+            timeline.forgetBlock(of: entry.id)
+            return nil
+        }
+        return rows
+    }
+
+    private func rowsAsRecorded(of entry: TimelineEntry) -> Range<Int>? {
+        guard let block = entry.block, session.exitStatus == nil,
+              terminal.terminalInputStateSnapshot()?.isAlternateBuffer == false,
+              let grid = TerminalGrid(terminal: terminal) else { return nil }
+        // The scrollback's first row, past which rows have been dropped.
+        guard block.prompt >= grid.bufferRowOffset else { return nil }
+        let commandLine = block.output - 1
+        guard let live = terminal.terminalContentSnapshot(region: .history(maximumScrollbackRows: 0)),
+              let snapshot = terminal.terminalContentSnapshot(region: .history(maximumScrollbackRows: min(
+                  max(live.liveTopRow - block.prompt, 0), CodecTerminalView.scrollback))) else { return nil }
+        let screen = Pane.screenRows(snapshot)
+        // Row numbers start over when the scrollback is cleared, so check the command is still on its line.
+        guard CommandBlocks.locate(command: entry.screenCommand, in: screen.rows, cursorRow: commandLine,
+                                   promptLines: 1)?.output == block.output else { return nil }
+        let end: Int
+        if let index = blocks.blocks.firstIndex(of: block), let next = blocks.blocks.dropFirst(index + 1).first {
+            end = next.prompt
+        } else if entry.isRunning || !session.integrated {
+            end = screen.cursorRow + 1
+        } else {
+            end = CommandBlocks.promptStart(cursorRow: screen.cursorRow, in: screen.rows, promptLines: session.promptLines)
+        }
+        return block.prompt..<max(end, block.output)
+    }
+
+    /// The terminal rewrapped its lines (it was resized), so commands may be on other rows now.
+    private var rowsMayHaveMoved = false
+
+    /// Finds every command's rows again from the screen's content, after the terminal rewrapped its lines.
+    /// They're looked for above `row`, by default where the newest command ends.
+    private func relocateBlocksIfNeeded(above row: Int? = nil) {
+        guard rowsMayHaveMoved, session.exitStatus == nil,
+              terminal.terminalInputStateSnapshot()?.isAlternateBuffer == false,
+              let end = row ?? newestBlockEnd,
+              let snapshot = terminal.terminalContentSnapshot(region: .history(maximumScrollbackRows: CodecTerminalView.scrollback))
+        else { return }
+        rowsMayHaveMoved = false
+        let placed = timeline.entries.filter { $0.block != nil }
+        let found = CommandBlocks.relocate(commands: placed.map(\.screenCommand), in: Pane.screenRows(snapshot).rows,
+                                           lastRow: end - 1, promptLines: session.promptLines)
+        timeline.setBlocks(Dictionary(uniqueKeysWithValues: zip(placed.map(\.id), found)))
+        blocks.replace(with: found.compactMap { $0 })
+    }
+
+    /// The output part of `rows(of:)`.
+    func liveOutputRange(of entry: TimelineEntry) -> Range<Int>? {
+        guard let rows = rows(of: entry), let block = timeline.value.entry(id: entry.id)?.block,
+              block.output < rows.upperBound else { return nil }
+        return block.output..<rows.upperBound
+    }
+
+    /// Scrolls the terminal back to a command and marks it. With a query, goes to the first line of its
+    /// output that holds it. False when the command isn't in the scrollback anymore.
+    @discardableResult
+    func reveal(_ entry: TimelineEntry, matching query: String = "") -> Bool {
+        // Looked up again: the rows may have moved since the caller got its copy.
+        guard let rows = rows(of: entry), var grid = TerminalGrid(terminal: terminal),
+              let entry = timeline.value.entry(id: entry.id), let block = entry.block else { return false }
+        terminal.selectNone()
+        var target = block.output - 1
+        if !query.isEmpty, block.output < rows.upperBound,
+           let snapshot = terminal.terminalContentSnapshot(region: .history(maximumScrollbackRows: CodecTerminalView.scrollback)) {
+            let output = snapshot.rows.filter { (block.output..<rows.upperBound).contains($0.absoluteRow) }
+            if let match = output.first(where: { $0.text.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil }) {
+                target = match.absoluteRow
+            }
+        }
+        let visible = grid.rows.count
+        // The command from its prompt, if it fits; otherwise the target a third of the way down.
+        let top = target - block.prompt < visible - 1 ? block.prompt - 1 : target - visible / 3
+        terminal.scrollTo(row: max(top, 0) - grid.bufferRowOffset)
+        guard let scrolled = TerminalGrid(terminal: terminal) else { return true }
+        grid = scrolled
+        let shown = grid.viewportTop..<(grid.viewportTop + grid.rows.count)
+        let marked = rows.clamped(to: shown)
+        guard !marked.isEmpty, shown.contains(target) else { return true }
+        let first = grid.frame(row: marked.lowerBound - grid.viewportTop, columns: 0..<1)
+        let last = grid.frame(row: marked.upperBound - 1 - grid.viewportTop, columns: 0..<1)
+        let line = grid.frame(row: target - grid.viewportTop, columns: 0..<grid.columns)
+        view.mark(block: view.convert(first.union(last), from: nil), line: view.convert(line, from: nil),
+                  color: entry.failed ? preferences.theme.alert : preferences.theme.accent)
+        return true
+    }
+
+    /// A command's output: all of it while it's still in the scrollback, otherwise what was kept.
+    func output(of entry: TimelineEntry) -> String? {
+        if let range = liveOutputRange(of: entry), let text = text(of: range) { return text }
+        return timeline.value.entry(id: entry.id)?.output?.text ?? entry.output?.text
     }
 
     // MARK: - Switching branches
@@ -758,13 +926,17 @@ final class Pane: LocalProcessTerminalViewDelegate {
     }
 
     func clearBuffer() {
+        if let end = newestBlockEnd { captureFinishedOutput(end: end) }
+        timeline.forgetBlocks()
         terminal.feed(text: "\u{1b}[H\u{1b}[2J\u{1b}[3J")
         terminal.send(txt: "\u{0c}")
     }
 
     // MARK: - LocalProcessTerminalViewDelegate
 
-    func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
+    func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {
+        rowsMayHaveMoved = true
+    }
 
     func setTerminalTitle(source: LocalProcessTerminalView, title: String) {}
 
@@ -780,6 +952,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
         guard !isShutDown else { return }
         timer?.invalidate()
         session.running = nil
+        timeline.abandonRunning()
         if preferences.exitBehavior.closesPane(exitCode: exitCode) {
             host?.paneDidFinish(self)
             return

@@ -16,6 +16,7 @@ Open Settings with ⌘,. Changes apply as you make them, unless a setting says i
 - **Shell**: the program panes run (your login shell by default), and whether Option acts as Meta.
 - **Shell integration**: what makes the zsh features work. See [Getting started › Shell integration](getting-started.md#shell-integration-zsh).
 - **Command line**: suggestions from history as you type, ↑ and ⌃R for the history menu and search, friendlier Tab completion (these apply to new panes; your `.zshrc` settings win), and [how long commands usually take](commands-sidebar.md#how-long-it-usually-takes).
+- **Apple Intelligence**: whether failed commands offer to be [explained](commands-sidebar.md#why-did-it-fail) by Apple's on-device model.
 - **History**: whether Codec records the commands you run, and a button to forget everything recorded so far. Forgetting also hides older commands from your shell's history file in Codec, without changing the file.
 - **Selection**: copy text as soon as it's selected.
 

@@ -173,6 +173,14 @@ private struct ShellSettings: View {
                     .foregroundStyle(.secondary)
             }
             Section {
+                Toggle("Offer to explain failed commands", isOn: $prefs.explainFailures)
+            } header: {
+                Text("Apple Intelligence")
+            } footer: {
+                Text("Adds Explain to a failed command’s output in the Commands sidebar. The command, its folder, its exit status and the end of its output go to Apple’s on-device model; nothing leaves your Mac.")
+                    .foregroundStyle(.secondary)
+            }
+            Section {
                 Toggle("Remember commands I run", isOn: $prefs.recordHistory)
                 if let history {
                     Button("Clear History…", role: .destructive) { confirmingClear = true }

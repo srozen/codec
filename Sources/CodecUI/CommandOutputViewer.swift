@@ -11,6 +11,8 @@ final class CommandOutputViewer: NSViewController {
         var run: () -> Void
         var close: () -> Void
         var saveToIntel: () -> Void = {}
+        /// Puts a command on the command line.
+        var insertCommand: (String) -> Void = { _ in }
     }
 
     let entry: TimelineEntry
@@ -19,12 +21,13 @@ final class CommandOutputViewer: NSViewController {
     private let query: String
     private let theme: CodecTheme
     private let codeFont: NSFont
-    private let actions: Actions
+    let actions: Actions
     private let canInsert: Bool
+    let explanation: FailureExplanationModel
     let textView = OutputTextView()
 
     init(entry: TimelineEntry, output: String?, inScrollback: Bool, query: String, theme: CodecTheme, codeFont: NSFont,
-         actions: Actions, canInsert: Bool) {
+         actions: Actions, canInsert: Bool, explanation: FailureExplanationModel) {
         self.entry = entry
         self.output = output
         self.inScrollback = inScrollback
@@ -33,6 +36,7 @@ final class CommandOutputViewer: NSViewController {
         self.codeFont = codeFont
         self.actions = actions
         self.canInsert = canInsert
+        self.explanation = explanation
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -44,7 +48,7 @@ final class CommandOutputViewer: NSViewController {
     override func loadView() {
         let header = NSHostingView(rootView: OutputHeader(
             entry: entry, theme: theme, codeFont: codeFont, inScrollback: inScrollback, canInsert: canInsert,
-            hasOutput: output != nil, note: note, actions: actions,
+            hasOutput: output != nil, note: note, actions: actions, explanation: explanation,
             copy: { [weak self] in
                 guard let output = self?.output else { return }
                 NSPasteboard.general.clearContents()
@@ -118,6 +122,11 @@ final class CommandOutputViewer: NSViewController {
         scrollToFirstMatch()
     }
 
+    override func viewDidDisappear() {
+        super.viewDidDisappear()
+        explanation.cancel()
+    }
+
     /// Puts the keyboard in the output, so ⌘F, ⌘A and ⌘C work on it straight away.
     func focusText() {
         DispatchQueue.main.async { [weak self] in
@@ -177,6 +186,7 @@ private struct OutputHeader: View {
     let hasOutput: Bool
     let note: String?
     let actions: CommandOutputViewer.Actions
+    @ObservedObject var explanation: FailureExplanationModel
     var copy: () -> Void
 
     var body: some View {
@@ -202,6 +212,11 @@ private struct OutputHeader: View {
                 Button("Copy Output", systemImage: "doc.on.doc", action: copy)
                     .disabled(!hasOutput)
                 Button("Save to Intel", systemImage: "bookmark", action: actions.saveToIntel)
+                if explanation.isOffered {
+                    Button("Explain", systemImage: "sparkles", action: explanation.explain)
+                        .disabled(explanation.availability != .available || explanation.isWorking)
+                        .help(explainHelp)
+                }
                 Spacer(minLength: 8)
                 Button("Insert", systemImage: "text.insert", action: actions.insert)
                     .disabled(!canInsert)
@@ -211,6 +226,8 @@ private struct OutputHeader: View {
             }
             .controlSize(.small)
             .buttonStyle(.glass)
+            FailureExplanationView(model: explanation, theme: theme, codeFont: codeFont, canInsert: canInsert,
+                                   insert: actions.insertCommand)
             if let note {
                 Text(note)
                     .font(.system(size: 11))
@@ -219,6 +236,11 @@ private struct OutputHeader: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
+    }
+
+    private var explainHelp: String {
+        if case .unavailable(let reason) = explanation.availability { return reason }
+        return "Ask Apple Intelligence, on this Mac, why this command failed"
     }
 
     private var statusSymbol: String {

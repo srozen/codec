@@ -120,8 +120,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
                 toggleTimeline: { [weak self] in self?.toggleCommandTimeline(nil) },
                 beginRenaming: { [weak self] in self?.beginRenaming($0) },
                 finishRenaming: { [weak self] in self?.finishRenaming($0, to: $1) })))
-        statusBar = PassthroughHostingView(rootView: StatusBar(model: model, preferences: preferences,
-                                                               monitor: environment.systemMonitor))
+        statusBar = PassthroughHostingView(rootView: StatusBar(
+            model: model, preferences: preferences, monitor: environment.systemMonitor, explainer: environment.explainer,
+            explain: { [weak self] pane in self?.explainLastFailure(in: pane) }))
         palette = PassthroughHostingView(rootView: AnyView(EmptyView()))
         palette.capturesMouse = false
         sidebar = FileTreeSidebar(model: fileTree, theme: preferences.theme)
@@ -158,6 +159,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         timelineSidebar = CommandTimelineSidebar(theme: preferences.theme, codeFont: preferences.font())
         timelineSidebar.onResize = { [weak self] width in self?.resizeTimeline(to: width) }
         timelineSidebar.onSaveToIntel = { [weak self] entry, pane in self?.saveToIntel(entry, from: pane) }
+        timelineSidebar.explainer = { [weak self] in
+            guard let self, self.preferences.explainFailures else { return nil }
+            return self.environment.explainer
+        }
         timelineSidebar.isHidden = true
         timelineWidthConstraint = timelineSidebar.widthAnchor.constraint(equalToConstant: 0)
         let storedTimelineWidth = preferences.stateDefaults.double(forKey: Self.timelineWidthKey)
@@ -906,6 +911,26 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         case .menu: showHistoryMenu(for: pane, typed: typed)
         case .search: showHistoryPanel(for: pane, typed: typed)
         }
+    }
+
+    /// Explain, in the status bar: the pane's most recent command, which failed.
+    func explainLastFailure(in pane: Pane) {
+        guard let entry = pane.finishedEntry(at: nil), entry.failed else { return NSSound.beep() }
+        explainFailure(of: entry, in: pane)
+    }
+
+    func explainFailure(of entry: TimelineEntry, in pane: Pane) {
+        guard let tab = model.tabs.first(where: { $0.layout.contains(pane) }) else { return }
+        if tab !== model.selected { select(tab) }
+        tab.focus(pane)
+        if !model.timelineVisible { setTimelineVisible(true) }
+        window?.layoutIfNeeded()
+        let row = timelineSidebar.rows.firstIndex { $0.entry?.id == entry.id }
+        if let row {
+            timelineSidebar.table.selectRowIndexes([row], byExtendingSelection: false)
+            timelineSidebar.table.scrollRowToVisible(row)
+        }
+        timelineSidebar.showOutput(of: entry, row: row ?? -1, explain: true)
     }
 
     /// ⌘Y: the history search, for the focused pane.

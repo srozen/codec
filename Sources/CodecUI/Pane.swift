@@ -15,6 +15,8 @@ protocol PaneHost: AnyObject {
     func paneDidFinish(_ pane: Pane)
     /// The shell asked for the history (↑ or ⌃R at the prompt), starting from what's typed.
     func showHistory(for pane: Pane, request: IntegrationEvent.HistoryRequest, typed: String)
+    /// Explain Failure, from the terminal's context menu: show the command in the Commands sidebar and explain it.
+    func explainFailure(of entry: TimelineEntry, in pane: Pane)
 }
 
 /// One shell in one pane: owns the process, the terminal view and the pane's `Session`.
@@ -513,6 +515,18 @@ final class Pane: LocalProcessTerminalViewDelegate {
         return blocks.outputRange(of: index, end: end)
     }
 
+    /// The finished command whose prompt or output is at `point` (window coordinates), or else the
+    /// most recent one that finished.
+    func finishedEntry(at point: NSPoint?) -> TimelineEntry? {
+        relocateBlocksIfNeeded()
+        if let point, let grid = TerminalGrid(terminal: terminal),
+           let index = blocks.index(containing: grid.viewportTop + grid.cell(at: point).row) {
+            let block = blocks.blocks[index]
+            return timeline.entries.last { $0.block == block && !$0.isRunning }
+        }
+        return timeline.entries.last { !$0.isRunning }
+    }
+
     /// The output of the most recent command that has finished.
     var lastOutputRange: Range<Int>? {
         relocateBlocksIfNeeded()
@@ -910,6 +924,13 @@ final class Pane: LocalProcessTerminalViewDelegate {
         menu.addItem(ClosureMenuItem("Select Output", image: "text.line.first.and.arrowtriangle.forward", enabled: output != nil) { [weak self] in
             if let output { self?.selectOutput(output) }
         })
+        if preferences.explainFailures, let explainer = environment.explainer,
+           let entry = finishedEntry(at: point), FailureReport(entry: entry, output: nil) != nil {
+            menu.addItem(ClosureMenuItem("Explain Failure", image: "sparkles", enabled: explainer.availability == .available) { [weak self] in
+                guard let self else { return }
+                self.host?.explainFailure(of: entry, in: self)
+            })
+        }
         menu.addItem(.separator())
         menu.addItem(ClosureMenuItem("Split Right", key: "d", image: "rectangle.split.2x1") { [weak self] in
             guard let self else { return }

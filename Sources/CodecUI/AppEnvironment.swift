@@ -42,13 +42,17 @@ final class AppEnvironment {
     let paneArchive: PaneArchive
     /// Tabs closed lately, for ⇧⌘T, from any window.
     let closedTabs = ClosedTabs()
+    /// Explains failed commands; nil where there's nothing to do it with.
+    let explainer: (any FailureExplaining)?
     weak var coordinator: (any AppCoordinating)?
     private var promptSync: AnyCancellable?
 
     init(preferences: Preferences, sounds: any SoundPlaying, notifier: any Notifying,
          systemMonitor: SystemMonitor, shellIntegration: ShellIntegration?, history: HistoryStore = HistoryStore(logURL: nil),
-         intelFolder: URL = IntelLibrary.standardPersonalFolder, savedPanesFolder: URL = PaneArchive.standardFolder) {
+         intelFolder: URL = IntelLibrary.standardPersonalFolder, savedPanesFolder: URL = PaneArchive.standardFolder,
+         explainer: (any FailureExplaining)? = nil) {
         self.intelFolder = intelFolder
+        self.explainer = explainer
         paneArchive = PaneArchive(folder: savedPanesFolder)
         self.preferences = preferences
         self.sounds = sounds
@@ -89,7 +93,8 @@ final class AppEnvironment {
             notifier: Notifier(),
             systemMonitor: SystemMonitor(),
             shellIntegration: integration,
-            history: history)
+            history: history,
+            explainer: OnDeviceExplainer())
     }
 }
 

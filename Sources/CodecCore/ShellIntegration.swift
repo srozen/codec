@@ -41,9 +41,11 @@ public struct ShellIntegration: Sendable {
 
     /// Writes the prompt open zsh sessions pick up at their next prompt.
     public func writePrompt(_ configuration: PromptConfiguration,
-                            chipFills: [PromptConfiguration.Color: String] = [:]) throws {
+                            chipFills: [PromptConfiguration.Color: String] = [:],
+                            tagColors: [PromptConfiguration.Color: String] = [:], frameColor: String? = nil) throws {
         try FileManager.default.createDirectory(at: zshDirectory, withIntermediateDirectories: true)
-        try configuration.zshScript(chipFills: chipFills).write(to: promptFile, atomically: true, encoding: .utf8)
+        try configuration.zshScript(chipFills: chipFills, tagColors: tagColors, frameColor: frameColor)
+            .write(to: promptFile, atomically: true, encoding: .utf8)
     }
 
     /// Whether integration is available for `shell` (a path or a name).
@@ -176,6 +178,8 @@ public struct ShellIntegration: Sendable {
       for hook in $precmd_functions; do
         [[ $hook == _codec_* ]] || $hook
       done
+      # The prompt file counts prompts to put a blank line before all but the first; this is the same prompt again.
+      (( ${_codec_prompt_count:-0} > 0 )) && (( _codec_prompt_count-- ))
       [[ -n "$CODEC_PROMPT_FILE" && -r "$CODEC_PROMPT_FILE" ]] && source "$CODEC_PROMPT_FILE"
       zle reset-prompt
     }

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftTerm
 import SwiftUI
 import CodecCore
@@ -38,6 +39,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
     /// The Settings font size `fontSize` was last derived from; ⌘+/⌘− zoom stays relative to it.
     private var baseFontSize: CGFloat
     private var oscObservation: TerminalOscObservation?
+    private var promptRefresh: AnyCancellable?
     private(set) var isShutDown = false
 
     /// A pane with a shell in `directory`, showing first what it showed last time when there's `contents`.
@@ -107,6 +109,10 @@ final class Pane: LocalProcessTerminalViewDelegate {
             }
         }
 
+        // A prompt waiting for a command shows a new prompt style straight away, not after the next command.
+        promptRefresh = environment.promptWritten.sink { [weak self] in
+            MainActor.assumeIsolated { self?.refreshPrompt() }
+        }
         applyPreferences()
         session.directory = directory ?? NSHomeDirectory()
         if let contents { restore(contents) }
@@ -214,6 +220,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
         isShutDown = true
         timer?.invalidate()
         oscObservation?.cancel()
+        promptRefresh?.cancel()
         branchPopover?.close()
         if terminal.process.running { terminal.terminate() }
         environment.notifier.clear(id: session.id.uuidString)
@@ -842,6 +849,11 @@ final class Pane: LocalProcessTerminalViewDelegate {
     /// The branch changed outside the shell: update the status bar, and the prompt if it's showing.
     func gitBranchDidChange() {
         refreshGitBranch()
+        refreshPrompt()
+    }
+
+    /// Has the shell redraw its prompt, keeping what's typed, if it's waiting at one.
+    func refreshPrompt() {
         if isAtCommandLine { terminal.send(CommandLineEditing.Action.refreshPrompt.sequence) }
     }
 

@@ -103,6 +103,34 @@ struct EndToEndTests {
         #expect(pane.session.lastCommand?.command == "echo hi there")
     }
 
+    /// Saving a new prompt redraws it in panes waiting at one, keeping what's typed, without a blank line
+    /// creeping in above a tab's first prompt.
+    @Test func savedPromptRedrawsAtTheWaitingPrompt() async throws {
+        let env = try TestEnvironment(shell: "/bin/zsh", integration: true)
+        defer { env.tearDown() }
+        var prompt = PromptConfiguration.default
+        prompt.style = .codec
+        prompt.layout = .singleLine
+        prompt.blankLineBetweenCommands = true
+        prompt.segments = [.init(.directory, enabled: false, color: .blue)]
+        env.preferences.prompt = prompt
+        let pane = try makeZshPane(env, host: FakeHost())
+        defer { pane.shutDown() }
+        #expect(await waitUntil { pane.isAtCommandLine })
+        pane.terminal.send(txt: "echo kept")
+        func row(of text: String) -> Int? { pane.terminal.visibleRowsText(0..<10).firstIndex { $0.contains(text) } }
+        #expect(await waitUntil { row(of: "❯ echo kept") != nil })
+        let before = row(of: "❯ echo kept")
+
+        prompt.symbol = "λ"
+        env.preferences.prompt = prompt
+        #expect(await waitUntil { row(of: "λ echo kept") != nil })
+        #expect(row(of: "λ echo kept") == before)
+
+        pane.terminal.send(txt: "\r")
+        #expect(await waitUntil { pane.session.lastCommand?.command == "echo kept" })
+    }
+
     @Test func exitClosesThePane() async throws {
         let env = try TestEnvironment(shell: "/bin/zsh", integration: true)
         defer { env.tearDown() }

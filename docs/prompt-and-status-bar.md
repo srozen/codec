@@ -6,7 +6,7 @@ Settings › Prompt › Edit Prompt… lets you keep your shell's own prompt (PS
 
 - **Add** a chip by clicking or dragging it in; **drag** to reorder; **×** to remove; **right-click** to recolor.
 - **Chips**: working directory, git branch (with `*` for uncommitted changes), git changes (`3 • +10 -2`), Python environment, Kubernetes context, the last command's duration and exit status, background jobs, user@host, time and date.
-- **Style**: by default, segments are drawn as chips (tinted, rounded pills like the ones in Codec's status bar, colored from your theme, with the directory in bold). The Text style draws them as a phrase instead: `~/code/codec on main* via venv took 3.2s`.
+- **Style**: by default, segments are drawn as chips (tinted, rounded pills like the ones in Codec's status bar, colored from your theme, with the directory in bold). The Text style draws them as a phrase instead: `~/code/codec on main* via venv took 3.2s`. The Panel style draws them like a codec screen: one bracketed panel, each segment behind a short tag in a dimmer shade of its color (`LOC`, `BR`, `T+`, `EXIT`), segments split by bars, and readings such as the duration, exit status and time in LCD digits. Codec draws the digits and the panel's corners itself, so they look the same in any font.
 - **Layout**: one line, or the context on a line above the command.
 - **Symbol**: the character before the command, which turns red after a failed command.
 

@@ -3,9 +3,16 @@ import AppKit
 import CodecCore
 
 struct SettingsView: View {
+    /// The running version, and a way to check for a newer one: nil in a development build.
+    struct Updates {
+        var version: String
+        var checkNow: () -> Void
+    }
+
     let preferences: Preferences
     let sounds: any SoundPlaying
     var history: HistoryStore?
+    var updates: Updates?
 
     var body: some View {
         TabView {
@@ -17,6 +24,8 @@ struct SettingsView: View {
                 .tabItem { Label("Prompt", systemImage: "chevron.right.square") }
             NotificationSettings(prefs: preferences, sounds: sounds)
                 .tabItem { Label("Alerts", systemImage: "bell.badge") }
+            UpdateSettings(prefs: preferences, updates: updates)
+                .tabItem { Label("Updates", systemImage: "arrow.down.circle") }
         }
         // A bounded size: long tabs scroll inside the window instead of growing it off the screen.
         .frame(minWidth: 560, idealWidth: 620, maxWidth: 900, minHeight: 420, idealHeight: 620)
@@ -24,8 +33,10 @@ struct SettingsView: View {
 
     /// The Settings window: resizable, sized to fit the screen, with each tab scrolling on its own.
     @MainActor
-    static func makeWindow(preferences: Preferences, sounds: any SoundPlaying, history: HistoryStore? = nil) -> NSWindow {
-        let controller = NSHostingController(rootView: SettingsView(preferences: preferences, sounds: sounds, history: history))
+    static func makeWindow(preferences: Preferences, sounds: any SoundPlaying, history: HistoryStore? = nil,
+                           updates: Updates? = nil) -> NSWindow {
+        let controller = NSHostingController(rootView: SettingsView(preferences: preferences, sounds: sounds, history: history,
+                                                                    updates: updates))
         controller.sizingOptions = [.minSize]
         let window = NSWindow(contentViewController: controller)
         window.title = "Settings"
@@ -248,6 +259,30 @@ private struct NotificationSettings: View {
                     Button("Close") { sounds.play(.exit) }
                 }
                 .disabled(!prefs.codecSounds)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+private struct UpdateSettings: View {
+    @ObservedObject var prefs: Preferences
+    let updates: SettingsView.Updates?
+
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent("Version", value: updates?.version ?? "Development build")
+                Toggle("Check for updates automatically", isOn: $prefs.checkForUpdates)
+                if let updates {
+                    HStack {
+                        Spacer()
+                        Button("Check Now") { updates.checkNow() }
+                    }
+                }
+            } footer: {
+                Text("Once a day, Codec asks GitHub for its latest release and posts a notification when there’s a newer one. Nothing about you, your Mac or what you run is sent. If you installed Codec with Homebrew, Homebrew upgrades it.")
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

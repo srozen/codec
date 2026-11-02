@@ -13,13 +13,14 @@
   <a href="https://github.com/srozen/codec/actions/workflows/ci.yml"><img src="https://github.com/srozen/codec/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/macOS-26%2B-black?logo=apple" alt="macOS 26+">
   <img src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white" alt="Swift 6">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License"></a>
 </p>
 
 <p align="center">
   <img src="docs/images/hero.png" alt="Codec with the file tree, a zsh session with Codec's prompt, and the Commands sidebar">
 </p>
 
-You ran a dozen things, went on for a while, and now you need to know what that build printed twenty minutes ago. Or you need the command you ran last Tuesday, in another folder, with a different branch. Codec is a terminal built around that moment: it keeps track of what you run, where and how it went, and puts it back in front of you without leaving the keyboard. It's written in Swift for macOS, with AppKit, SwiftUI and SwiftTerm: no Electron, no account, nothing leaves your Mac.
+You ran a dozen things, went on for a while, and now you need to know what that build printed twenty minutes ago. Or you need the command you ran last Tuesday, in another folder, with a different branch. Codec is a terminal built around that moment: it keeps track of what you run, where and how it went, and puts it back in front of you without leaving the keyboard. It's written in Swift for macOS, with AppKit, SwiftUI and SwiftTerm: no Electron, no account, and nothing about you or what you run leaves your Mac.
 
 ## Every command, remembered
 
@@ -77,15 +78,22 @@ Four themes (Codec, Arctic, Amber and Daylight) drawn through everything from th
 
 ## Get it
 
-Codec needs **macOS 26** or later. Build it with **Xcode 26** or later:
+Codec needs **macOS 26** or later, on Apple silicon or Intel.
+
+**Download** the disk image from the [latest release](https://github.com/srozen/codec/releases/latest), open it and drag Codec to Applications. Codec isn't notarized by Apple yet, so the first time you open it, macOS stops it: choose **Open Anyway** in System Settings › Privacy & Security.
+
+**Or with Homebrew:**
 
 ```bash
-git clone https://github.com/srozen/codec.git
-cd codec
-make run
+brew tap srozen/codec https://github.com/srozen/codec
+brew install --cask srozen/codec/codec
 ```
 
-That builds `build/Codec.app` in release and opens it; drag it to Applications to keep it. Most of what's above relies on Codec's zsh integration, which loads automatically, alongside your own `.zshrc`, unchanged.
+Codec checks for a new version once a day, and on Codec › Check for Updates…; it tells you when there is one, and lets you turn that off.
+
+**Or build it** with **Xcode 26** or later: `git clone https://github.com/srozen/codec.git && cd codec && make run` builds `build/Codec.app` and opens it.
+
+Most of what's above relies on Codec's zsh integration, which loads automatically, alongside your own `.zshrc`, unchanged.
 
 → [Getting started](docs/getting-started.md)
 
@@ -107,3 +115,7 @@ That builds `build/Codec.app` in release and opens it; drag it to Applications t
 ## Built with
 
 [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) for terminal emulation, and Swift 6 with strict concurrency, AppKit and SwiftUI for everything else. To find your way around the code, see [Development](docs/development.md).
+
+## License
+
+Codec is released under the [MIT License](LICENSE).

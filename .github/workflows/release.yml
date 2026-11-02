@@ -1,0 +1,156 @@
+name: Release
+
+# Push a tag like v1.2.0 to release that commit: a universal Codec.app in a disk image published to
+# GitHub Releases, then the Homebrew cask pointed at it. An annotated tag's message becomes the release
+# notes. The app is signed with the SIGNING_CERTIFICATE secret's certificate (ad hoc without one); when
+# that's a Developer ID, it's notarized too.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, sign, notarize and publish
+    runs-on: macos-26
+    timeout-minutes: 75
+    env:
+      HAS_CERTIFICATE: ${{ secrets.SIGNING_CERTIFICATE != '' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The build number counts commits.
+          fetch-depth: 0
+
+      - name: Read the version from the tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ ! "$version" =~ ^[0-9]+(\.[0-9]+){1,2}(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::$GITHUB_REF_NAME isn't a version tag like v1.2.0 or v1.3.0-beta.1"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          # A version with a "-" is a prerelease: published as one, and left out of the cask.
+          [[ "$version" == *-* ]] && echo "PRERELEASE=1" >> "$GITHUB_ENV" || true
+          # Checkout leaves the tag lightweight; fetch it as it is, for an annotated tag's message.
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+
+      # The newest Xcode 26 on the runner, as in CI.
+      - name: Select Xcode
+        run: |
+          xcode=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -n 1)
+          echo "Using $xcode"
+          sudo xcode-select -s "$xcode"
+          swift --version
+
+      - name: Test
+        run: |
+          swift build --build-tests
+          swift test --skip-build
+
+      - name: Import the signing certificate
+        if: env.HAS_CERTIFICATE == 'true'
+        env:
+          CERTIFICATE: ${{ secrets.SIGNING_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password="$(openssl rand -base64 24)"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          echo "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/certificate.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          # All of them, not only valid ones: a self-signed certificate isn't trusted, and needn't be.
+          identities="$(security find-identity -p codesigning "$keychain" | grep -o '"[^"]*"' | tr -d '"')"
+          identity="$(grep -m 1 '^Developer ID Application: ' <<<"$identities" || head -n 1 <<<"$identities")"
+          if [[ -z "$identity" ]]; then
+            echo "::error::SIGNING_CERTIFICATE has no code signing identity"
+            exit 1
+          fi
+          echo "Signing as $identity"
+          echo "CODEC_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+          [[ "$identity" == "Developer ID Application: "* ]] && echo "NOTARIZE=true" >> "$GITHUB_ENV" || true
+          echo "KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+      - name: Set up notarization
+        if: env.NOTARIZE == 'true'
+        env:
+          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          if [[ -z "$NOTARY_KEY" || -z "$NOTARY_KEY_ID" || -z "$NOTARY_ISSUER_ID" ]]; then
+            echo "::error::With a Developer ID, add the NOTARY_KEY, NOTARY_KEY_ID and NOTARY_ISSUER_ID secrets too"
+            exit 1
+          fi
+          key="$RUNNER_TEMP/notary.p8"
+          printf '%s\n' "$NOTARY_KEY" > "$key"
+          {
+            echo "CODEC_NOTARY_KEY=$key"
+            echo "CODEC_NOTARY_KEY_ID=$NOTARY_KEY_ID"
+            echo "CODEC_NOTARY_ISSUER=$NOTARY_ISSUER_ID"
+          } >> "$GITHUB_ENV"
+
+      - name: Build the disk image
+        run: scripts/release.sh "$VERSION"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dmg="build/Codec-$VERSION.dmg"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            # Made by hand already, say as a draft with notes: add the disk image to it.
+            gh release upload "$GITHUB_REF_NAME" "$dmg" --clobber
+          else
+            notes="$RUNNER_TEMP/notes.md"
+            flags=(--title "Codec $VERSION" --verify-tag --notes-file "$notes")
+            if [[ "$(git cat-file -t "$GITHUB_REF_NAME")" == "tag" ]]; then
+              git tag -l --format='%(contents:subject)%0a%0a%(contents:body)' "$GITHUB_REF_NAME" > "$notes"
+            else
+              # GitHub's generated notes go after what's in the file.
+              : > "$notes"
+              flags+=(--generate-notes)
+            fi
+            if [[ "${NOTARIZE:-}" != "true" ]]; then
+              cat >> "$notes" <<'EOF'
+
+          ### Opening Codec the first time
+
+          Codec isn't notarized by Apple yet, so macOS stops it the first time you open it. Open System Settings › Privacy & Security, scroll down and choose **Open Anyway** beside Codec, then confirm. After each update, macOS asks again.
+          EOF
+            fi
+            [[ -n "${PRERELEASE:-}" ]] && flags+=(--prerelease)
+            gh release create "$GITHUB_REF_NAME" "$dmg" "${flags[@]}"
+          fi
+
+      - name: Update the Homebrew cask
+        if: env.PRERELEASE == ''
+        run: |
+          git fetch origin main
+          git checkout -B main origin/main
+          scripts/update-cask.sh "$VERSION" "build/Codec-$VERSION.dmg"
+          if git diff --quiet; then
+            echo "The cask already installs Codec $VERSION"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Point the Homebrew cask at Codec $VERSION"
+          git push origin main
+
+      - name: Remove the signing keychain
+        if: always()
+        run: |
+          [[ -n "${KEYCHAIN:-}" ]] && security delete-keychain "$KEYCHAIN" || true
+          rm -f "$RUNNER_TEMP/notary.p8"

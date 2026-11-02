@@ -2,12 +2,29 @@
 
 ## Requirements
 
-- macOS 26 or later
-- Xcode 26 or later (Swift 6), to build it
+- macOS 26 or later, on Apple silicon or Intel
+- Xcode 26 or later (Swift 6), to build it yourself
 
-## Build and install
+## Install
 
-Codec isn't distributed as a download yet; you build it from source.
+Download `Codec-<version>.dmg` from the [latest release](https://github.com/srozen/codec/releases/latest), open it and drag Codec to Applications.
+
+Codec isn't notarized by Apple yet, so the first time you open it, macOS says it can't check it for malicious software. Open System Settings › Privacy & Security, scroll to Security, choose **Open Anyway** beside Codec and confirm. You do this once per version: after an update, macOS asks again. Permissions you've given Codec, like Full Disk Access, carry over.
+
+Or install it with Homebrew, from the cask in this repository (macOS asks the same way the first time):
+
+```bash
+brew tap srozen/codec https://github.com/srozen/codec
+brew install --cask srozen/codec/codec
+```
+
+### Updates
+
+Once a day, Codec asks GitHub for its latest release. When there's a newer one, it posts a notification, and Codec › Check for Updates… becomes Update to Codec 1.2.0…: choose it, or click the notification, to see what's new. **Download** opens the new disk image; if Homebrew installed Codec, **Upgrade** puts `brew upgrade --cask srozen/codec/codec` at the prompt for you to run instead. Then reopen Codec, and your windows come back. **Skip This Version** stops it from announcing that one.
+
+The check sends nothing about you, your Mac or what you run. Turn it off in [Settings › Updates](settings.md#updates); Check for Updates… still works.
+
+## Build from source
 
 ```bash
 git clone https://github.com/srozen/codec.git

@@ -457,6 +457,15 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
             cancel: { [weak self] in self?.hideCommandPalette() }))
     }
 
+    /// Puts `command` on the focused pane's command line, for you to run, and brings the window to the
+    /// front. False when that pane's shell isn't at its prompt.
+    func typeCommand(_ command: String) -> Bool {
+        guard let pane = focusedPane, pane.replaceCommandLine(with: command, run: false) else { return false }
+        window?.makeKeyAndOrderFront(nil)
+        focusTerminal()
+        return true
+    }
+
     /// Run or Insert on a code block in a Markdown document.
     private func runFromDocument(_ code: String, run: Bool) {
         guard let pane = focusedPane, pane.replaceCommandLine(with: code, run: run) else { return NSSound.beep() }

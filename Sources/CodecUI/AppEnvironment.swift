@@ -45,6 +45,8 @@ final class AppEnvironment {
     /// Explains failed commands; nil where there's nothing to do it with.
     let explainer: (any FailureExplaining)?
     weak var coordinator: (any AppCoordinating)?
+    /// Sends once the prompt file has been rewritten, so panes waiting at a prompt can redraw it.
+    let promptWritten = PassthroughSubject<Void, Never>()
     private var promptSync: AnyCancellable?
 
     init(preferences: Preferences, sounds: any SoundPlaying, notifier: any Notifying,
@@ -65,9 +67,12 @@ final class AppEnvironment {
             // Chip colors come from the theme, so a theme change rewrites the prompt too.
             promptSync = preferences.$prompt.combineLatest(preferences.$themeID)
                 .removeDuplicates { $0 == $1 }
-                .sink { configuration, themeID in
+                .sink { [weak self] configuration, themeID in
                     do {
-                        try shellIntegration.writePrompt(configuration, chipFills: CodecTheme.named(themeID).promptChipFills)
+                        let theme = CodecTheme.named(themeID)
+                        try shellIntegration.writePrompt(configuration, chipFills: theme.promptChipFills,
+                                                         tagColors: theme.promptTagColors, frameColor: theme.promptFrameColor)
+                        MainActor.assumeIsolated { self?.promptWritten.send() }
                     } catch {
                         Log.app.error("Couldn't write the prompt: \(error.localizedDescription, privacy: .public)")
                     }

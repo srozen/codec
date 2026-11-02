@@ -292,6 +292,84 @@ struct PromptConfigurationTests {
         #expect(configuration.zshScript().contains(#"_codec_prompt_add 4 '' "%~" 1 '0'"#))
     }
 
+    // MARK: Panel
+
+    @Test func panelTagsSegmentsInsideCornersWithLCDReadouts() {
+        let configuration = codec {
+            $0.appearance = .panel
+            $0.segments = [.init(.directory, enabled: true, color: .blue), .init(.gitBranch, enabled: true, color: .magenta),
+                           .init(.duration, enabled: true, color: .yellow), .init(.exitStatus, enabled: true, color: .red),
+                           .init(.jobs, enabled: true, color: .cyan)]
+        }
+        let runs = configuration.preview()
+        #expect(text(runs) == "⌈ LOC ~/code/codec │ BR main* │ T+ 🯳.🯲s │ EXIT 🯱 │ JOBS 🯱 ⌋\n\n❯ ")
+        #expect(runs.filter(\.tag).map(\.text) == ["LOC", "BR", "T+", "EXIT", "JOBS"])
+        #expect(runs.filter(\.tag).map(\.color) == [.blue, .magenta, .yellow, .red, .cyan])
+        #expect(runs.filter(\.frame).map(\.text) == ["⌈", " │ ", " │ ", " │ ", " │ ", "⌋"])
+        #expect(runs.allSatisfy { !$0.chip })
+    }
+
+    @Test func panelKeepsDigitsInNames() {
+        var sample = PromptConfiguration.Sample()
+        sample.directory = "/Users/you/code/k8s-2"
+        sample.kubernetesContext = "prod-3"
+        let configuration = codec {
+            $0.appearance = .panel
+            $0.layout = .singleLine
+            $0.segments = [.init(.directory, enabled: true, color: .blue), .init(.kubernetesContext, enabled: true, color: .cyan)]
+        }
+        #expect(text(configuration.preview(sample)) == "⌈ LOC ~/code/k8s-2 │ K8S prod-3 ⌋ ❯ ")
+    }
+
+    @Test func lcdTurnsOnlyASCIIDigitsIntoLCDDigits() {
+        #expect(PromptConfiguration.lcd("09:05") == "🯰🯹:🯰🯵")
+        #expect(PromptConfiguration.lcd("Nov ٣ 2") == "Nov ٣ 🯲")
+    }
+
+    @Test func panelUsesTheThemeFrameAndTagColorsOrFallsBack() {
+        let configuration = codec { $0.appearance = .panel; $0.segments = [.init(.directory, enabled: true, color: .blue)] }
+        let themed = configuration.zshScript(tagColors: [.blue: "#1A2B3C"], frameColor: "#2E875A")
+        #expect(themed.contains(#"_codec_prompt_tag 4 '#1a2b3c' 'LOC' "%~" 1"#))
+        #expect(themed.contains(#"line="%F{#2e875a}⌈%f ${line} %F{#2e875a}⌋%f""#))
+        #expect(themed.contains("local joiner=' %F{#2e875a}│%f '"))
+        let plain = configuration.zshScript(tagColors: [.blue: "red"], frameColor: "'; rm -rf ~; '")
+        #expect(plain.contains(#"_codec_prompt_tag 4 '8' 'LOC' "%~" 1"#))
+        #expect(plain.contains("%F{8}⌈%f"))
+        #expect(!plain.contains("rm -rf"))
+        // Only the panel carries its helpers.
+        #expect(!codec().zshScript().contains("_codec_prompt_lcd"))
+    }
+
+    /// zsh doesn't know the LCD digits are one column wide, which would put the cursor in the wrong place.
+    @Test(.enabled(if: FileManager.default.isExecutableFile(atPath: "/bin/zsh")), arguments: [true, false])
+    func panelRendersInZsh(utf8: Bool) throws {
+        let temp = try TemporaryDirectory()
+        let configuration = codec {
+            $0.appearance = .panel
+            $0.segments = [.init(.duration, enabled: true, color: .yellow), .init(.exitStatus, enabled: true, color: .red),
+                           .init(.time, enabled: true, color: .gray)]
+        }
+        let file = try temp.file("prompt.zsh", configuration.zshScript(tagColors: [.yellow: "#302010"], frameColor: "#2e875a"))
+        let zsh = Process()
+        zsh.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        zsh.arguments = ["-i", "HOME=\(temp.url.path)"] + (utf8 ? ["LC_ALL=en_US.UTF-8"] : []) + ["/bin/zsh", "-fc",
+                         "typeset -gi _codec_last_status=3; typeset -gF _codec_last_duration=12.46; source \"$1\"; print -rn -- \"$PROMPT\"",
+                         "zsh", file.path]
+        let output = Pipe(), errors = Pipe()
+        zsh.standardOutput = output
+        zsh.standardError = errors
+        try zsh.run()
+        zsh.waitUntilExit()
+        let prompt = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let complaints = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        #expect(zsh.terminationStatus == 0)
+        #expect(complaints.isEmpty, "\(complaints)")
+        #expect(prompt.contains("%F{#302010}T+%f %F{3}%{🯱%1G%}%{🯲%1G%}.%{🯵%1G%}s%f"), "\(prompt)")
+        #expect(prompt.contains("EXIT%f %F{1}%{🯳%1G%}%f"), "\(prompt)")
+        #expect(prompt.contains("TIME%f %F{8}%{"), "\(prompt)")
+        #expect(prompt.hasPrefix("%F{#2e875a}⌈%f "))
+    }
+
     /// Regression: `$'\ue0b6'` escapes failed with "character not in range" outside a UTF-8 locale.
     @Test(.enabled(if: FileManager.default.isExecutableFile(atPath: "/bin/zsh")))
     func rendersWithoutAUTF8Locale() throws {

@@ -36,6 +36,7 @@ final class CodecTerminalView: LocalProcessTerminalView {
         let relay = BellRelay(base: self)
         self.relay = relay
         terminalDelegate = relay
+        glyphFallbackProvider = CodecGlyphs.shared
         registerForDraggedTypes([.fileURL])
     }
 

@@ -27,7 +27,7 @@ struct PromptSettings: View {
                 }
                 PromptPreview(configuration: prefs.prompt, theme: prefs.theme)
             } footer: {
-                Text("Changes show up at the next prompt in every open zsh pane.")
+                Text("Open zsh panes redraw their prompt as soon as you save; panes running a command, at their next prompt.")
                     .foregroundStyle(.secondary)
             }
 
@@ -73,6 +73,12 @@ struct PromptEditorSheet: View {
         _draft = State(initialValue: original)
     }
 
+    private var codecDraft: PromptConfiguration {
+        var configuration = draft
+        configuration.style = .codec
+        return configuration
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Edit prompt")
@@ -92,6 +98,8 @@ struct PromptEditorSheet: View {
                 ChipEditor(configuration: $draft, theme: theme, sample: sample, activate: { draft.style = .codec })
                 Divider().opacity(0.5)
                 OptionsGrid(configuration: $draft)
+                // What the options make, as the terminal will draw it, even before the Codec prompt is picked.
+                PromptPreview(configuration: codecDraft, theme: theme)
             }
 
             StyleCard(selected: draft.style == .shell, theme: theme, select: { draft.style = .shell }) {
@@ -433,22 +441,19 @@ struct PromptPreview: View {
     let configuration: PromptConfiguration
     let theme: CodecTheme
     private let sample = PromptConfiguration.Sample.current()
-    private static let font = Font.system(size: 12, design: .monospaced)
+
+    private static func font(_ size: CGFloat) -> Font { .system(size: size, design: .monospaced) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-                HStack(spacing: 0) {
-                    ForEach(Array(line.enumerated()), id: \.offset) { _, run in
-                        piece(run)
-                    }
-                    if line.isEmpty && index < lines.count - 1 {
-                        // An empty line still takes a line's height, as in the terminal.
-                        Text(" ").font(Self.font)
-                    }
-                    if index == lines.count - 1 {
-                        Text("git push").font(Self.font).foregroundStyle(theme.foregroundColor)
-                    }
+                // A long prompt shrinks to stay on one line, as the terminal shows it. Should it still not fit,
+                // it wraps between pieces: a piece that wrapped on its own would break inside a word.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 0) { pieces(of: line, index: index, size: 12) }.fixedSize()
+                    HStack(spacing: 0) { pieces(of: line, index: index, size: 11) }.fixedSize()
+                    HStack(spacing: 0) { pieces(of: line, index: index, size: 10) }.fixedSize()
+                    FlowLayout(spacing: 0, lineSpacing: 4) { pieces(of: line, index: index, size: 10) }
                 }
             }
         }
@@ -471,11 +476,53 @@ struct PromptPreview: View {
         return lines
     }
 
+    /// A line's runs grouped into what can't be split across rows: a segment with its tag or word, and
+    /// the panel's closing corner with the last segment. Rows break after a space or separator between segments.
+    private static func units(_ line: [PromptConfiguration.Run]) -> [[PromptConfiguration.Run]] {
+        var units: [[PromptConfiguration.Run]] = []
+        var unit: [PromptConfiguration.Run] = []
+        for (index, run) in line.enumerated() {
+            unit.append(run)
+            let between = run.text.hasPrefix(" ") && run.text.hasSuffix(" ")
+            let afterTag = index > 0 && line[index - 1].tag
+            let beforeCorner = line.indices.contains(index + 1) && line[index + 1].frame
+                && !line[index + 1].text.contains(PromptConfiguration.panelBar)
+            if between, !afterTag, !beforeCorner {
+                units.append(unit)
+                unit = []
+            }
+        }
+        if !unit.isEmpty { units.append(unit) }
+        return units
+    }
+
     @ViewBuilder
-    private func piece(_ run: PromptConfiguration.Run) -> some View {
-        let color = run.color.map(theme.promptColor) ?? theme.foregroundColor
-        let text = Text(run.text)
-            .font(Self.font.weight(run.bold ? .bold : .regular))
+    private func pieces(of line: [PromptConfiguration.Run], index: Int, size: CGFloat) -> some View {
+        ForEach(Array(Self.units(line).enumerated()), id: \.offset) { _, unit in
+            HStack(spacing: 0) {
+                ForEach(Array(unit.enumerated()), id: \.offset) { _, run in piece(run, size: size) }
+            }
+            .fixedSize()
+        }
+        if line.isEmpty && index < lines.count - 1 {
+            // An empty line still takes a line's height, as in the terminal.
+            Text(" ").font(Self.font(size))
+        }
+        if index == lines.count - 1 {
+            Text("git push").font(Self.font(size)).foregroundStyle(theme.foregroundColor).fixedSize()
+        }
+    }
+
+    @ViewBuilder
+    private func piece(_ run: PromptConfiguration.Run, size: CGFloat) -> some View {
+        let color = if run.frame {
+            Self.color(theme.promptFrameColor, or: theme.accentColor)
+        } else if run.tag, let segment = run.color {
+            Self.color(theme.promptTagColor(segment), or: theme.promptColor(segment))
+        } else {
+            run.color.map(theme.promptColor) ?? theme.foregroundColor
+        }
+        let text = Self.text(run.text, size: size, weight: run.bold ? .bold : .regular)
             .foregroundStyle(color)
         if run.chip, let segment = run.color {
             text
@@ -485,6 +532,34 @@ struct PromptPreview: View {
         } else {
             text
         }
+    }
+
+    /// `string` in the preview's font, with the characters Codec draws itself (LCD digits, the panel's
+    /// corners) in Codec's glyph font, as in the terminal.
+    private static func text(_ string: String, size: CGFloat, weight: Font.Weight) -> Text {
+        let font = font(size)
+        let glyphFont = CodecGlyphs.shared.fallbackFont(forPointSize: size).map(Font.init) ?? font
+        var result = Text(verbatim: "")
+        var plain = ""
+        func flush() {
+            guard !plain.isEmpty else { return }
+            result = Text("\(result)\(Text(verbatim: plain).font(font.weight(weight)))")
+            plain = ""
+        }
+        for character in string {
+            if let scalar = character.unicodeScalars.first, CodecGlyphs.shared.placementPolicy(for: scalar) != nil {
+                flush()
+                result = Text("\(result)\(Text(verbatim: String(character)).font(glyphFont))")
+            } else {
+                plain.append(character)
+            }
+        }
+        flush()
+        return result
+    }
+
+    private static func color(_ hex: String, or fallback: Color) -> Color {
+        NSColor(hexString: hex).map { Color(nsColor: $0) } ?? fallback
     }
 }
 

@@ -32,6 +32,20 @@ struct CodecTheme: Identifiable, Equatable {
         Dictionary(uniqueKeysWithValues: PromptConfiguration.Color.allCases.map { ($0, promptChipFill($0)) })
     }
 
+    /// A panel tag in `color`: that color halfway into the background, so the value after it stands out.
+    func promptTagColor(_ color: PromptConfiguration.Color) -> String {
+        (background.blended(withFraction: 0.5, of: ansi[color.ansiIndex]) ?? background).hexString
+    }
+
+    var promptTagColors: [PromptConfiguration.Color: String] {
+        Dictionary(uniqueKeysWithValues: PromptConfiguration.Color.allCases.map { ($0, promptTagColor($0)) })
+    }
+
+    /// The panel prompt's corners and bars: the accent, dimmed.
+    var promptFrameColor: String {
+        (background.blended(withFraction: 0.5, of: accent) ?? accent).hexString
+    }
+
     static let all: [CodecTheme] = [.codec, .arctic, .amber, .daylight]
 
     static func named(_ id: String) -> CodecTheme {

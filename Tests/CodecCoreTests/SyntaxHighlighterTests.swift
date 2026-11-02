@@ -161,6 +161,8 @@ struct SyntaxHighlighterTests {
         let code = String(repeating: "func f(x: Int) -> Int { return x * 2 } // c\n", count: 20_000)
         let clock = ContinuousClock()
         let elapsed = clock.measure { _ = SyntaxHighlighter.spans(in: code, language: .swift) }
-        #expect(elapsed < .seconds(2))
+        // Well under a second on a Mac, but a debug build on a busy CI runner can take a few: this is
+        // here to catch a highlighter gone quadratic, which takes minutes.
+        #expect(elapsed < .seconds(6))
     }
 }

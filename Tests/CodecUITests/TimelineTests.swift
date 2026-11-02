@@ -43,6 +43,8 @@ struct TimelineTests {
         #expect(await run("printf 'alpha\\nbeta\\n'", in: pane))
         #expect(await run("cd sub && false", in: pane))
         #expect(await run("seq 1 40", in: pane))
+        // Its output is kept once the next prompt is drawn, which can come after the command is reported finished.
+        #expect(await waitUntil { pane.timeline.entries.last?.output != nil })
 
         let entries = pane.timeline.entries
         #expect(entries.map(\.command) == ["printf 'alpha\\nbeta\\n'", "cd sub && false", "seq 1 40"])

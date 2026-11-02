@@ -39,5 +39,6 @@ jobs:
       - name: Test
         run: swift test --skip-build
 
+      # Universal, as releases are, so a build that only breaks for one architecture shows here first.
       - name: Bundle the app
-        run: scripts/build-app.sh release
+        run: ARCHS="arm64 x86_64" scripts/build-app.sh release

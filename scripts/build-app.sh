@@ -15,11 +15,30 @@ cd "$(dirname "$0")/.."
 CONFIG="${1:-release}"
 APP="build/Codec.app"
 
-ARCH_FLAGS=()
-for arch in ${ARCHS:-}; do ARCH_FLAGS+=(--arch "$arch"); done
-# bash 3.2, which macOS has, calls an empty array unbound under `set -u`.
-swift build -j "${JOBS:-2}" -c "$CONFIG" ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"}
-BIN="$(swift build -c "$CONFIG" ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"} --show-bin-path)"
+ARCH_LIST=(${ARCHS:-})
+if (( ${#ARCH_LIST[@]} > 1 )); then
+  # One build per architecture, joined with lipo. Building them together goes through Xcode's build
+  # system in Xcode 26, which can't resolve SwiftTerm's build plugin; and Swift 6.4's default
+  # build system makes that plugin's tool for the target, which an Apple silicon Mac without Rosetta
+  # can't run. SwiftPM's native build system makes it for this Mac.
+  BINARIES=()
+  for arch in "${ARCH_LIST[@]}"; do
+    swift build -j "${JOBS:-2}" -c "$CONFIG" --build-system native --arch "$arch"
+    BIN="$(swift build -c "$CONFIG" --build-system native --arch "$arch" --show-bin-path)"
+    BINARIES+=("$BIN/Codec")
+  done
+  mkdir -p build
+  EXECUTABLE="build/Codec-universal"
+  lipo -create "${BINARIES[@]}" -output "$EXECUTABLE"
+elif (( ${#ARCH_LIST[@]} == 1 )); then
+  swift build -j "${JOBS:-2}" -c "$CONFIG" --arch "${ARCH_LIST[0]}"
+  BIN="$(swift build -c "$CONFIG" --arch "${ARCH_LIST[0]}" --show-bin-path)"
+  EXECUTABLE="$BIN/Codec"
+else
+  swift build -j "${JOBS:-2}" -c "$CONFIG"
+  BIN="$(swift build -c "$CONFIG" --show-bin-path)"
+  EXECUTABLE="$BIN/Codec"
+fi
 
 if [[ ! -f build/AppIcon.icns || scripts/make-icon.swift -nt build/AppIcon.icns ]]; then
   ICONSET="build/AppIcon.iconset"
@@ -34,7 +53,7 @@ fi
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN/Codec" "$APP/Contents/MacOS/Codec"
+cp "$EXECUTABLE" "$APP/Contents/MacOS/Codec"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp build/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 # Codec sound files are optional and not in the repository; without them the app synthesizes its cues.

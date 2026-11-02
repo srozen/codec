@@ -68,14 +68,17 @@ public struct Release: Decodable, Equatable, Sendable {
     public struct Asset: Decodable, Equatable, Sendable {
         public var name: String
         public var url: URL
+        /// Its checksum, as "sha256:" and the hex; GitHub lists one for assets uploaded since mid-2025.
+        public var digest: String?
 
-        public init(name: String, url: URL) {
+        public init(name: String, url: URL, digest: String? = nil) {
             self.name = name
             self.url = url
+            self.digest = digest
         }
 
         private enum CodingKeys: String, CodingKey {
-            case name, url = "browser_download_url"
+            case name, url = "browser_download_url", digest
         }
     }
 
@@ -111,8 +114,10 @@ public struct Release: Decodable, Equatable, Sendable {
     public var version: AppVersion? { AppVersion(tag) }
 
     /// The disk image to download, if the release has one.
-    public var diskImage: URL? {
-        assets.first { $0.name.lowercased().hasSuffix(".dmg") }?.url
+    public var diskImage: URL? { diskImageAsset?.url }
+
+    public var diskImageAsset: Asset? {
+        assets.first { $0.name.lowercased().hasSuffix(".dmg") }
     }
 }
 
@@ -155,17 +160,20 @@ public enum UpdateCheckError: LocalizedError, Equatable {
 /// Codec's releases on GitHub. Asks for the latest one and nothing else: no cookies, no cache, and
 /// nothing about the Mac beyond what any web request carries.
 public struct GitHubReleases: ReleaseSource {
-    public static let codec = GitHubReleases(repository: "srozen/codec")
+    /// Codec's, or, to try an update before releasing it, the release JSON at `CODEC_RELEASES_URL`.
+    /// What's installed from there still has to be signed as the running copy is.
+    public static var codec: GitHubReleases {
+        GitHubReleases(repository: "srozen/codec",
+                       latestURL: ProcessInfo.processInfo.environment["CODEC_RELEASES_URL"].flatMap(URL.init(string:)))
+    }
 
     /// "owner/name".
     public var repository: String
+    public var latestURL: URL
 
-    public init(repository: String) {
+    public init(repository: String, latestURL: URL? = nil) {
         self.repository = repository
-    }
-
-    public var latestURL: URL {
-        URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!
+        self.latestURL = latestURL ?? URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!
     }
 
     public func latest() async throws -> Release {
@@ -187,14 +195,31 @@ public enum CodeSigning {
     /// Whether it's signed with a Developer ID, as a notarized release is; false when it's signed ad
     /// hoc, so macOS asks before opening each new version that's downloaded.
     public static var runningAppHasTeamIdentifier: Bool {
-        var code: SecCode?
-        var staticCode: SecStaticCode?
         var information: CFDictionary?
-        guard SecCodeCopySelf([], &code) == errSecSuccess, let code,
-              SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
+        guard let staticCode = runningStaticCode,
               SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &information) == errSecSuccess,
               let information = information as? [String: Any] else { return false }
         return information[kSecCodeInfoTeamIdentifier as String] != nil
+    }
+
+    /// What a new version has to be signed to satisfy to replace the running app: its designated
+    /// requirement, when that names a certificate. Nil when it's signed ad hoc, as builds from source
+    /// are, which only that very build satisfies.
+    public static var runningAppRequirement: String? {
+        var requirement: SecRequirement?
+        var text: CFString?
+        guard let staticCode = runningStaticCode,
+              SecCodeCopyDesignatedRequirement(staticCode, [], &requirement) == errSecSuccess, let requirement,
+              SecRequirementCopyString(requirement, [], &text) == errSecSuccess, let text = text as String? else { return nil }
+        return text.contains("certificate") && !text.contains("cdhash") ? text : nil
+    }
+
+    private static var runningStaticCode: SecStaticCode? {
+        var code: SecCode?
+        var staticCode: SecStaticCode?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code,
+              SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess else { return nil }
+        return staticCode
     }
 }
 

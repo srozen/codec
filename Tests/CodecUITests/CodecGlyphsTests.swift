@@ -20,8 +20,8 @@ struct CodecGlyphsTests {
         let font = try #require(CodecGlyphs.shared.fallbackFont(forPointSize: 13))
         #expect(CTFontCopyPostScriptName(font) as String == "CodecGlyphs-Regular")
         for scalar in scalars {
-            let glyph = try #require(glyph(scalar, in: font), "U+\(String(scalar.value, radix: 16, uppercase: true))")
-            let path = try #require(CTFontCreatePathForGlyph(font, glyph, nil))
+            let id = try #require(glyph(scalar, in: font), "U+\(String(scalar.value, radix: 16, uppercase: true))")
+            let path = try #require(CTFontCreatePathForGlyph(font, id, nil))
             #expect(!path.boundingBoxOfPath.isEmpty)
         }
     }

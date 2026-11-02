@@ -6,9 +6,11 @@ The repository has to be public, as it is: Codec's update check asks GitHub's AP
 
 ## Signing
 
-Releases aren't notarized by Apple, as that takes an Apple Developer Program membership. So macOS stops Codec the first time people open each version, and they allow it with Open Anyway in System Settings › Privacy & Security. The release notes say how, the cask prints it, and Codec's update alert says it too.
+Releases aren't notarized by Apple, as that takes an Apple Developer Program membership. So macOS stops Codec the first time people open it, and they allow it with Open Anyway in System Settings › Privacy & Security. The release notes say how, the cask prints it, and Codec's update alert says it too when it offers a download. A version Codec installs itself isn't stopped: macOS only checks files that come from a browser or another app that marks them as downloaded.
 
 They are **signed with a self-signed certificate**, so that every version has the same identity. macOS remembers the permissions people give an app (Full Disk Access, the camera, controlling other apps) by that identity: with it, they survive updates; signed ad hoc, as builds from source are, every update would ask for them again. The certificate costs nothing, and Gatekeeper doesn't trust it, which is fine: it's only there to stay the same.
+
+It's also what Codec checks before installing an update itself: the new app has to satisfy the running one's designated requirement, which names this certificate. **Keep a copy of it.** Released with a new certificate, a version still installs by download, but copies signed with the old one won't install it themselves.
 
 The workflow signs with whatever certificate is in two secrets, in the repository's Settings › Secrets and variables › Actions:
 
@@ -81,6 +83,23 @@ CODEC_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" CODEC_NOTARY_
 ```
 
 It writes `build/Codec-1.2.0.dmg` and prints its SHA-256. `scripts/update-cask.sh 1.2.0 build/Codec-1.2.0.dmg` then updates the cask, if you publish it by hand.
+
+## Trying an update before releasing
+
+`CODEC_RELEASES_URL` points Codec's update check at a release's JSON, in the shape of GitHub's API, instead of GitHub. To see a copy install the next one: sign two builds with the same certificate, at two versions, put the newer one in a disk image, and serve the JSON and the image from your Mac.
+
+```bash
+shasum -a 256 Codec-1.2.1.dmg   # the asset's digest, as "sha256:<hex>"
+cat > latest.json <<'EOF'
+{"tag_name": "v1.2.1", "html_url": "http://127.0.0.1:8765/", "body": "What's new",
+ "assets": [{"name": "Codec-1.2.1.dmg", "browser_download_url": "http://127.0.0.1:8765/Codec-1.2.1.dmg",
+             "digest": "sha256:<hex>"}]}
+EOF
+python3 -m http.server 8765 --bind 127.0.0.1 &
+open --env CODEC_RELEASES_URL=http://127.0.0.1:8765/latest.json /path/to/Codec-1.2.0/Codec.app
+```
+
+Give the test builds another `CFBundleIdentifier` (`com.srozen.codec.updatetest`), so they keep their own settings and saved windows rather than sharing yours.
 
 ## Homebrew
 

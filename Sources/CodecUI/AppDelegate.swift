@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private var settingsWindow: NSWindow?
     /// Nil outside a bundled app with a version (tests, `swift run`).
     private(set) var updater: Updater?
+    private var updateProgress: UpdateProgressWindow?
     private var pendingSave: DispatchWorkItem?
     /// Quitting: windows going away now aren't being closed by the user, so they stay saved.
     private var terminating = false
@@ -48,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if Bundle.main.bundleURL.pathExtension == "app", let version = AppVersion.running {
             let updater = Updater(current: version, preferences: environment.preferences, notifier: environment.notifier)
             updater.present = { [weak self] in self?.showUpdate($0) }
+            updater.installationChanged = { [weak self] in self?.showInstallation($0) }
             updater.start()
             self.updater = updater
         }
@@ -58,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     func applicationWillTerminate(_ notification: Notification) {
         terminating = true
         saveWindows(keepingContents: environment.preferences.restorePaneContents)
+        updater?.finishInstalling()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -234,19 +237,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         guard let updater else { return }
         NSApp.activate()
         let response = updater.alert(for: finding).runModal()
-        guard case .available(let release) = finding else { return }
-        switch response {
-        case .alertFirstButtonReturn:
+        switch (finding, response) {
+        case (.available(let release), .alertFirstButtonReturn):
             if updater.installedWithHomebrew {
                 typeUpgradeCommand()
+            } else if updater.installer != nil {
+                updater.install(release)
             } else {
                 NSWorkspace.shared.open(release.diskImage ?? release.page)
             }
-        case .alertThirdButtonReturn:
+        case (.available(let release), .alertThirdButtonReturn):
             updater.skip(release)
+        case (.readyToInstall, .alertFirstButtonReturn):
+            // Quitting asks first if programs are still running; if it's cancelled, nothing is installed yet.
+            updater.relaunchesAfterInstalling = true
+            NSApp.terminate(nil)
+            updater.relaunchesAfterInstalling = false
+        case (.installFailed(_, _, let download), .alertFirstButtonReturn):
+            NSWorkspace.shared.open(download)
         default:
             break
         }
+    }
+
+    private func showInstallation(_ installation: Updater.Installation?) {
+        guard let installation else {
+            updateProgress?.close()
+            updateProgress = nil
+            return
+        }
+        if updateProgress == nil {
+            updateProgress = UpdateProgressWindow { [weak self] in self?.updater?.cancelInstalling() }
+        }
+        updateProgress?.show(installation)
     }
 
     /// Puts Homebrew's upgrade command at the front pane's prompt, or on the clipboard when no shell is

@@ -122,6 +122,15 @@ struct UpdaterTests {
         #expect(homebrew.alert(for: .upToDate).messageText == "You’re up to date")
     }
 
+    /// Each item keeps the bullet written into its text, and no list a text view would draw a second one for.
+    @Test func listsInTheReleaseNotesHaveOneBullet() {
+        let notes = Updater.notes("Fixes:\n\n- **Splits** keep their size\n- Tabs reopen")
+        #expect(notes.string == "Fixes:\n\t•\tSplits keep their size\n\t•\tTabs reopen")
+        notes.enumerateAttribute(.paragraphStyle, in: NSRange(location: 0, length: notes.length)) { value, _, _ in
+            #expect((value as? NSParagraphStyle)?.textLists.isEmpty ?? true)
+        }
+    }
+
     @Test func putsCheckForUpdatesInTheAppMenu() {
         _ = NSApplication.shared
         let appMenu = MainMenu.build().items.first?.submenu

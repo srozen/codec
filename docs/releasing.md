@@ -55,6 +55,12 @@ To get them:
    git push origin v1.2.0
    ```
 
+   For longer notes, write them in a file. Git drops lines starting with `#` from a tag message, Markdown headings included, unless you pass `--cleanup=verbatim`:
+
+   ```bash
+   git tag -a v1.2.0 --cleanup=verbatim -F notes.md
+   ```
+
 3. Watch the Release workflow (about 15 minutes, most of it testing; notarizing adds a few more). It ends by committing the cask's new version and checksum to `main`.
 
 A version with a hyphen, like `v1.3.0-beta.1`, is published as a prerelease: the cask stays on the last release, and the update check doesn't offer it, since GitHub's latest release never is one.

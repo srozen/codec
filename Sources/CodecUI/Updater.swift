@@ -170,6 +170,14 @@ final class Updater {
         }
         // HTML comes in black; follow the appearance instead.
         text.addAttribute(.foregroundColor, value: NSColor.labelColor, range: NSRange(location: 0, length: text.length))
+        // A list item's text already starts with its bullet; a text view that draws the list's markers
+        // too would show two.
+        text.enumerateAttribute(.paragraphStyle, in: NSRange(location: 0, length: text.length)) { value, range, _ in
+            guard let style = value as? NSParagraphStyle, !style.textLists.isEmpty,
+                  let plain = style.mutableCopy() as? NSMutableParagraphStyle else { return }
+            plain.textLists = []
+            text.addAttribute(.paragraphStyle, value: plain, range: range)
+        }
         while text.string.hasSuffix("\n") { text.deleteCharacters(in: NSRange(location: text.length - 1, length: 1)) }
         return text
     }

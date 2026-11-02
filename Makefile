@@ -1,7 +1,7 @@
 # Convenience targets. Builds use two jobs to keep memory use reasonable.
 JOBS ?= 2
 
-.PHONY: build test app run screenshots clean
+.PHONY: build test app run release screenshots clean
 
 build:
 	swift build -j $(JOBS)
@@ -15,6 +15,10 @@ app:
 
 run: app
 	open build/Codec.app
+
+# A signed, notarized disk image: make release VERSION=1.2.0. See docs/releasing.md.
+release:
+	JOBS=$(JOBS) scripts/release.sh $(VERSION)
 
 # Retakes docs/images; windows open on screen while it runs.
 screenshots:

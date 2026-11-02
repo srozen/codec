@@ -29,3 +29,7 @@ Your shell's prompt, or the Codec prompt and its builder. See [Prompt and status
 - **When the shell exits**: close the pane unless the shell crashed (the default), always close it, or always keep it open.
 - **Bell**: in the focused pane, visual only, visual plus a codec lock-on, visual plus the system alert, or nothing. And whether panes you're not looking at notify you of a bell or of a command that ran for more than 10 seconds.
 - **Codec sounds**: on or off, also when opening and closing panes, and their volume, with buttons to hear each one.
+
+## Updates
+
+The version you have, whether Codec checks GitHub for a newer one once a day, and Check Now. See [Getting started › Updates](getting-started.md#updates).

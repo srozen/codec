@@ -11,7 +11,7 @@ make screenshots   # retake the screenshots in docs/images
 
 `make` builds with two jobs to keep memory use reasonable; override with `make test JOBS=8`. Without make: `swift build`, `swift test`, `scripts/build-app.sh [debug|release]`.
 
-Tests use [Swift Testing](https://developer.apple.com/documentation/testing). Besides unit tests, some run a real zsh in a headless terminal, end to end. CI (`.github/workflows/ci.yml`) builds, runs the tests and bundles the app on every push and pull request.
+Tests use [Swift Testing](https://developer.apple.com/documentation/testing). Besides unit tests, some run a real zsh in a headless terminal, end to end. CI (`.github/workflows/ci.yml`) builds, runs the tests and bundles the app on every push and pull request. Pushing a `v*` tag runs `.github/workflows/release.yml`, which signs, notarizes and publishes a release: see [Releasing](releasing.md).
 
 ## Architecture
 
@@ -19,8 +19,8 @@ Three targets, compiled in Swift 6 language mode (strict concurrency):
 
 | Target | What's in it |
 |---|---|
-| `CodecCore` | Logic with no UI, all of it unit-tested: the split layout tree and pane geometry, shell integration scripts and environment, integration event parsing, bell and exit policies, preferences, git branch lookup and switching, smart selection, command block tracking, each pane's command timeline and kept output, Intel files and their variables, syntax highlighting, Markdown rendering, file types, command history ranking and storage, process inspection, system sampling. |
-| `CodecUI` | AppKit and SwiftUI: app delegate and menus, window controller, tabs, panes, chrome, sidebars, editor, palette, settings, sounds, notifications. |
+| `CodecCore` | Logic with no UI, all of it unit-tested: the split layout tree and pane geometry, shell integration scripts and environment, integration event parsing, bell and exit policies, preferences, git branch lookup and switching, smart selection, command block tracking, each pane's command timeline and kept output, Intel files and their variables, syntax highlighting, Markdown rendering, file types, command history ranking and storage, process inspection, system sampling, versions and release lookup for the update check. |
+| `CodecUI` | AppKit and SwiftUI: app delegate and menus, window controller, tabs, panes, chrome, sidebars, editor, palette, settings, sounds, notifications, the update check. |
 | `Codec` | The executable; calls `CodecApp.run()`. |
 
 `CodecUI` takes its services through an `AppEnvironment` (preferences, sound player, notifier, system monitor, shell integration, history, app coordinator), and panes talk to their window through the `PaneHost` protocol. Tests swap in fakes for both.
@@ -34,8 +34,11 @@ Sources/CodecUI/      AppDelegate, MainMenu, AppEnvironment, TerminalWindowContr
 Sources/Codec/        main.swift
 Tests/CodecCoreTests/ unit tests, plus zsh integration tests that run a real zsh in a headless terminal
 Tests/CodecUITests/   panes, sidebars, editor, window layout and actions, palette, end-to-end zsh tests
-scripts/              build-app.sh (bundles Codec.app), make-icon.swift (renders the icon),
+scripts/              build-app.sh (bundles Codec.app), release.sh (signed, notarized disk image),
+                      update-cask.sh (points the cask at a release), make-signing-certificate.sh
+                      (the release signing certificate), make-icon.swift (renders the icon),
                       screenshots.sh (retakes docs/images)
+Casks/codec.rb        the Homebrew cask
 ```
 
 Terminal emulation is provided by [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm).

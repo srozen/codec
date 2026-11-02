@@ -15,10 +15,12 @@ public enum CodecApp {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, AppCoordinating {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, AppCoordinating {
     private let environment: AppEnvironment
     private(set) var windows: [TerminalWindowController] = []
     private var settingsWindow: NSWindow?
+    /// Nil outside a bundled app with a version (tests, `swift run`).
+    private(set) var updater: Updater?
     private var pendingSave: DispatchWorkItem?
     /// Quitting: windows going away now aren't being closed by the user, so they stay saved.
     private var terminating = false
@@ -36,8 +38,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, AppCoordinating {
             notifier.activate()
             notifier.onOpen = { [weak self] id in
                 NSApp.activate()
+                if id == Updater.notificationID {
+                    self?.updater?.showAvailable()
+                    return
+                }
                 _ = self?.windows.first { $0.reveal(sessionID: id) }
             }
+        }
+        if Bundle.main.bundleURL.pathExtension == "app", let version = AppVersion.running {
+            let updater = Updater(current: version, preferences: environment.preferences, notifier: environment.notifier)
+            updater.present = { [weak self] in self?.showUpdate($0) }
+            updater.start()
+            self.updater = updater
         }
         if !restoreWindows() { newWindow(nil) }
         NSApp.activate()
@@ -196,9 +208,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, AppCoordinating {
     @objc func showSettings(_ sender: Any?) {
         if settingsWindow == nil {
             settingsWindow = SettingsView.makeWindow(preferences: environment.preferences, sounds: environment.sounds,
-                                                     history: environment.history)
+                                                     history: environment.history,
+                                                     updates: updater.map { updater in
+                                                         SettingsView.Updates(version: "\(updater.current)") { [weak updater] in
+                                                             updater?.checkNow()
+                                                         }
+                                                     })
         }
         settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    // MARK: - Updates
+
+    @objc func checkForUpdates(_ sender: Any?) {
+        updater?.checkNow()
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        guard menuItem.action == #selector(checkForUpdates(_:)) else { return true }
+        if let updater { menuItem.title = updater.menuTitle }
+        return updater != nil
+    }
+
+    private func showUpdate(_ finding: Updater.Finding) {
+        guard let updater else { return }
+        NSApp.activate()
+        let response = updater.alert(for: finding).runModal()
+        guard case .available(let release) = finding else { return }
+        switch response {
+        case .alertFirstButtonReturn:
+            if updater.installedWithHomebrew {
+                typeUpgradeCommand()
+            } else {
+                NSWorkspace.shared.open(release.diskImage ?? release.page)
+            }
+        case .alertThirdButtonReturn:
+            updater.skip(release)
+        default:
+            break
+        }
+    }
+
+    /// Puts Homebrew's upgrade command at the front pane's prompt, or on the clipboard when no shell is
+    /// waiting at one.
+    private func typeUpgradeCommand() {
+        let command = Homebrew.upgradeCommand
+        if currentWindow?.typeCommand(command) == true || windows.contains(where: { $0.typeCommand(command) }) { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(command, forType: .string)
+        let alert = NSAlert()
+        alert.messageText = "The upgrade command is on the clipboard"
+        alert.informativeText = "No shell is waiting at its prompt. Paste \(command) into one, run it, then reopen Codec."
+        alert.runModal()
     }
 
     // MARK: - AppCoordinating

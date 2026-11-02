@@ -51,6 +51,8 @@ public final class Preferences: ObservableObject {
     @Published public var showUsualDuration: Bool { didSet { store(showUsualDuration, .showUsualDuration) } }
     /// Offers to explain a failed command with Apple Intelligence, on this Mac.
     @Published public var explainFailures: Bool { didSet { store(explainFailures, .explainFailures) } }
+    /// Asks GitHub once a day whether there's a newer Codec.
+    @Published public var checkForUpdates: Bool { didSet { store(checkForUpdates, .checkForUpdates) } }
 
     /// Commands that run at least this long notify you when they finish in the background.
     public let longCommandThreshold: TimeInterval = 10
@@ -59,7 +61,7 @@ public final class Preferences: ObservableObject {
         case themeID, fontName, fontSize, opacity, blur, scanlines, dimInactivePanes, bell, notifyInBackground,
              codecSounds, paneSounds, soundVolume, optionAsMeta, exitBehavior, shellIntegration, shellPath,
              showSystemStats, prompt, copyOnSelect, suggestCommands, historyKeys, friendlyCompletion, recordHistory,
-             restoreWindows, restorePaneContents, showUsualDuration, explainFailures
+             restoreWindows, restorePaneContents, showUsualDuration, explainFailures, checkForUpdates
     }
 
     private static let factoryDefaults: [Key: Any] = [
@@ -89,6 +91,7 @@ public final class Preferences: ObservableObject {
         .restorePaneContents: true,
         .showUsualDuration: true,
         .explainFailures: true,
+        .checkForUpdates: true,
     ]
 
     public init(defaults: UserDefaults) {
@@ -120,6 +123,7 @@ public final class Preferences: ObservableObject {
         restorePaneContents = defaults.bool(forKey: Key.restorePaneContents.rawValue)
         showUsualDuration = defaults.bool(forKey: Key.showUsualDuration.rawValue)
         explainFailures = defaults.bool(forKey: Key.explainFailures.rawValue)
+        checkForUpdates = defaults.bool(forKey: Key.checkForUpdates.rawValue)
         prompt = defaults.data(forKey: Key.prompt.rawValue)
             .flatMap { try? JSONDecoder().decode(PromptConfiguration.self, from: $0) } ?? .default
     }

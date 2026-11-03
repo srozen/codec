@@ -25,10 +25,14 @@ public struct CommandBlocks: Equatable, Sendable {
         public var prompt: Int
         /// The first row after the command line, where output begins.
         public var output: Int
+        /// The command line as it was found, the end of the prompt and the command, so it can be told
+        /// from output that happens to end with the same command. Nil when not known.
+        public var commandLine: String?
 
-        public init(prompt: Int, output: Int) {
+        public init(prompt: Int, output: Int, commandLine: String? = nil) {
             self.prompt = prompt
             self.output = output
+            self.commandLine = commandLine
         }
     }
 
@@ -64,7 +68,14 @@ public struct CommandBlocks: Equatable, Sendable {
 
     /// Finds the command line that ends with `command` at or above `cursorRow`, and returns the block it
     /// opens. `promptLines` is how many lines the prompt has, its command line included.
-    public static func locate(command: String, in rows: [ScreenRow], cursorRow: Int, promptLines: Int) -> Block? {
+    ///
+    /// Any line can end with the command, its output's too: `ls` printing `Pictures  Tools`, or `cat list`
+    /// printing `wildcat list`. That's harmless while the output hasn't started, as when a command is first
+    /// found, but not when finding it again later. Then `line`, the command line as first found, must
+    /// match too. Older prompts' ends aren't marked anywhere, only the current one's, so the line's text
+    /// is what tells the prompt apart from output.
+    public static func locate(command: String, line: String? = nil, in rows: [ScreenRow], cursorRow: Int,
+                              promptLines: Int) -> Block? {
         let wanted = command.trimmingCharacters(in: .whitespaces)
         guard !wanted.isEmpty else { return nil }
         let candidates = rows.filter { $0.row <= cursorRow }
@@ -73,9 +84,10 @@ public struct CommandBlocks: Equatable, Sendable {
         while index >= 0 {
             var first = index
             while first > 0, candidates[first].isWrapped { first -= 1 }
-            let text = candidates[first...index].map(\.text).joined()
-            if trimmingTrailingSpace(text).hasSuffix(wanted) {
-                return Block(prompt: candidates[first].row - max(promptLines - 1, 0), output: candidates[index].row + 1)
+            let text = trimmingTrailingSpace(candidates[first...index].map(\.text).joined())
+            if text.hasSuffix(wanted), line.map({ sameLine(text, $0) }) ?? true {
+                return Block(prompt: candidates[first].row - max(promptLines - 1, 0), output: candidates[index].row + 1,
+                             commandLine: String(text))
             }
             index = first - 1
         }
@@ -88,13 +100,15 @@ public struct CommandBlocks: Equatable, Sendable {
     }
 
     /// Finds commands' blocks again after their rows moved, as they do when the terminal rewraps its lines
-    /// on a resize. `commands` are oldest first; each is looked for above the one after it, starting from
-    /// `lastRow`. Nil for a command that isn't on screen anymore.
-    public static func relocate(commands: [String], in rows: [ScreenRow], lastRow: Int, promptLines: Int) -> [Block?] {
+    /// on a resize. `commands` are oldest first, each with its command line as first found (see `locate`);
+    /// each is looked for above the one after it, starting from `lastRow`. Nil for a command that isn't on
+    /// screen anymore.
+    public static func relocate(commands: [(command: String, line: String?)], in rows: [ScreenRow], lastRow: Int,
+                                promptLines: Int) -> [Block?] {
         var found: [Block?] = []
         var below = lastRow
-        for command in commands.reversed() {
-            let block = locate(command: command, in: rows, cursorRow: below, promptLines: promptLines)
+        for (command, line) in commands.reversed() {
+            let block = locate(command: command, line: line, in: rows, cursorRow: below, promptLines: promptLines)
             if let block { below = block.prompt - 1 }
             found.append(block)
         }
@@ -113,6 +127,12 @@ public struct CommandBlocks: Equatable, Sendable {
             remaining -= 1
         }
         return rows[position].row - remaining
+    }
+
+    /// Rewrapping keeps a line's text and only breaks it into rows elsewhere, but where it breaks can add
+    /// or drop a blank cell, as when a wide character doesn't fit at a row's end. So spaces don't count.
+    private static func sameLine(_ text: Substring, _ line: String) -> Bool {
+        text.filter { !$0.isWhitespace } == line.filter { !$0.isWhitespace }
     }
 
     private static func trimmingTrailingSpace(_ text: String) -> Substring {

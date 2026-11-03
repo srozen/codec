@@ -74,6 +74,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
             guard let self else { return }
             if let file = self.pressedFile {
                 self.pressedFile = nil
+                self.view.fileLink.isPressed = false
                 self.host?.openFile(file, from: self)
             } else if self.pressedBranch {
                 self.pressedBranch = false
@@ -105,8 +106,8 @@ final class Pane: LocalProcessTerminalViewDelegate {
             }
         }
         view.onScroll = { [weak self] in
-            guard let self, !self.view.fileLink.frames.isEmpty || NSEvent.modifierFlags.contains(.command) else { return }
-            self.refreshFileLink(modifiers: NSEvent.modifierFlags)
+            guard let self, self.openableNames != nil else { return }
+            self.refreshFileLink(modifiers: self.fileLinkModifiers, rescan: true)
         }
         terminal.onRelease = { [weak self] clicks, dragged, point in
             self?.terminalGestureEnded(clicks: clicks, dragged: dragged, at: point)
@@ -305,6 +306,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
             session.unseenOutput = true
         }
         if printed { view.finder.contentChanged() }
+        if printed, openableNames != nil { refreshFileLink(modifiers: fileLinkModifiers, rescan: true) }
         ticks += 1
         if ticks % 4 == 0 { pollProcess() }
         if session.running != nil, timeline.running?.fullScreen == false,
@@ -563,6 +565,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
               terminal.currentMouseMode == .off,
               let path = file(at: event.locationInWindow) else { return false }
         pressedFile = URL(fileURLWithPath: path)
+        view.fileLink.isPressed = true
         return true
     }
 
@@ -580,48 +583,123 @@ final class Pane: LocalProcessTerminalViewDelegate {
         return FileReference.resolve(name, in: directories)
     }
 
-    /// The name last looked at under the pointer, and whether it named a file, so moving within it
-    /// doesn't ask the disk again.
-    private var fileLinkToken: (text: String, row: Int, visibleRow: Int, column: Int, isFile: Bool)?
+    /// A name on screen that a ⌘-click would open.
+    private struct OpenableName {
+        var text: String
+        var first: (row: Int, column: Int)
+        var last: (row: Int, column: Int)
+        var path: String
 
-    /// Underlines the name under the pointer if ⌘ is down and it's a file, or takes the line away.
-    func refreshFileLink(modifiers: NSEvent.ModifierFlags) {
-        guard let point = pointerLocation() else { return hideFileLink(pointer: nil) }
-        updateFileLink(at: point, modifiers: modifiers)
+        func contains(_ cell: (row: Int, column: Int)) -> Bool {
+            (cell.row, cell.column) >= (first.row, first.column) && (cell.row, cell.column) <= (last.row, last.column)
+        }
     }
 
-    /// While ⌘ is held over a name a ⌘-click would open, underlines it and shows the pointing hand.
-    func updateFileLink(at point: NSPoint, modifiers: NSEvent.ModifierFlags) {
+    /// Every name on screen ⌘ would open, found when ⌘ went down and again when the screen changes,
+    /// so moving the pointer doesn't ask the disk. Nil while ⌘ is up.
+    private var openableNames: [OpenableName]?
+    private var isPointingAtFile = false
+    /// The modifiers when the marks were last drawn, to redraw them with when the screen changes.
+    private var fileLinkModifiers: NSEvent.ModifierFlags = []
+
+    /// Marks what ⌘ would open, if ⌘ is down, or takes the marks away.
+    func refreshFileLink(modifiers: NSEvent.ModifierFlags, rescan: Bool = false) {
+        guard let point = pointerLocation() else { return hideFileLink(pointer: nil) }
+        updateFileLink(at: point, modifiers: modifiers, rescan: rescan)
+    }
+
+    /// While ⌘ is down, marks every name on screen a click would open, and the one under the pointer
+    /// most, with a tag saying what opens and the pointing hand. Otherwise takes the marks away.
+    func updateFileLink(at point: NSPoint, modifiers: NSEvent.ModifierFlags, rescan: Bool = false) {
         guard !isShutDown, modifiers.intersection([.shift, .option, .command, .control]) == .command,
               terminal.currentMouseMode == .off, terminal.window != nil,
-              terminal.bounds.contains(terminal.convert(point, from: nil)),
-              let grid = TerminalGrid(terminal: terminal), let token = token(at: point, in: grid) else {
-            fileLinkToken = nil
+              let grid = TerminalGrid(terminal: terminal) else {
             return hideFileLink(pointer: point)
         }
-        let row = grid.viewportTop + token.first.row
-        if let seen = fileLinkToken, seen.text == token.text, seen.row == row,
-           seen.visibleRow == token.first.row, seen.column == token.first.column {
-            guard seen.isFile else { return hideFileLink(pointer: point) }
-        } else {
-            let isFile = file(named: token.text, at: row) != nil
-            fileLinkToken = (token.text, row, token.first.row, token.first.column, isFile)
-            guard isFile else { return hideFileLink(pointer: point) }
-        }
+        fileLinkModifiers = modifiers
+        if rescan || openableNames == nil { openableNames = openableNames(in: grid) }
+        let names = openableNames ?? []
+        let cell = grid.cell(at: point)
+        let hovered = terminal.bounds.contains(terminal.convert(point, from: nil))
+            ? names.firstIndex { $0.contains(cell) } : nil
         let link = view.fileLink
-        link.show((token.first.row...token.last.row).map { row in
-            let start = row == token.first.row ? token.first.column : 0
-            let end = row == token.last.row ? token.last.column + 1 : grid.columns
-            return link.convert(grid.frame(row: row, columns: start..<end), from: nil)
-        })
-        NSCursor.pointingHand.set()
+        link.font = terminal.font
+        func frames(_ name: OpenableName) -> [NSRect] {
+            (name.first.row...name.last.row).map { row in
+                let start = row == name.first.row ? name.first.column : 0
+                let end = row == name.last.row ? name.last.column + 1 : grid.columns
+                return link.convert(grid.frame(row: row, columns: start..<end), from: nil)
+            }
+        }
+        link.show(marks: names.indices.filter { $0 != hovered }.flatMap { frames(names[$0]) },
+                  frames: hovered.map { frames(names[$0]) } ?? [],
+                  tag: hovered.map { fileLinkTag(names[$0].path, named: names[$0].text) })
+        if hovered != nil {
+            NSCursor.pointingHand.set()
+        } else if isPointingAtFile, terminal.bounds.contains(terminal.convert(point, from: nil)) {
+            NSCursor.iBeam.set()
+        }
+        isPointingAtFile = hovered != nil
+    }
+
+    /// Every name on the screen that's a file or folder, each looked for where the command that printed
+    /// it ran. The prompt's own lines are left out, all but the command line: their directory already
+    /// opens from the status bar, and a mark inside a prompt chip would muddy it.
+    private func openableNames(in grid: TerminalGrid) -> [OpenableName] {
+        relocateBlocksIfNeeded()
+        let end = newestBlockEnd
+        let promptStarts = blocks.blocks.map(\.prompt) + (session.running == nil ? end.map { [$0] } ?? [] : [])
+        let promptRows = Set(promptStarts.flatMap { $0..<($0 + max(session.promptLines - 1, 0)) })
+        var known: [Int: [String]] = [:]
+        func directories(forRow row: Int) -> [String] {
+            let index = end.map { row < $0 } == true ? blocks.index(containing: row) : nil
+            if let directories = known[index ?? -1] { return directories }
+            let entry = index.flatMap { index in timeline.entries.last { $0.block == blocks.blocks[index] } }
+            let found = FileReference.directories(command: entry?.command ?? "", in: entry?.directory ?? session.directory)
+            known[index ?? -1] = found
+            return found
+        }
+        var names: [OpenableName] = []
+        var row = 0
+        // A screen full of names is a few hundred; past that, it's not worth asking the disk about more.
+        while row < grid.rows.count, names.count < 400 {
+            guard let line = grid.logicalLine(containing: row) else { break }
+            defer { row = max(row + 1, (line.cells.last?.row ?? row) + 1) }
+            guard !promptRows.contains(grid.viewportTop + row) else { continue }
+            var index = 0
+            while index < line.characters.count {
+                guard let range = SmartSelection.range(in: line.characters, at: index) else {
+                    index += 1
+                    continue
+                }
+                let text = String(line.characters[range])
+                let first = line.cells[range.lowerBound], last = line.cells[range.upperBound - 1]
+                if let path = FileReference.resolve(text, in: directories(forRow: grid.viewportTop + first.row)) {
+                    names.append(OpenableName(text: text, first: first, last: last, path: path))
+                }
+                index = range.upperBound
+            }
+        }
+        return names
+    }
+
+    /// What the tag beside the name under the pointer shows: the file's icon, and the path that opens
+    /// when it's more than the name says.
+    private func fileLinkTag(_ path: String, named name: String) -> FileLinkView.Tag {
+        let file = (path as NSString).lastPathComponent
+        let theme = preferences.theme
+        let icon = FileReference.isDirectory(path)
+            ? FileIcons.image(for: FolderType.of(folderNamed: file), state: .closed, theme: theme)
+            : FileIcons.image(for: FileType.of(fileNamed: file), theme: theme)
+        return FileLinkView.Tag(icon: icon, path: FileReference.label(for: path, named: name, from: session.directory))
     }
 
     private func hideFileLink(pointer point: NSPoint?) {
-        guard !view.fileLink.frames.isEmpty else { return }
-        view.fileLink.show([])
-        fileLinkToken = nil
-        if let point, terminal.bounds.contains(terminal.convert(point, from: nil)) { NSCursor.iBeam.set() }
+        openableNames = nil
+        guard view.fileLink.isShowing else { return }
+        view.fileLink.show(marks: [], frames: [], tag: nil)
+        if isPointingAtFile, let point, terminal.bounds.contains(terminal.convert(point, from: nil)) { NSCursor.iBeam.set() }
+        isPointingAtFile = false
     }
 
     /// The command, running or finished, whose prompt or output holds an absolute row.

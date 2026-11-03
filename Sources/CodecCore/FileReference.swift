@@ -35,6 +35,23 @@ public enum FileReference {
         return directories
     }
 
+    /// How to show the path a name opens: relative to the shell's directory when it's inside it, else
+    /// from `~`. Nil when that's just what the name says, as for `README.md` listed where you are.
+    public static func label(for path: String, named name: String, from directory: String,
+                             home: String = NSHomeDirectory()) -> String? {
+        let base = directory.hasSuffix("/") ? directory : directory + "/"
+        var label = path
+        if !directory.isEmpty, path.hasPrefix(base) {
+            label = String(path.dropFirst(base.count))
+        } else if path == home || path.hasPrefix(home + "/") {
+            label = "~" + path.dropFirst(home.count)
+        }
+        var said = name
+        if said.hasPrefix("./") { said.removeFirst(2) }
+        while said.count > 1, said.hasSuffix("/") { said.removeLast() }
+        return label == said ? nil : label
+    }
+
     public static func isDirectory(_ path: String) -> Bool {
         var isDirectory: ObjCBool = false
         return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue

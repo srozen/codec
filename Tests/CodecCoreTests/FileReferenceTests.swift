@@ -34,6 +34,16 @@ struct FileReferenceTests {
         #expect(resolve("main.swift") == nil)
     }
 
+    @Test func labelsThePathOnlyWhenTheNameDoesntSayIt() {
+        #expect(FileReference.label(for: "/p/README.md", named: "README.md", from: "/p") == nil)
+        #expect(FileReference.label(for: "/p/Sources", named: "Sources/", from: "/p/") == nil)
+        #expect(FileReference.label(for: "/p/run.sh", named: "./run.sh", from: "/p") == nil)
+        #expect(FileReference.label(for: "/p/Sources/main.swift", named: "main.swift", from: "/p") == "Sources/main.swift")
+        #expect(FileReference.label(for: "/p/main.swift", named: "main.swift:42:7", from: "/p") == "main.swift")
+        #expect(FileReference.label(for: "/home/me/notes.txt", named: "notes.txt", from: "/p", home: "/home/me") == "~/notes.txt")
+        #expect(FileReference.label(for: "/etc/hosts", named: "hosts", from: "/p", home: "/home/me") == "/etc/hosts")
+    }
+
     @Test func aCommandsDirectoriesAreWhereItRanThenTheFoldersItWasGiven() {
         let folders: Set<String> = ["/p", "/p/Sources", "/p/Tests", "/etc"]
         let directories = FileReference.directories(command: "ls -la Sources 'Tests' /etc README.md ../p/Sources",

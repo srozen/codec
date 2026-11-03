@@ -21,7 +21,11 @@ zsh's own selection (the region) is what's highlighted, in the theme's selection
 
 ## Opening files and links
 
-⌘-click a file's name in the output to open it in the [editor](files-and-editor.md#editor), or a folder's to open it in Finder. It works on what `ls` lists, the paths `git status` and `grep` print, and a compiler's `Sources/App/Main.swift:42:7`. Codec looks for the name where the command that printed it ran, then in the folders it was given, so after `ls Sources` its files open too; on the command line you're typing, in the shell's directory. Press ⌘ with the pointer over a name to see whether it opens: a file's name is underlined in the theme's accent color and the pointer turns into a hand, until you let go of ⌘. Names that aren't files are left alone. ⌘-click a URL to open it in the browser.
+⌘-click a file's name in the output to open it in the [editor](files-and-editor.md#editor), or a folder's to open it in Finder. It works on what `ls` lists, the paths `git status` and `grep` print, and a compiler's `Sources/App/Main.swift:42:7`. Codec looks for the name where the command that printed it ran, then in the folders it was given, so after `ls Sources` its files open too; on the command line you're typing, in the shell's directory. ⌘-click a URL to open it in the browser.
+
+Hold ⌘ to see what opens. Every file and folder name on screen is washed in the theme's accent color, and the one under the pointer is underlined, with a tag showing its icon and, when the name doesn't say it all, the path that opens (`Sources/CodecCore/FileTree.swift` for a name `ls Sources/CodecCore` listed). The marks go as soon as you let go of ⌘. Names that aren't files are left alone, and so is the prompt, whose directory opens from the status bar.
+
+![⌘ held over the output of ls: every name marked, one tagged with the file that opens](images/open-file.png)
 
 Copy on select is a setting (Settings › Shell › Selection). The scrollback keeps 10,000 lines; ⌘K clears it.
 

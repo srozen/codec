@@ -220,6 +220,7 @@ extension OpenListedFileTests {
         let project = env.directory.appendingPathComponent("project")
         try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
         try "".write(to: project.appendingPathComponent("hovered.txt"), atomically: true, encoding: .utf8)
+        try "".write(to: project.appendingPathComponent("other.txt"), atomically: true, encoding: .utf8)
         let host = FakeHost()
         let (pane, window) = try zshPane(env, host: host, directory: project.path)
         defer { pane.shutDown(); window.close() }
@@ -237,14 +238,22 @@ extension OpenListedFileTests {
         let grid = try #require(TerminalGrid(terminal: pane.terminal))
         let cell = grid.cell(at: name)
         #expect(link.frames == [link.convert(grid.frame(row: cell.row, columns: cell.column..<(cell.column + 11)), from: nil)])
+        #expect(link.fileTag != nil)
+        // The other file is marked too, less.
+        let other = grid.cell(at: try point(of: "other.txt", in: pane))
+        #expect(link.marks == [link.convert(grid.frame(row: other.row, columns: other.column..<(other.column + 9)), from: nil)])
 
-        // Moving onto a word that isn't a file, or letting go of ⌘, takes the line away.
+        // Moving onto a word that isn't a file leaves both marked, neither under the pointer; letting
+        // go of ⌘ takes every mark away.
         pane.updateFileLink(at: try point(of: "done-listing", in: pane), modifiers: .command)
         #expect(link.frames.isEmpty)
+        #expect(link.marks.count == 2)
+        #expect(link.fileTag == nil)
         pane.updateFileLink(at: name, modifiers: .command)
         #expect(!link.frames.isEmpty)
         pane.updateFileLink(at: name, modifiers: [])
         #expect(link.frames.isEmpty)
+        #expect(link.marks.isEmpty)
     }
 
     private func modifiersChanged(to flags: NSEvent.ModifierFlags, in window: NSWindow) -> NSEvent {

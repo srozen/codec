@@ -86,7 +86,7 @@ final class PaneView: NSView {
 
     func apply(theme: CodecTheme, scanlines enabled: Bool) {
         finder.apply(theme: theme)
-        fileLink.color = theme.accent
+        fileLink.theme = theme
         scanlines.isHidden = !enabled
         scanlines.lineColor = theme.isDark ? .black : NSColor(white: 0, alpha: 0.5)
         scanlines.needsDisplay = true
@@ -165,27 +165,130 @@ final class PassthroughView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
-/// A line under the name of the file a ⌘-click would open, like a link's.
+/// What ⌘ would open. Every name a click would open is washed in the accent, like a prompt chip; the
+/// one under the pointer more, and underlined, with a tag beside it showing the file's icon and, when
+/// the name doesn't say it all, the path that opens. The tag goes under the name when there's no room
+/// beside it.
 final class FileLinkView: NSView {
-    var color: NSColor = .controlAccentColor {
+    struct Tag: Equatable {
+        var icon: NSImage
+        var path: String?
+    }
+
+    var theme: CodecTheme = .codec {
         didSet { needsDisplay = true }
     }
-    /// The name's cells, a rect per row it spans, in this view's coordinates.
+    /// The terminal's font; the tag's path is set in it, a little smaller.
+    var font: NSFont = .monospacedSystemFont(ofSize: 13, weight: .regular)
+    /// The other names' cells, a rect per row each spans, in this view's coordinates.
+    private(set) var marks: [NSRect] = []
+    /// The cells of the name under the pointer.
     private(set) var frames: [NSRect] = []
+    private(set) var fileTag: Tag?
+    /// Where the tag is, in this view's coordinates.
+    private(set) var tagFrame: NSRect = .zero
+    /// A ⌘-press is on the name: its wash deepens until the press ends.
+    var isPressed = false {
+        didSet { if isPressed != oldValue { needsDisplay = true } }
+    }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    func show(_ frames: [NSRect]) {
-        guard frames != self.frames else { return }
+    var isShowing: Bool { !marks.isEmpty || !frames.isEmpty }
+
+    func show(marks: [NSRect], frames: [NSRect], tag: Tag?) {
+        guard marks != self.marks || frames != self.frames || tag != fileTag else { return }
+        let appearing = !isShowing && (!marks.isEmpty || !frames.isEmpty)
+        self.marks = marks
         self.frames = frames
+        fileTag = frames.isEmpty ? nil : tag
+        if frames.isEmpty { isPressed = false }
+        layOutTag()
         needsDisplay = true
+        // It comes in quickly when ⌘ goes down, and goes at once when ⌘ comes up.
+        if appearing, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            alphaValue = 0
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.09
+                animator().alphaValue = 1
+            }
+        } else if !isShowing {
+            alphaValue = 1
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        layOutTag()
+    }
+
+    private var tagFont: NSFont {
+        NSFont(descriptor: font.fontDescriptor, size: (font.pointSize * 0.85).rounded()) ?? font
+    }
+
+    /// The path, its folders bright since they're what the name didn't say, and its last part, which
+    /// the name already shows, quieter.
+    private var tagText: NSAttributedString? {
+        guard let path = fileTag?.path else { return nil }
+        let paragraph = NSMutableParagraphStyle()
+        // A long path loses its start, never the file's name.
+        paragraph.lineBreakMode = .byTruncatingHead
+        let split = path.range(of: "/", options: .backwards).map(\.upperBound) ?? path.startIndex
+        let text = NSMutableAttributedString()
+        for (part, alpha) in [(path[..<split], 0.92), (path[split...], split == path.startIndex ? 0.86 : 0.5)] where !part.isEmpty {
+            text.append(NSAttributedString(string: String(part), attributes: [
+                .font: tagFont, .foregroundColor: theme.foreground.withAlphaComponent(alpha), .paragraphStyle: paragraph,
+            ]))
+        }
+        return text
+    }
+
+    private func iconSide(_ height: CGFloat) -> CGFloat { min(FileIcons.size.height, height - 4) }
+
+    private func layOutTag() {
+        guard fileTag != nil, let first = frames.first, let last = frames.last else {
+            tagFrame = .zero
+            return
+        }
+        let height = last.height - 1
+        let text = tagText.map { ceil($0.size().width) }
+        let width = min(5 + iconSide(height) + (text.map { 5 + $0 + 7 } ?? 5), bounds.width - 8)
+        var frame = NSRect(x: last.maxX + 6, y: last.midY - height / 2, width: width, height: height)
+        if frame.maxX > bounds.maxX - 4 {
+            frame.origin.x = max(4, min(first.minX - 2, bounds.maxX - 4 - width))
+            frame.origin.y = last.minY - height - 3
+            if frame.minY < bounds.minY { frame.origin.y = first.maxY + 3 }
+        }
+        tagFrame = frame
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        color.setFill()
-        for frame in frames {
-            NSRect(x: frame.minX, y: frame.minY + 1, width: frame.width, height: 1).fill()
+        let accent = theme.accent
+        accent.withAlphaComponent(0.13).setFill()
+        for mark in marks {
+            NSBezierPath(roundedRect: mark.insetBy(dx: -2, dy: 0.5), xRadius: 3, yRadius: 3).fill()
         }
+        for frame in frames {
+            accent.withAlphaComponent(isPressed ? 0.4 : 0.26).setFill()
+            NSBezierPath(roundedRect: frame.insetBy(dx: -2, dy: 0.5), xRadius: 3, yRadius: 3).fill()
+            accent.setFill()
+            NSRect(x: frame.minX, y: frame.minY + 1.5, width: frame.width, height: 1.5).fill()
+        }
+        guard let fileTag, !tagFrame.isEmpty else { return }
+        let chip = NSBezierPath(roundedRect: tagFrame.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
+        (theme.background.blended(withFraction: 0.12, of: accent) ?? theme.background).setFill()
+        chip.fill()
+        accent.withAlphaComponent(0.28).setStroke()
+        chip.lineWidth = 1
+        chip.stroke()
+        let side = iconSide(tagFrame.height)
+        let icon = NSRect(x: tagFrame.minX + 5, y: (tagFrame.midY - side / 2).rounded(), width: side, height: side)
+        fileTag.icon.draw(in: icon)
+        guard let text = tagText else { return }
+        let lineHeight = ceil(tagFont.ascender - tagFont.descender)
+        text.draw(with: NSRect(x: icon.maxX + 5, y: (tagFrame.midY - lineHeight / 2).rounded(),
+                               width: tagFrame.maxX - 7 - (icon.maxX + 5), height: lineHeight),
+                  options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
     }
 }
 

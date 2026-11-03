@@ -8,7 +8,7 @@
 
 - It follows the pane as you `cd`, and opens down to the current directory.
 - It updates as files change on disk.
-- Files are colored by git status (modified, added, untracked, ignored), and folders holding changes get a dot.
+- Files are colored by git status (modified, added, untracked, ignored), and folders holding changes get a dot. Codec reads the status without locking the repository, so it never gets in the way of an IDE or git in another terminal.
 - Files and folders have Codec's own icons, drawn from the theme's palette: a page with a folded corner and a monogram (SW, TS, PY…) or a glyph per type (a `>_` for scripts, signal bars for audio, a key for `.env`…). Folders are colored by role (sources, tests, docs, assets, scripts), dimmed for build output and dependencies, with the current one in the accent color.
 - The eye button shows or hides hidden files.
 

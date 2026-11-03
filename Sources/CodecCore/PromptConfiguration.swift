@@ -672,8 +672,10 @@ extension PromptConfiguration {
             return code
         case .gitDiffStats:
             // "3 files changed, 10 insertions(+), 2 deletions(-)" → "3 • +10 -2". Only digits reach the prompt.
+            // diff-index, not diff: `git diff` rewrites the index to refresh its file stats, even with
+            // GIT_OPTIONAL_LOCKS=0, and would lock it at every prompt against other apps using git.
             return [
-                "value=$(command git diff --shortstat HEAD 2>/dev/null)",
+                "value=$(command git diff-index --shortstat HEAD -- 2>/dev/null)",
                 "if [[ -n $value ]]; then",
                 "  local files=${value%% file*} insertions=0 deletions=0",
                 "  files=${files//[^0-9]/}",

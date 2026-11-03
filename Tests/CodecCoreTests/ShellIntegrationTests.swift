@@ -353,6 +353,33 @@ struct ZshPromptTests {
         #expect(rendered.contains("%D{%H:%M}"))
     }
 
+    /// The prompt runs git before every command, so it must never lock the index against another app.
+    @Test func readsGitWithoutRewritingTheIndex() async throws {
+        let setup = try TemporaryDirectory()
+        let repo = try repository(in: setup, branch: "main")
+        let file = repo.appendingPathComponent("file.txt")
+        try "one\n".write(to: file, atomically: true, encoding: .utf8)
+        try git(["add", "."], in: repo)
+        try git(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "init"], in: repo)
+        // The same contents with another date: `git diff` would refresh the index to record it.
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -3600)], ofItemAtPath: file.path)
+        let index = repo.appendingPathComponent(".git/index")
+        let before = try Data(contentsOf: index)
+
+        var configuration = prompt
+        configuration.showsGitChanges = true
+        configuration.segments = [
+            .init(.gitBranch, enabled: true, color: .magenta),
+            .init(.gitDiffStats, enabled: true, color: .green),
+        ]
+        let zsh = try ZshHarness(prompt: configuration, directory: repo.path)
+        #expect(await zsh.wait { zsh.payloads(133).contains { $0.hasPrefix("A") } })
+        zsh.reportPrompt()
+        #expect(await zsh.wait { !zsh.reportedPrompts.isEmpty })
+        #expect(zsh.reportedPrompts.last?.contains("main") == true)
+        #expect(try Data(contentsOf: index) == before)
+    }
+
     /// The prompt zsh draws must match the Settings preview exactly.
     @Test(arguments: [true, false])
     func drawsExactlyWhatThePreviewShows(connectingWords: Bool) async throws {

@@ -176,6 +176,198 @@ struct ZshSelectionTests {
     }
 }
 
+/// ⌘-click on a file's name in the output opens it.
+@Suite("Opening listed files", .serialized, .timeLimit(.minutes(1)),
+       .enabled(if: FileManager.default.isExecutableFile(atPath: "/bin/zsh")))
+@MainActor
+struct OpenListedFileTests {
+    private func zshPane(_ env: TestEnvironment, host: FakeHost, directory: String) throws -> (Pane, NSWindow) {
+        let config = env.directory.appendingPathComponent("zdotdir")
+        try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+        try "PS1='%# '\n".write(to: config.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8)
+        setenv("ZDOTDIR", config.path, 1)
+        defer { unsetenv("ZDOTDIR") }
+        let pane = env.makePane(directory: directory, host: host)
+        let window = makeTestWindow(size: NSSize(width: 800, height: 400))
+        window.contentView = pane.view
+        pane.view.layoutSubtreeIfNeeded()
+        return (pane, window)
+    }
+
+    private func click(_ pane: Pane, at point: NSPoint, in window: NSWindow, modifiers: NSEvent.ModifierFlags) {
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: modifiers,
+                                           timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                           context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1)!
+            if type == .leftMouseDown { pane.terminal.mouseDown(with: event) } else { pane.terminal.mouseUp(with: event) }
+        }
+    }
+
+    /// The center of the last cell showing `target` on screen, which is output rather than the command typed.
+    private func point(of target: String, in pane: Pane) throws -> NSPoint {
+        let grid = try #require(TerminalGrid(terminal: pane.terminal))
+        for (row, snapshot) in grid.rows.enumerated().reversed() {
+            if let range = snapshot.text.range(of: target, options: .backwards) {
+                return grid.center(row: row, column: snapshot.text.distance(from: snapshot.text.startIndex, to: range.lowerBound))
+            }
+        }
+        Issue.record("\(target) isn't on screen")
+        return .zero
+    }
+
+    @Test func commandClickOpensAFileListedFromAFolderTheCommandWasGiven() async throws {
+        let env = try TestEnvironment(shell: "/bin/zsh", integration: true)
+        defer { env.tearDown() }
+        let project = env.directory.appendingPathComponent("project")
+        let sources = project.appendingPathComponent("Sources")
+        try FileManager.default.createDirectory(at: sources, withIntermediateDirectories: true)
+        try "".write(to: sources.appendingPathComponent("listed.swift"), atomically: true, encoding: .utf8)
+        let host = FakeHost()
+        let (pane, window) = try zshPane(env, host: host, directory: project.path)
+        defer { pane.shutDown(); window.close() }
+        #expect(await waitUntil { pane.isAtCommandLine })
+        pane.terminal.send(txt: "ls Sources; echo done-listing\r")
+        #expect(await waitUntil { pane.lastOutputRange != nil && pane.isAtCommandLine })
+        #expect(await waitUntil { pane.terminal.visibleRowsText(0..<10).joined().contains("done-listing") })
+
+        let name = try point(of: "listed.swift", in: pane)
+        // A plain click selects as usual; it takes ⌘ to open.
+        click(pane, at: name, in: window, modifiers: [])
+        #expect(host.openedFiles.isEmpty)
+        click(pane, at: name, in: window, modifiers: .command)
+        #expect(host.openedFiles.map { $0.resolvingSymlinksInPath().path }
+                == [sources.appendingPathComponent("listed.swift").resolvingSymlinksInPath().path])
+
+        // A word that names no file is left to the terminal.
+        click(pane, at: try point(of: "done-listing", in: pane), in: window, modifiers: .command)
+        #expect(host.openedFiles.count == 1)
+    }
+}
+
+extension OpenListedFileTests {
+    @Test func holdingCommandOverAFileUnderlinesIt() async throws {
+        let env = try TestEnvironment(shell: "/bin/zsh", integration: true)
+        defer { env.tearDown() }
+        let project = env.directory.appendingPathComponent("project")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        try "".write(to: project.appendingPathComponent("hovered.txt"), atomically: true, encoding: .utf8)
+        try "".write(to: project.appendingPathComponent("other.txt"), atomically: true, encoding: .utf8)
+        let host = FakeHost()
+        let (pane, window) = try zshPane(env, host: host, directory: project.path)
+        defer { pane.shutDown(); window.close() }
+        #expect(await waitUntil { pane.isAtCommandLine })
+        pane.terminal.send(txt: "ls; echo done-listing\r")
+        #expect(await waitUntil { pane.lastOutputRange != nil && pane.isAtCommandLine })
+        #expect(await waitUntil { pane.terminal.visibleRowsText(0..<10).joined().contains("done-listing") })
+
+        let name = try point(of: "hovered.txt", in: pane)
+        let link = pane.view.fileLink
+        pane.updateFileLink(at: name, modifiers: [])
+        #expect(link.frames.isEmpty)
+
+        pane.updateFileLink(at: name, modifiers: .command)
+        let grid = try #require(TerminalGrid(terminal: pane.terminal))
+        let cell = grid.cell(at: name)
+        #expect(link.frames == [link.convert(grid.frame(row: cell.row, columns: cell.column..<(cell.column + 11)), from: nil)])
+        #expect(link.fileTag != nil)
+        // The other file is marked too, less.
+        let other = grid.cell(at: try point(of: "other.txt", in: pane))
+        #expect(link.marks == [link.convert(grid.frame(row: other.row, columns: other.column..<(other.column + 9)), from: nil)])
+
+        // Moving onto a word that isn't a file leaves both marked, neither under the pointer; letting
+        // go of ⌘ takes every mark away.
+        pane.updateFileLink(at: try point(of: "done-listing", in: pane), modifiers: .command)
+        #expect(link.frames.isEmpty)
+        #expect(link.marks.count == 2)
+        #expect(link.fileTag == nil)
+        pane.updateFileLink(at: name, modifiers: .command)
+        #expect(!link.frames.isEmpty)
+        pane.updateFileLink(at: name, modifiers: [])
+        #expect(link.frames.isEmpty)
+        #expect(link.marks.isEmpty)
+    }
+
+    /// Regression: the prompt's own lines were left out, found from command blocks, and a block found
+    /// again after a rewrap on a line of its own output (`wildcat list` for `cat list`, before blocks
+    /// remembered their command line) left a line of output unmarked. The marks shouldn't hang on where
+    /// blocks are.
+    @Test func everyNameIsMarkedAfterBlocksMove() async throws {
+        let env = try TestEnvironment(shell: "/bin/zsh", integration: true)
+        defer { env.tearDown() }
+        let project = env.directory.appendingPathComponent("project")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        try "first.txt\nwildcat list\n".write(to: project.appendingPathComponent("list"), atomically: true, encoding: .utf8)
+        try "".write(to: project.appendingPathComponent("first.txt"), atomically: true, encoding: .utf8)
+        let config = env.directory.appendingPathComponent("zdotdir")
+        try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+        try "PS1=$'top\\n\\n%# '\n".write(to: config.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8)
+        setenv("ZDOTDIR", config.path, 1)
+        let host = FakeHost()
+        let pane = env.makePane(directory: project.path, host: host)
+        unsetenv("ZDOTDIR")
+        let window = makeTestWindow(size: NSSize(width: 800, height: 400))
+        window.contentView = pane.view
+        pane.view.layoutSubtreeIfNeeded()
+        defer { pane.shutDown(); window.close() }
+        #expect(await waitUntil { pane.isAtCommandLine && pane.session.promptLines == 3 })
+        pane.terminal.send(txt: "cat list\r")
+        #expect(await waitUntil { pane.lastOutputRange != nil && pane.isAtCommandLine })
+        #expect(await waitUntil { pane.terminal.visibleRowsText(0..<12).joined().contains("wildcat list") })
+
+        // As a resize would.
+        pane.sizeChanged(source: pane.terminal, newCols: 80, newRows: 24)
+        pane.updateFileLink(at: try point(of: "wildcat", in: pane), modifiers: .command)
+        let grid = try #require(TerminalGrid(terminal: pane.terminal))
+        let first = grid.cell(at: try point(of: "first.txt", in: pane))
+        #expect(pane.view.fileLink.marks.contains(pane.view.fileLink.convert(
+            grid.frame(row: first.row, columns: first.column..<(first.column + 9)), from: nil)))
+    }
+
+    private func modifiersChanged(to flags: NSEvent.ModifierFlags, in window: NSWindow) -> NSEvent {
+        NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: flags,
+                         timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                         characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 55)!
+    }
+
+    /// The line comes with ⌘ going down, without the pointer moving, and goes with ⌘ coming up,
+    /// wherever that happens.
+    @Test func theLineLastsAsLongAsCommandIsDown() async throws {
+        let env = try TestEnvironment(shell: "/bin/zsh", integration: true)
+        defer { env.tearDown() }
+        let project = env.directory.appendingPathComponent("project")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        try "".write(to: project.appendingPathComponent("pressed.txt"), atomically: true, encoding: .utf8)
+        let host = FakeHost()
+        let (pane, window) = try zshPane(env, host: host, directory: project.path)
+        let other = makeTestWindow()
+        defer { pane.shutDown(); window.close(); other.close() }
+        #expect(await waitUntil { pane.isAtCommandLine })
+        pane.terminal.send(txt: "ls; echo done-listing\r")
+        #expect(await waitUntil { pane.lastOutputRange != nil && pane.isAtCommandLine })
+        #expect(await waitUntil { pane.terminal.visibleRowsText(0..<10).joined().contains("done-listing") })
+        let name = try point(of: "pressed.txt", in: pane)
+        pane.pointerLocation = { name }
+        let link = pane.view.fileLink
+
+        NSApp.sendEvent(modifiersChanged(to: .command, in: window))
+        #expect(!link.frames.isEmpty)
+        NSApp.sendEvent(modifiersChanged(to: [], in: window))
+        #expect(link.frames.isEmpty)
+
+        // Let go in another window.
+        NSApp.sendEvent(modifiersChanged(to: .command, in: window))
+        #expect(!link.frames.isEmpty)
+        NSApp.sendEvent(modifiersChanged(to: [], in: other))
+        #expect(link.frames.isEmpty)
+
+        // Let go in another app, after Codec stopped being the active one.
+        NSApp.sendEvent(modifiersChanged(to: .command, in: window))
+        #expect(!link.frames.isEmpty)
+        NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: NSApp)
+        #expect(link.frames.isEmpty)
+    }
+}
+
 /// The branch in the prompt opens the branch picker.
 @Suite("Branch in the prompt", .serialized, .timeLimit(.minutes(1)),
        .enabled(if: FileManager.default.isExecutableFile(atPath: "/bin/zsh")))

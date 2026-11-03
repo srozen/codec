@@ -80,6 +80,23 @@ struct RestoreTests {
         })
     }
 
+    @Test func keepsSavingWhileWindowsKeepChanging() async throws {
+        let env = try TestEnvironment()
+        defer { env.tearDown() }
+        let app = AppDelegate(environment: env.environment)
+        defer { close(app.windows) }
+        app.newWindow(nil)
+        let window = try #require(app.windows.first)
+        // A change every 0.2 s, as a running command's progress makes: a save still lands a moment later.
+        var saved = false
+        for step in 0..<15 where !saved {
+            window.model.selected?.rename(to: "step \(step)")
+            try await Task.sleep(for: .milliseconds(200))
+            saved = SavedWorkspace.load(from: env.preferences.stateDefaults)?.windows.first?.tabs.first?.title?.hasPrefix("step") == true
+        }
+        #expect(saved)
+    }
+
     @Test func theAppSavesOnQuitAndReopensAtLaunch() throws {
         let env = try TestEnvironment()
         defer { env.tearDown() }

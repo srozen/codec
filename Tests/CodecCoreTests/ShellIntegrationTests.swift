@@ -151,9 +151,20 @@ private final class ZshHarness: @unchecked Sendable {
 
     /// Runs a command and waits for the integration to report it finished.
     func run(_ command: String) async -> Bool {
+        guard await waitForPrompt() else { return false }
         let finished = payloads(6973).filter { $0.hasPrefix("done;") }.count
         send(command + "\r")
         return await wait { payloads(6973).filter { $0.hasPrefix("done;") }.count > finished }
+    }
+
+    /// Waits until zsh is reading a command line: it has drawn a prompt (whose 133;B mark comes once
+    /// its line editor has the terminal) after every command it ran. Typed sooner, keys go through the
+    /// terminal's line mode, where DEL erases the byte before it, which can leave an escape sequence
+    /// unfinished and the Return after it swallowed.
+    func waitForPrompt() async -> Bool {
+        await wait {
+            payloads(133).filter { $0 == "B" }.count > payloads(6973).filter { $0.hasPrefix("exec;") }.count
+        }
     }
 
     /// OSC payloads with this code, in arrival order.
@@ -489,12 +500,13 @@ struct CommandLineEditingTests {
 
     private func shell(rc: String = "") async throws -> ZshHarness {
         let zsh = try ZshHarness(homeFiles: [".zshrc": rc])
-        #expect(await zsh.wait { zsh.payloads(133).contains { $0.hasPrefix("A") } })
+        #expect(await zsh.waitForPrompt())
         return zsh
     }
 
     /// Types `text`, applies `keys`, presses Return, and gives back the command zsh ran.
     private func run(_ zsh: ZshHarness, typing text: String, then keys: [UInt8]) async -> String? {
+        guard await zsh.waitForPrompt() else { return nil }
         let before = zsh.payloads(6973).count
         zsh.send(text)
         zsh.sendBytes(keys)
@@ -618,7 +630,7 @@ struct HistoryAndCompletionTests {
     /// have) wraps what's typed onto the next line.
     private func shell(rc: String = "", environment: [String: String] = features, directory: String? = nil) async throws -> ZshHarness {
         let zsh = try ZshHarness(homeFiles: [".zshrc": "PS1='%# '\n" + rc], directory: directory, environment: environment)
-        #expect(await zsh.wait { zsh.payloads(133).contains { $0.hasPrefix("A") } })
+        #expect(await zsh.waitForPrompt())
         return zsh
     }
 

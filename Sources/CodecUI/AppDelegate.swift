@@ -161,10 +161,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         open(makeWindow(restoring: SavedWindow(frame: nil, tabs: [closed.tab], selectedTab: 0), contents: { closed.contents[$0] }))
     }
 
-    /// Saves the windows a moment after they change, once for a burst of changes.
+    /// Saves the windows a moment after they change, once for a burst of changes. Changes while a save
+    /// is pending don't put it off: they're in what it saves, and windows that never stop changing (a
+    /// pane's command updating its progress) would otherwise never be saved.
     private func scheduleSave() {
-        guard !terminating else { return }
-        pendingSave?.cancel()
+        guard !terminating, pendingSave == nil else { return }
         let save = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.saveWindows() } }
         pendingSave = save
         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: save)

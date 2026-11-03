@@ -101,6 +101,20 @@ struct GitRepositoryTests {
         await #expect(throws: GitError.self) { try await repository.createBranch("has space") }
     }
 
+    /// The file tree reads the status whenever the repository changes, which is when another app is
+    /// likely committing or staging: it must never hold the index's lock against that app.
+    @Test func readsTheStatusWithoutRewritingTheIndex() async throws {
+        let temp = try TemporaryDirectory()
+        let clone = try makeClone(in: temp)
+        // The same contents with another date: git would refresh the index to record it.
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -3600)],
+                                              ofItemAtPath: clone.appendingPathComponent("file.txt").path)
+        let index = clone.appendingPathComponent(".git/index")
+        let before = try Data(contentsOf: index)
+        #expect(try await GitRepository(directory: clone).status().isEmpty)
+        #expect(try Data(contentsOf: index) == before)
+    }
+
     @Test func failsCleanlyOutsideARepository() async throws {
         let temp = try TemporaryDirectory()
         let repository = GitRepository(directory: try temp.directory("plain"))

@@ -220,7 +220,8 @@ public struct CommandTimeline: Codable, Equatable, Sendable {
         for index in copy.entries.indices {
             guard let block = copy.entries[index].block else { continue }
             copy.entries[index].block = block.prompt >= firstRow
-                ? CommandBlocks.Block(prompt: block.prompt - firstRow, output: block.output - firstRow) : nil
+                ? CommandBlocks.Block(prompt: block.prompt - firstRow, output: block.output - firstRow,
+                                      commandLine: block.commandLine) : nil
         }
         return copy
     }

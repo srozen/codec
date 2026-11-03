@@ -113,6 +113,37 @@ struct ZshSelectionTests {
         #expect(selected.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) } == ["one", "two", "three"])
     }
 
+    /// Regression: after a rewrap, a command was found again on the newest line ending with it, and
+    /// `ls` printing `Tools` ends with it. Its output then started below that line, at the next prompt.
+    @Test(arguments: ["%# ", "top\n\n%# "])
+    func copiesTheSameOutputAfterBlocksMove(prompt: String) async throws {
+        let env = try TestEnvironment(shell: "/bin/zsh", integration: true)
+        defer { env.tearDown() }
+        let project = env.directory.appendingPathComponent("project")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        for name in ["Pictures", "Tools"] {
+            try "".write(to: project.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+        let (pane, window) = try zshPane(env, prompt: prompt, directory: project.path)
+        defer { pane.shutDown(); window.close() }
+        let promptLines = prompt.split(separator: "\n", omittingEmptySubsequences: false).count
+        #expect(await waitUntil { pane.isAtCommandLine && pane.session.promptLines == promptLines })
+        pane.terminal.send(txt: "ls\r")
+        #expect(await waitUntil { pane.lastOutputRange != nil && pane.isAtCommandLine })
+        let output = try #require(pane.lastOutputRange.flatMap(pane.text(of:)))
+        #expect(output.hasPrefix("Pictures") && output.hasSuffix("Tools"))
+
+        // As a resize would.
+        pane.sizeChanged(source: pane.terminal, newCols: 80, newRows: 24)
+        let range = try #require(pane.lastOutputRange)
+        #expect(pane.text(of: range) == output)
+        let pasteboard = NSPasteboard.general
+        let saved = pasteboard.string(forType: .string)
+        defer { pasteboard.clearContents(); if let saved { pasteboard.setString(saved, forType: .string) } }
+        pane.copyOutput(range)
+        #expect(pasteboard.string(forType: .string) == output)
+    }
+
     /// Dragging on the command line selects through zsh only: no second, terminal highlight.
     @Test func draggingOnTheCommandLineSelectsInTheShell() async throws {
         let env = try TestEnvironment(shell: "/bin/zsh", integration: true)

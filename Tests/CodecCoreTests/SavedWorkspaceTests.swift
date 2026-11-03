@@ -72,12 +72,12 @@ struct SavedWorkspaceTests {
         var timeline = CommandTimeline()
         timeline.begin(command: "old", directory: "/", started: Date(timeIntervalSince1970: 0), block: .init(prompt: 2, output: 3))
         timeline.finish(exitCode: 0, duration: 1, output: CapturedOutput(lines: ["gone"]))
-        timeline.begin(command: "make", directory: "/", started: Date(timeIntervalSince1970: 10), block: .init(prompt: 50, output: 51))
+        timeline.begin(command: "make", directory: "/", started: Date(timeIntervalSince1970: 10), block: .init(prompt: 50, output: 51, commandLine: "% make"))
         timeline.finish(exitCode: 2, duration: 3, output: CapturedOutput(lines: ["error"]))
         timeline.begin(command: "npm run dev", directory: "/", started: Date(timeIntervalSince1970: 20), block: .init(prompt: 60, output: 61))
 
         let rebased = timeline.rebased(firstRow: 40)
-        #expect(rebased.entries.map(\.block) == [nil, .init(prompt: 10, output: 11), .init(prompt: 20, output: 21)])
+        #expect(rebased.entries.map(\.block) == [nil, .init(prompt: 10, output: 11, commandLine: "% make"), .init(prompt: 20, output: 21)])
         // What was running didn't report back.
         #expect(rebased.entries.last?.exitCode == -1)
         #expect(rebased.entries[1].output?.text == "error")

@@ -45,6 +45,9 @@ final class Pane: LocalProcessTerminalViewDelegate {
     private var promptRefresh: AnyCancellable?
     private(set) var isShutDown = false
     private var fileLinkMonitor: Any?
+    private var fileLinkObservers: [NSObjectProtocol] = []
+    /// Where the pointer is, in window coordinates; tests put it where they like.
+    lazy var pointerLocation: () -> NSPoint? = { [weak self] in self?.terminal.window?.mouseLocationOutsideOfEventStream }
 
     /// A pane with a shell in `directory`, showing first what it showed last time when there's `contents`.
     init(directory: String?, environment: AppEnvironment, restoring contents: SavedPaneContents? = nil) {
@@ -81,13 +84,29 @@ final class Pane: LocalProcessTerminalViewDelegate {
         terminal.addSubview(branchHotspot)
         terminal.onDropFiles = { [weak self] urls in self?.insertPaths(urls) }
         // SwiftTerm doesn't let a subclass see ⌘ go down or the pointer move; a monitor can. While ⌘
-        // is held, SwiftTerm has the window report every move.
+        // is held, SwiftTerm has the window report every move. Letting go of ⌘ counts in any window, so
+        // the line never outlasts it.
         fileLinkMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .mouseMoved]) { [weak self] event in
             MainActor.assumeIsolated {
-                guard let self, let window = self.terminal.window, event.window === window else { return }
-                self.updateFileLink(at: window.mouseLocationOutsideOfEventStream, modifiers: event.modifierFlags)
+                guard let self, event.window === self.terminal.window || !event.modifierFlags.contains(.command) else { return }
+                self.refreshFileLink(modifiers: event.modifierFlags)
             }
             return event
+        }
+        // ⌘ can be let go where Codec doesn't hear it: in Finder after ⌘-clicking a folder, or after ⌘⇥.
+        fileLinkObservers = [NSApplication.didResignActiveNotification, NSWindow.didResignKeyNotification].map { name in
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                let sender = (note.object as AnyObject?).map(ObjectIdentifier.init)
+                MainActor.assumeIsolated {
+                    guard let self, name == NSApplication.didResignActiveNotification
+                        || sender == self.terminal.window.map(ObjectIdentifier.init) else { return }
+                    self.hideFileLink(pointer: nil)
+                }
+            }
+        }
+        view.onScroll = { [weak self] in
+            guard let self, !self.view.fileLink.frames.isEmpty || NSEvent.modifierFlags.contains(.command) else { return }
+            self.refreshFileLink(modifiers: NSEvent.modifierFlags)
         }
         terminal.onRelease = { [weak self] clicks, dragged, point in
             self?.terminalGestureEnded(clicks: clicks, dragged: dragged, at: point)
@@ -251,6 +270,8 @@ final class Pane: LocalProcessTerminalViewDelegate {
         branchPopover?.close()
         if let fileLinkMonitor { NSEvent.removeMonitor(fileLinkMonitor) }
         fileLinkMonitor = nil
+        fileLinkObservers.forEach(NotificationCenter.default.removeObserver)
+        fileLinkObservers = []
         if terminal.process.running { terminal.terminate() }
         environment.notifier.clear(id: session.id.uuidString)
     }
@@ -563,6 +584,12 @@ final class Pane: LocalProcessTerminalViewDelegate {
     /// doesn't ask the disk again.
     private var fileLinkToken: (text: String, row: Int, visibleRow: Int, column: Int, isFile: Bool)?
 
+    /// Underlines the name under the pointer if ⌘ is down and it's a file, or takes the line away.
+    func refreshFileLink(modifiers: NSEvent.ModifierFlags) {
+        guard let point = pointerLocation() else { return hideFileLink(pointer: nil) }
+        updateFileLink(at: point, modifiers: modifiers)
+    }
+
     /// While ⌘ is held over a name a ⌘-click would open, underlines it and shows the pointing hand.
     func updateFileLink(at point: NSPoint, modifiers: NSEvent.ModifierFlags) {
         guard !isShutDown, modifiers.intersection([.shift, .option, .command, .control]) == .command,
@@ -590,11 +617,11 @@ final class Pane: LocalProcessTerminalViewDelegate {
         NSCursor.pointingHand.set()
     }
 
-    private func hideFileLink(pointer point: NSPoint) {
+    private func hideFileLink(pointer point: NSPoint?) {
         guard !view.fileLink.frames.isEmpty else { return }
         view.fileLink.show([])
         fileLinkToken = nil
-        if terminal.bounds.contains(terminal.convert(point, from: nil)) { NSCursor.iBeam.set() }
+        if let point, terminal.bounds.contains(terminal.convert(point, from: nil)) { NSCursor.iBeam.set() }
     }
 
     /// The command, running or finished, whose prompt or output holds an absolute row.

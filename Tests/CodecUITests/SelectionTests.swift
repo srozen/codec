@@ -246,6 +246,50 @@ extension OpenListedFileTests {
         pane.updateFileLink(at: name, modifiers: [])
         #expect(link.frames.isEmpty)
     }
+
+    private func modifiersChanged(to flags: NSEvent.ModifierFlags, in window: NSWindow) -> NSEvent {
+        NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: flags,
+                         timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                         characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 55)!
+    }
+
+    /// The line comes with ⌘ going down, without the pointer moving, and goes with ⌘ coming up,
+    /// wherever that happens.
+    @Test func theLineLastsAsLongAsCommandIsDown() async throws {
+        let env = try TestEnvironment(shell: "/bin/zsh", integration: true)
+        defer { env.tearDown() }
+        let project = env.directory.appendingPathComponent("project")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        try "".write(to: project.appendingPathComponent("pressed.txt"), atomically: true, encoding: .utf8)
+        let host = FakeHost()
+        let (pane, window) = try zshPane(env, host: host, directory: project.path)
+        let other = makeTestWindow()
+        defer { pane.shutDown(); window.close(); other.close() }
+        #expect(await waitUntil { pane.isAtCommandLine })
+        pane.terminal.send(txt: "ls; echo done-listing\r")
+        #expect(await waitUntil { pane.lastOutputRange != nil && pane.isAtCommandLine })
+        #expect(await waitUntil { pane.terminal.visibleRowsText(0..<10).joined().contains("done-listing") })
+        let name = try point(of: "pressed.txt", in: pane)
+        pane.pointerLocation = { name }
+        let link = pane.view.fileLink
+
+        NSApp.sendEvent(modifiersChanged(to: .command, in: window))
+        #expect(!link.frames.isEmpty)
+        NSApp.sendEvent(modifiersChanged(to: [], in: window))
+        #expect(link.frames.isEmpty)
+
+        // Let go in another window.
+        NSApp.sendEvent(modifiersChanged(to: .command, in: window))
+        #expect(!link.frames.isEmpty)
+        NSApp.sendEvent(modifiersChanged(to: [], in: other))
+        #expect(link.frames.isEmpty)
+
+        // Let go in another app, after Codec stopped being the active one.
+        NSApp.sendEvent(modifiersChanged(to: .command, in: window))
+        #expect(!link.frames.isEmpty)
+        NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: NSApp)
+        #expect(link.frames.isEmpty)
+    }
 }
 
 /// The branch in the prompt opens the branch picker.

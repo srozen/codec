@@ -21,6 +21,8 @@ final class PaneView: NSView {
     var onRestart: (() -> Void)? {
         didSet { keyCatcher.onReturn = onRestart }
     }
+    /// The terminal scrolled, by the user or as output came in.
+    var onScroll: (() -> Void)?
     var onDismiss: (() -> Void)? {
         didSet { keyCatcher.onEscape = onDismiss }
     }
@@ -39,7 +41,10 @@ final class PaneView: NSView {
         let barRoom = finder.bar.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 14)
         barRoom.priority = .defaultLow
         terminal.onFind = { [weak self] action in self?.finder.perform(action) }
-        terminal.onScroll = { [weak self] in self?.finder.refreshHighlights() }
+        terminal.onScroll = { [weak self] in
+            self?.finder.refreshHighlights()
+            self?.onScroll?()
+        }
 
         for view in [terminal, finder.highlights, fileLink, scanlines, commandMark, finder.bar, dimmer, overlay, keyCatcher] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false

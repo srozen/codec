@@ -643,13 +643,11 @@ final class Pane: LocalProcessTerminalViewDelegate {
     }
 
     /// Every name on the screen that's a file or folder, each looked for where the command that printed
-    /// it ran. The prompt's own lines are left out, all but the command line: their directory already
-    /// opens from the status bar, and a mark inside a prompt chip would muddy it.
+    /// it ran. The prompt's are marked too: telling its lines from output by command blocks went wrong
+    /// once a block was found again on its own output, and a prompt with no command has no block.
     private func openableNames(in grid: TerminalGrid) -> [OpenableName] {
         relocateBlocksIfNeeded()
         let end = newestBlockEnd
-        let promptStarts = blocks.blocks.map(\.prompt) + (session.running == nil ? end.map { [$0] } ?? [] : [])
-        let promptRows = Set(promptStarts.flatMap { $0..<($0 + max(session.promptLines - 1, 0)) })
         var known: [Int: [String]] = [:]
         func directories(forRow row: Int) -> [String] {
             let index = end.map { row < $0 } == true ? blocks.index(containing: row) : nil
@@ -665,7 +663,6 @@ final class Pane: LocalProcessTerminalViewDelegate {
         while row < grid.rows.count, names.count < 400 {
             guard let line = grid.logicalLine(containing: row) else { break }
             defer { row = max(row + 1, (line.cells.last?.row ?? row) + 1) }
-            guard !promptRows.contains(grid.viewportTop + row) else { continue }
             var index = 0
             while index < line.characters.count {
                 guard let range = SmartSelection.range(in: line.characters, at: index) else {

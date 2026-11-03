@@ -256,6 +256,41 @@ extension OpenListedFileTests {
         #expect(link.marks.isEmpty)
     }
 
+    /// Regression: the prompt's own lines were left out, found from command blocks. After a rewrap a
+    /// block is found again from the newest line ending with its command, which can be its own output
+    /// (`wildcat list` for `cat list`), so a line of output went unmarked.
+    @Test func everyNameIsMarkedAfterBlocksMove() async throws {
+        let env = try TestEnvironment(shell: "/bin/zsh", integration: true)
+        defer { env.tearDown() }
+        let project = env.directory.appendingPathComponent("project")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        try "first.txt\nwildcat list\n".write(to: project.appendingPathComponent("list"), atomically: true, encoding: .utf8)
+        try "".write(to: project.appendingPathComponent("first.txt"), atomically: true, encoding: .utf8)
+        let config = env.directory.appendingPathComponent("zdotdir")
+        try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+        try "PS1=$'top\\n\\n%# '\n".write(to: config.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8)
+        setenv("ZDOTDIR", config.path, 1)
+        let host = FakeHost()
+        let pane = env.makePane(directory: project.path, host: host)
+        unsetenv("ZDOTDIR")
+        let window = makeTestWindow(size: NSSize(width: 800, height: 400))
+        window.contentView = pane.view
+        pane.view.layoutSubtreeIfNeeded()
+        defer { pane.shutDown(); window.close() }
+        #expect(await waitUntil { pane.isAtCommandLine && pane.session.promptLines == 3 })
+        pane.terminal.send(txt: "cat list\r")
+        #expect(await waitUntil { pane.lastOutputRange != nil && pane.isAtCommandLine })
+        #expect(await waitUntil { pane.terminal.visibleRowsText(0..<12).joined().contains("wildcat list") })
+
+        // As a resize would.
+        pane.sizeChanged(source: pane.terminal, newCols: 80, newRows: 24)
+        pane.updateFileLink(at: try point(of: "wildcat", in: pane), modifiers: .command)
+        let grid = try #require(TerminalGrid(terminal: pane.terminal))
+        let first = grid.cell(at: try point(of: "first.txt", in: pane))
+        #expect(pane.view.fileLink.marks.contains(pane.view.fileLink.convert(
+            grid.frame(row: first.row, columns: first.column..<(first.column + 9)), from: nil)))
+    }
+
     private func modifiersChanged(to flags: NSEvent.ModifierFlags, in window: NSWindow) -> NSEvent {
         NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: flags,
                          timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,

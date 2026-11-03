@@ -175,4 +175,25 @@ struct MainMenuTests {
             #expect(entry.keyEquivalent == key && entry.keyEquivalentModifierMask == modifiers, "\(title)")
         }
     }
+
+    @Test func splitsTowardAnArrowWithControlCommand() throws {
+        _ = NSApplication.shared
+        let menu = MainMenu.build()
+        let shell = try #require(menu.items.first { $0.title == "Shell" }?.submenu)
+        func key(_ code: Int) -> String { String(Character(UnicodeScalar(code)!)) }
+        let expected: [(String, String, NSEvent.ModifierFlags)] = [
+            ("Split Left", key(NSLeftArrowFunctionKey), [.command, .control]),
+            ("Split Right", "d", .command),
+            ("Split Up", key(NSUpArrowFunctionKey), [.command, .control]),
+            ("Split Down", "d", [.command, .shift]),
+        ]
+        for (title, key, modifiers) in expected {
+            let entry = try #require(shell.items.first { $0.title == title && !$0.isHidden }, "\(title)")
+            #expect(entry.keyEquivalent == key && entry.keyEquivalentModifierMask == modifiers, "\(title)")
+        }
+        let hidden = shell.items.filter(\.isHidden)
+        #expect(hidden.map(\.title) == ["Split Right", "Split Down"])
+        #expect(hidden.map(\.keyEquivalent) == [key(NSRightArrowFunctionKey), key(NSDownArrowFunctionKey)])
+        #expect(hidden.allSatisfy { $0.keyEquivalentModifierMask == [.command, .control] && $0.allowsKeyEquivalentWhenHidden })
+    }
 }

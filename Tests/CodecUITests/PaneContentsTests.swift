@@ -65,6 +65,34 @@ struct PaneContentsTests {
         #expect(zip(restored, thirds).allSatisfy { abs($0 - $1) < 3 })
     }
 
+    @Test func splittingLeftOrUpKeepsTheSizes() throws {
+        let env = try TestEnvironment()
+        defer { env.tearDown() }
+        let controller = makeWindow(env)
+        defer { controller.window?.close() }
+        let tab = try #require(controller.model.selected)
+        controller.splitRight(nil)
+        var split = try rootSplit(controller)
+        split.setPosition(300, ofDividerAt: 0)
+        controller.window?.layoutIfNeeded()
+        let dragged = widths(split)
+
+        // Left of the wide pane: it gives the new one half of its width, the narrow one keeps its own.
+        let wide = tab.panes[1]
+        controller.splitLeft(nil)
+        split = try rootSplit(controller)
+        let thirds = widths(split)
+        #expect(tab.panes[1] === tab.focused && tab.panes[2] === wide)
+        #expect(thirds.count == 3 && abs(thirds[0] - dragged[0]) < 3 && abs(thirds[1] - thirds[2]) < 3)
+
+        // Above the narrow pane: the columns stay as they were.
+        tab.focus(tab.panes[0])
+        controller.splitUp(nil)
+        split = try rootSplit(controller)
+        #expect(zip(widths(split), thirds).allSatisfy { abs($0 - $1) < 3 })
+        #expect(tab.panes[0] === tab.focused)
+    }
+
     // MARK: What panes showed
 
     @Test func keepsTheScrollbackInColorAndShowsItAgain() async throws {

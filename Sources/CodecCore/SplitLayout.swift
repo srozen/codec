@@ -29,19 +29,20 @@ public indirect enum SplitLayout<Leaf: AnyObject> {
         leaves.contains { $0 === target }
     }
 
-    /// Places `new` right after `target` along `axis`, joining an existing split along the same axis
-    /// rather than nesting a new one. Returns the layout unchanged if `target` isn't in it.
-    public func splitting(_ target: Leaf, with new: Leaf, axis: SplitAxis) -> SplitLayout {
+    /// Places `new` right after `target` along `axis` (right of it or below it), or right before it
+    /// (left or above), joining an existing split along the same axis rather than nesting a new one.
+    /// Returns the layout unchanged if `target` isn't in it.
+    public func splitting(_ target: Leaf, with new: Leaf, axis: SplitAxis, before: Bool = false) -> SplitLayout {
         switch self {
         case .leaf(let leaf):
             guard leaf === target else { return self }
-            return .split(axis, [.leaf(leaf), .leaf(new)])
+            return .split(axis, before ? [.leaf(new), .leaf(leaf)] : [.leaf(leaf), .leaf(new)])
         case .split(let splitAxis, var children):
             if splitAxis == axis, let index = children.firstIndex(where: { $0.isLeaf(target) }) {
-                children.insert(.leaf(new), at: index + 1)
+                children.insert(.leaf(new), at: before ? index : index + 1)
                 return .split(splitAxis, children)
             }
-            return .split(splitAxis, children.map { $0.splitting(target, with: new, axis: axis) })
+            return .split(splitAxis, children.map { $0.splitting(target, with: new, axis: axis, before: before) })
         }
     }
 

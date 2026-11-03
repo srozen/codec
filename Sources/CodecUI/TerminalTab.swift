@@ -28,6 +28,17 @@ final class TerminalTab: ObservableObject, Identifiable {
             self.axis = axis
             anchors = node.childAnchors.map(ObjectIdentifier.init)
         }
+
+        init(axis: SplitAxis, anchors: [ObjectIdentifier]) {
+            self.axis = axis
+            self.anchors = anchors
+        }
+
+        /// The keys of a layout's splits, nested ones included.
+        static func all(in node: SplitLayout<Pane>) -> [SplitKey] {
+            guard case .split(_, let children) = node, let key = SplitKey(node) else { return [] }
+            return [key] + children.flatMap(all)
+        }
     }
 
     /// How each split shares its length between its children, as the user left it.
@@ -98,12 +109,42 @@ final class TerminalTab: ObservableObject, Identifiable {
         focused = pane
     }
 
-    /// Splits `pane`, placing `new` after it, and focuses `new`.
-    func split(_ pane: Pane, with new: Pane, axis: SplitAxis) {
+    /// Splits `pane`, placing `new` after it (or before it), and focuses `new`.
+    func split(_ pane: Pane, with new: Pane, axis: SplitAxis, before: Bool = false) {
         guard layout.contains(pane) else { return }
         observe(new)
-        layout = layout.splitting(pane, with: new, axis: axis)
+        let split = layout.splitting(pane, with: new, axis: axis, before: before)
+        // Before the views are laid out for the new layout, which reads the sizes.
+        if before { moveShares(from: pane, to: new, in: split) }
+        layout = split
         focused = new
+    }
+
+    /// Splits' sizes are keyed by the first pane of each child, and a pane split before takes that place
+    /// from `pane`: the sizes of the splits around it carry over to `new`, and in a split `new` joined,
+    /// it takes half of `pane`'s share, as a pane split after does.
+    private func moveShares(from pane: Pane, to new: Pane, in split: SplitLayout<Pane>) {
+        let old = ObjectIdentifier(pane), added = ObjectIdentifier(new)
+        let keys = Set(SplitKey.all(in: split))
+        for (key, value) in shares {
+            guard let index = key.anchors.firstIndex(of: old) else { continue }
+            var anchors = key.anchors
+            anchors[index] = added
+            let replaced = SplitKey(axis: key.axis, anchors: anchors)
+            anchors.insert(old, at: index + 1)
+            let joined = SplitKey(axis: key.axis, anchors: anchors)
+            if keys.contains(replaced) {
+                shares[replaced] = value
+            } else if keys.contains(joined), value.indices.contains(index) {
+                var halved = value
+                halved[index] /= 2
+                halved.insert(halved[index], at: index)
+                shares[joined] = halved
+            } else {
+                continue
+            }
+            shares[key] = nil
+        }
     }
 
     /// Removes `pane`. Returns true when the tab has no panes left.

@@ -12,7 +12,7 @@ Middle-click a tab to close it.
 
 ## Splits
 
-Split any pane right (⌘D) or down (⇧⌘D); the new pane opens in the same directory. Splits nest as deep as you like.
+Split any pane right (⌘D) or down (⇧⌘D), left (⌃⌘←) or up (⌃⌘↑); ⌃⌘→ and ⌃⌘↓ split right and down too. The new pane opens in the same directory. Splits nest as deep as you like.
 
 - ⌘] / ⌘[ go to the next or previous pane, ⌥⌘ with an arrow to the pane in that direction.
 - Inactive panes dim, so you always know which one has the keyboard (Settings › Appearance › Dim inactive split panes).
@@ -53,7 +53,7 @@ A clean `exit` closes the pane. If the shell crashes or is killed, the pane stay
 
 ## Right-click menu
 
-Right-click in a pane for Copy, Copy Output, Select Output, Paste, Select All, Split Right / Down, Find, Clear Buffer, Restart Shell, Open in Finder, Copy Path, Switch Branch…, Close Pane. Programs that use the mouse (vim, htop, tmux) still get their right-clicks.
+Right-click in a pane for Copy, Copy Output, Select Output, Paste, Select All, Split Left / Right / Up / Down, Find, Clear Buffer, Restart Shell, Open in Finder, Copy Path, Switch Branch…, Close Pane. Programs that use the mouse (vim, htop, tmux) still get their right-clicks.
 
 ## The command palette
 

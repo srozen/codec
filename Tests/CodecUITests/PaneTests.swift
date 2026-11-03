@@ -229,7 +229,8 @@ struct PaneContextMenuTests {
         let pane = env.makePane(host: FakeHost())
         defer { pane.shutDown() }
         #expect(pane.contextMenu().itemTitles == [
-            "Cut", "Copy", "Paste", "Select All", "Copy Output", "Select Output", "Split Right", "Split Down", "Find…", "Clear Buffer",
+            "Cut", "Copy", "Paste", "Select All", "Copy Output", "Select Output", "Split Left", "Split Right", "Split Up", "Split Down",
+            "Find…", "Clear Buffer",
             "Restart Shell", "Open in Finder", "Copy Path", "Switch Branch…", "Close Pane",
         ])
     }
@@ -249,10 +250,10 @@ struct PaneContextMenuTests {
         let pane = env.makePane(host: host)
         defer { pane.shutDown() }
         let menu = pane.contextMenu()
-        menu.perform("Split Right")
-        menu.perform("Split Down")
+        for title in ["Split Left", "Split Right", "Split Up", "Split Down"] { menu.perform(title) }
         menu.perform("Close Pane")
-        #expect(host.splits == [.horizontal, .vertical])
+        #expect(host.splits.map(\.axis) == [.horizontal, .horizontal, .vertical, .vertical])
+        #expect(host.splits.map(\.before) == [true, false, true, false])
         #expect(host.closeRequests == 1)
     }
 

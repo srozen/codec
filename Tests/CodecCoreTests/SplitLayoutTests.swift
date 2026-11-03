@@ -51,6 +51,18 @@ struct SplitLayoutTests {
         #expect(shape(layout) == "h(a,v(b,c))")
     }
 
+    @Test func splittingBeforePlacesTheNewLeafFirst() {
+        #expect(shape(SplitLayout.leaf(a).splitting(a, with: b, axis: .horizontal, before: true)) == "h(b,a)")
+        let joined = SplitLayout.leaf(a)
+            .splitting(a, with: b, axis: .horizontal)
+            .splitting(b, with: c, axis: .horizontal, before: true)
+        #expect(shape(joined) == "h(a,c,b)")
+        let nested = SplitLayout.leaf(a)
+            .splitting(a, with: b, axis: .horizontal)
+            .splitting(b, with: c, axis: .vertical, before: true)
+        #expect(shape(nested) == "h(a,v(c,b))")
+    }
+
     @Test func splittingAMissingLeafChangesNothing() {
         let layout = SplitLayout.leaf(a).splitting(b, with: c, axis: .vertical)
         #expect(shape(layout) == "a")

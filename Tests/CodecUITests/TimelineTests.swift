@@ -57,6 +57,23 @@ struct TimelineTests {
         #expect(!entries[1].directory.hasSuffix("/sub"))
     }
 
+    /// Typed ahead (a paste, a script), the next command can be on screen before the prompt's mark
+    /// reaches the main thread; what the command before printed still stops at the prompt after it.
+    @Test func keepsOutputApartFromACommandTypedAhead() async throws {
+        let env = try TestEnvironment(shell: "/bin/zsh", integration: true)
+        defer { env.tearDown() }
+        let (pane, window) = try zshPane(env)
+        defer { pane.shutDown(); window.close() }
+        #expect(await waitUntil { pane.isAtCommandLine })
+        pane.terminal.send(txt: "printf 'one\\ntwo\\n'\rseq 1 3\r")
+        // Holds the main thread while zsh runs both, so the marks are handled after the screen moved on.
+        usleep(1_500_000)
+        #expect(await waitUntil { pane.timeline.entries.count == 2 && pane.timeline.entries.last?.output != nil })
+        #expect(pane.timeline.entries.map(\.command) == ["printf 'one\\ntwo\\n'", "seq 1 3"])
+        #expect(pane.timeline.entries.first?.output?.text == "one\ntwo")
+        #expect(pane.timeline.entries.last?.output?.text == "1\n2\n3")
+    }
+
     /// The first command has scrolled off screen; going back to it scrolls up and marks it.
     @Test func goesBackToACommandInTheScrollback() async throws {
         let env = try TestEnvironment(shell: "/bin/zsh", integration: true)

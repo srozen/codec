@@ -84,12 +84,15 @@ final class Pane: LocalProcessTerminalViewDelegate {
             let payload = String(decoding: event.payload, as: UTF8.self)
             switch event.code {
             case 133 where payload == "B":
-                // The prompt ends here; what follows on this row is the command line.
+                // The prompt ends here; what follows on this row is the command line. The screen is
+                // captured now: by the time the main thread looks, a command typed ahead may be on it.
                 let column = event.cursor.col
+                let screen = terminalOnAnyQueue.terminalContentSnapshot(region: .history(maximumScrollbackRows: 0))
+                    .map(Pane.screenRows)
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
                         self?.promptEndColumn = column
-                        self?.promptWasDrawn()
+                        self?.promptWasDrawn(on: screen)
                     }
                 }
             case 133 where payload == "C":
@@ -601,11 +604,12 @@ final class Pane: LocalProcessTerminalViewDelegate {
     private var outputToCapture: Int?
 
     /// The prompt is drawn (zsh just printed its 133;B mark), so the finished command's output can be
-    /// told from it.
-    private func promptWasDrawn() {
+    /// told from it: it ends where this prompt starts on `screen`, the screen as the prompt was drawn.
+    private func promptWasDrawn(on screen: (rows: [ScreenRow], cursorRow: Int)?) {
         guard outputToCapture != nil else { return }
         relocateBlocksIfNeeded()
-        guard let end = newestBlockEnd else { return }
+        let end = screen.map { CommandBlocks.promptStart(cursorRow: $0.cursorRow, in: $0.rows, promptLines: session.promptLines) }
+        guard let end = end ?? newestBlockEnd else { return }
         captureFinishedOutput(end: end)
     }
 

@@ -84,11 +84,15 @@ final class Pane: LocalProcessTerminalViewDelegate {
             let payload = String(decoding: event.payload, as: UTF8.self)
             switch event.code {
             case 133 where payload == "B":
-                // The prompt ends here; what follows on this row is the command line. The screen is
-                // captured now: by the time the main thread looks, a command typed ahead may be on it.
+                // The prompt ends here; what follows on this row is the command line. Events arrive after
+                // the parser has moved on, and a command typed ahead may be on screen already: the screen
+                // only says where this prompt is if the cursor is still where the mark left it.
                 let column = event.cursor.col
                 let screen = terminalOnAnyQueue.terminalContentSnapshot(region: .history(maximumScrollbackRows: 0))
-                    .map(Pane.screenRows)
+                    .flatMap { snapshot in
+                        snapshot.cursorRow == snapshot.liveTopRow + event.cursor.row && snapshot.cursorColumn == column
+                            ? Pane.screenRows(snapshot) : nil
+                    }
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
                         self?.promptEndColumn = column
@@ -605,12 +609,13 @@ final class Pane: LocalProcessTerminalViewDelegate {
 
     /// The prompt is drawn (zsh just printed its 133;B mark), so the finished command's output can be
     /// told from it: it ends where this prompt starts on `screen`, the screen as the prompt was drawn.
+    /// Without one (something was typed ahead), it's kept once the next command starts, from where
+    /// that command's prompt is found.
     private func promptWasDrawn(on screen: (rows: [ScreenRow], cursorRow: Int)?) {
-        guard outputToCapture != nil else { return }
+        guard outputToCapture != nil, let screen else { return }
         relocateBlocksIfNeeded()
-        let end = screen.map { CommandBlocks.promptStart(cursorRow: $0.cursorRow, in: $0.rows, promptLines: session.promptLines) }
-        guard let end = end ?? newestBlockEnd else { return }
-        captureFinishedOutput(end: end)
+        captureFinishedOutput(end: CommandBlocks.promptStart(cursorRow: screen.cursorRow, in: screen.rows,
+                                                            promptLines: session.promptLines))
     }
 
     /// Keeps what the command that just finished printed, up to `end`: the first row of the prompt after it.

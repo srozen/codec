@@ -19,6 +19,19 @@ struct TerminalTabTests {
         #expect(tab.focused === third)
     }
 
+    @Test func splitsLeftAndUpPutTheNewPaneFirst() throws {
+        let env = try TestEnvironment()
+        defer { env.tearDown() }
+        let first = env.makePane(), second = env.makePane(), third = env.makePane()
+        defer { [first, second, third].forEach { $0.shutDown() } }
+        let tab = TerminalTab(pane: first)
+        tab.split(first, with: second, axis: .horizontal, before: true)
+        #expect(tab.focused === second)
+        tab.split(first, with: third, axis: .vertical, before: true)
+        #expect(tab.focused === third)
+        #expect(tab.panes.map(\.session.id) == [second, third, first].map(\.session.id))
+    }
+
     @Test func removingFocusesTheNeighbor() throws {
         let env = try TestEnvironment()
         defer { env.tearDown() }

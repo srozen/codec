@@ -65,8 +65,18 @@ enum MainMenu {
         menu.addItem(item("New Tab", #selector(AppDelegate.newTab(_:)), "t"))
         menu.addItem(item("Reopen Closed Tab", #selector(AppDelegate.reopenClosedTab(_:)), "t", [.command, .shift]))
         menu.addItem(.separator())
+        // ⌃⌘ and an arrow splits toward it; right and down also have ⌘D and ⇧⌘D, shown instead.
+        menu.addItem(item("Split Left", #selector(W.splitLeft(_:)), arrow(NSLeftArrowFunctionKey), [.command, .control]))
         menu.addItem(item("Split Right", #selector(W.splitRight(_:)), "d"))
+        menu.addItem(item("Split Up", #selector(W.splitUp(_:)), arrow(NSUpArrowFunctionKey), [.command, .control]))
         menu.addItem(item("Split Down", #selector(W.splitDown(_:)), "d", [.command, .shift]))
+        for (title, action, key) in [("Split Right", #selector(W.splitRight(_:)), NSRightArrowFunctionKey),
+                                     ("Split Down", #selector(W.splitDown(_:)), NSDownArrowFunctionKey)] {
+            let alternate = item(title, action, arrow(key), [.command, .control])
+            alternate.isHidden = true
+            alternate.allowsKeyEquivalentWhenHidden = true
+            menu.addItem(alternate)
+        }
         menu.addItem(.separator())
         menu.addItem(item("Close Pane", #selector(W.closePane(_:)), "w"))
         menu.addItem(item("Close Window", #selector(NSWindow.performClose(_:)), "w", [.command, .shift]))

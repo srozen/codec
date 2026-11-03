@@ -7,6 +7,7 @@
 | ⌘T / ⌘N | New tab / new window |
 | ⇧⌘T | Reopen the tab closed last |
 | ⌘D / ⇧⌘D | Split right / split down |
+| ⌃⌘←→↑↓ | Split toward the arrow: left, right, up, down |
 | ⌘W / ⇧⌘W | Close pane / close window |
 | ⌘] / ⌘[ | Next / previous pane |
 | ⌥⌘←→↑↓ | Focus the pane in that direction |

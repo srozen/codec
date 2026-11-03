@@ -9,7 +9,8 @@ import CodecCore
 protocol PaneHost: AnyObject {
     /// Whether the user is looking at this pane: app active, window key, tab selected, pane focused.
     func isInFront(_ pane: Pane) -> Bool
-    func split(_ pane: Pane, axis: SplitAxis)
+    /// Splits `pane` along `axis`, the new pane after it (right or below) or before it (left or above).
+    func split(_ pane: Pane, axis: SplitAxis, before: Bool)
     /// The user asked to close the pane; the host may confirm first.
     func requestClose(_ pane: Pane)
     /// The pane's shell is gone and the pane should be removed now.
@@ -946,13 +947,23 @@ final class Pane: LocalProcessTerminalViewDelegate {
             })
         }
         menu.addItem(.separator())
-        menu.addItem(ClosureMenuItem("Split Right", key: "d", image: "rectangle.split.2x1") { [weak self] in
+        menu.addItem(ClosureMenuItem("Split Left", key: String(Character(UnicodeScalar(NSLeftArrowFunctionKey)!)),
+                                     modifiers: [.command, .control], image: "rectangle.lefthalf.inset.filled") { [weak self] in
             guard let self else { return }
-            self.host?.split(self, axis: .horizontal)
+            self.host?.split(self, axis: .horizontal, before: true)
         })
-        menu.addItem(ClosureMenuItem("Split Down", key: "d", modifiers: [.command, .shift], image: "rectangle.split.1x2") { [weak self] in
+        menu.addItem(ClosureMenuItem("Split Right", key: "d", image: "rectangle.righthalf.inset.filled") { [weak self] in
             guard let self else { return }
-            self.host?.split(self, axis: .vertical)
+            self.host?.split(self, axis: .horizontal, before: false)
+        })
+        menu.addItem(ClosureMenuItem("Split Up", key: String(Character(UnicodeScalar(NSUpArrowFunctionKey)!)),
+                                     modifiers: [.command, .control], image: "rectangle.tophalf.inset.filled") { [weak self] in
+            guard let self else { return }
+            self.host?.split(self, axis: .vertical, before: true)
+        })
+        menu.addItem(ClosureMenuItem("Split Down", key: "d", modifiers: [.command, .shift], image: "rectangle.bottomhalf.inset.filled") { [weak self] in
+            guard let self else { return }
+            self.host?.split(self, axis: .vertical, before: false)
         })
         menu.addItem(.separator())
         menu.addItem(ClosureMenuItem("Find…", key: "f", image: "magnifyingglass") { [weak self] in

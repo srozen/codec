@@ -29,11 +29,11 @@ final class FakeCoordinator: AppCoordinating {
 @MainActor
 final class FakeHost: PaneHost {
     var inFront = false
-    private(set) var splits: [SplitAxis] = []
+    private(set) var splits: [(axis: SplitAxis, before: Bool)] = []
     private(set) var closeRequests = 0
     private(set) var finished = 0
     func isInFront(_ pane: Pane) -> Bool { inFront }
-    func split(_ pane: Pane, axis: SplitAxis) { splits.append(axis) }
+    func split(_ pane: Pane, axis: SplitAxis, before: Bool) { splits.append((axis, before)) }
     func requestClose(_ pane: Pane) { closeRequests += 1 }
     func paneDidFinish(_ pane: Pane) { finished += 1 }
     private(set) var historyRequests: [(IntegrationEvent.HistoryRequest, String)] = []

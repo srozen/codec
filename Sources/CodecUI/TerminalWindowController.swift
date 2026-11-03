@@ -892,9 +892,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         NSApp.isActive && window?.isKeyWindow == true && model.selected?.focused === pane
     }
 
-    func split(_ pane: Pane, axis: SplitAxis) {
+    func split(_ pane: Pane, axis: SplitAxis, before: Bool) {
         guard let tab = model.tabs.first(where: { $0.layout.contains(pane) }) else { return }
-        tab.split(pane, with: makePane(directory: pane.session.directory), axis: axis)
+        tab.split(pane, with: makePane(directory: pane.session.directory), axis: axis, before: before)
     }
 
     func requestClose(_ pane: Pane) {
@@ -1118,11 +1118,19 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     }
 
     @objc func splitRight(_ sender: Any?) {
-        if let pane = focusedPane { split(pane, axis: .horizontal) }
+        if let pane = focusedPane { split(pane, axis: .horizontal, before: false) }
     }
 
     @objc func splitDown(_ sender: Any?) {
-        if let pane = focusedPane { split(pane, axis: .vertical) }
+        if let pane = focusedPane { split(pane, axis: .vertical, before: false) }
+    }
+
+    @objc func splitLeft(_ sender: Any?) {
+        if let pane = focusedPane { split(pane, axis: .horizontal, before: true) }
+    }
+
+    @objc func splitUp(_ sender: Any?) {
+        if let pane = focusedPane { split(pane, axis: .vertical, before: true) }
     }
 
     @objc func closePane(_ sender: Any?) {
@@ -1245,8 +1253,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
             .init(id: "new-window", title: "New Window", shortcut: "⌘N", systemImage: "macwindow.badge.plus") { [weak self] in
                 self?.environment.coordinator?.newWindow()
             },
-            .init(id: "split-right", title: "Split Pane Right", shortcut: "⌘D", systemImage: "rectangle.split.2x1") { [weak self] in self?.splitRight(nil) },
-            .init(id: "split-down", title: "Split Pane Down", shortcut: "⇧⌘D", systemImage: "rectangle.split.1x2") { [weak self] in self?.splitDown(nil) },
+            .init(id: "split-right", title: "Split Pane Right", shortcut: "⌘D", systemImage: "rectangle.righthalf.inset.filled") { [weak self] in self?.splitRight(nil) },
+            .init(id: "split-down", title: "Split Pane Down", shortcut: "⇧⌘D", systemImage: "rectangle.bottomhalf.inset.filled") { [weak self] in self?.splitDown(nil) },
+            .init(id: "split-left", title: "Split Pane Left", shortcut: "⌃⌘←", systemImage: "rectangle.lefthalf.inset.filled") { [weak self] in self?.splitLeft(nil) },
+            .init(id: "split-up", title: "Split Pane Up", shortcut: "⌃⌘↑", systemImage: "rectangle.tophalf.inset.filled") { [weak self] in self?.splitUp(nil) },
             .init(id: "close-pane", title: "Close Pane", shortcut: "⌘W", systemImage: "xmark.square") { [weak self] in self?.closePane(nil) },
             .init(id: "next-pane", title: "Focus Next Pane", shortcut: "⌘]", systemImage: "arrow.right.square") { [weak self] in self?.nextPane(nil) },
             .init(id: "previous-pane", title: "Focus Previous Pane", shortcut: "⌘[", systemImage: "arrow.left.square") { [weak self] in self?.previousPane(nil) },

@@ -28,6 +28,7 @@
 | ⌘E | Find the selected text |
 | ⌘+ / ⌘− / ⌘0 | Font size |
 | ⇧⌘B | Switch branch |
+| ⌘-click | Open a file or folder named in the output (`ls`, `git status`, `file.swift:42:7`), or a link |
 
 ## Command line (zsh)
 

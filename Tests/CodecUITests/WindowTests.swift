@@ -206,6 +206,56 @@ struct WindowTests {
         #expect(controller.model.tabs.count == 1)
     }
 
+    @Test func movesTabs() throws {
+        let env = try TestEnvironment()
+        defer { env.tearDown() }
+        let controller = makeWindow(env)
+        defer { close(controller) }
+        controller.newTab(nil)
+        controller.newTab(nil)
+        let tabs = controller.model.tabs
+        zip(tabs, ["a", "b", "c"]).forEach { $0.rename(to: $1) }
+        controller.move(tabs[0], to: 2)
+        #expect(controller.model.tabs.map(\.id) == [tabs[1], tabs[2], tabs[0]].map(\.id))
+        controller.move(tabs[0], to: 0)
+        #expect(controller.model.tabs.map(\.id) == tabs.map(\.id))
+        controller.move(tabs[1], to: 99)
+        #expect(controller.model.tabs.last === tabs[1])
+        // ⌘1 follows the order on screen; the saved window keeps it too.
+        let first = NSMenuItem()
+        first.tag = 1
+        controller.selectTabByNumber(first)
+        #expect(controller.model.selected === tabs[0])
+        #expect(controller.savedState.tabs.map(\.title) == ["a", "c", "b"])
+    }
+
+    @Test func aDraggedTabLandsAfterTheTabsWhoseMiddleItPassed() {
+        let frames = [CGRect(x: 0, y: 0, width: 100, height: 28), CGRect(x: 104, y: 0, width: 100, height: 28),
+                      CGRect(x: 208, y: 0, width: 100, height: 28)]
+        #expect(TabBar.landingIndex(of: 0, drawnAt: 150, among: frames) == 0)
+        #expect(TabBar.landingIndex(of: 0, drawnAt: 160, among: frames) == 1)
+        #expect(TabBar.landingIndex(of: 0, drawnAt: 400, among: frames) == 2)
+        #expect(TabBar.landingIndex(of: 2, drawnAt: 160, among: frames) == 2)
+        #expect(TabBar.landingIndex(of: 2, drawnAt: 150, among: frames) == 1)
+        #expect(TabBar.landingIndex(of: 2, drawnAt: -20, among: frames) == 0)
+    }
+
+    @Test func theOtherTabsSlideAsideToShowWhereItWillLand() {
+        // The first of four dragged to the third place: the second and third slide left.
+        #expect((0..<4).map { TabBar.slide($0, from: 0, to: 2, by: 104) } == [0, -104, -104, 0])
+        // The last dragged to the second place: the second and third slide right.
+        #expect((0..<4).map { TabBar.slide($0, from: 3, to: 1, by: 104) } == [0, 104, 104, 0])
+        #expect((0..<4).map { TabBar.slide($0, from: 2, to: 2, by: 104) } == [0, 0, 0, 0])
+    }
+
+    @Test func dragsOnTabsDontMoveTheWindow() throws {
+        let env = try TestEnvironment()
+        defer { env.tearDown() }
+        let controller = makeWindow(env)
+        defer { close(controller) }
+        #expect(!controller.tabBar.mouseDownCanMoveWindow)
+    }
+
     @Test func opensWithOneTabInTheRequestedDirectory() throws {
         let env = try TestEnvironment()
         defer { env.tearDown() }

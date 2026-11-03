@@ -111,6 +111,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
             actions: TabBarActions(
                 select: { [weak self] in self?.select($0) },
                 close: { [weak self] in self?.requestClose(tab: $0) },
+                move: { [weak self] in self?.move($0, to: $1) },
                 newTab: { [weak self] in self?.newTab(nil) },
                 showPalette: { [weak self] in self?.showCommandPalette(nil) },
                 toggleFileTree: { [weak self] in
@@ -120,6 +121,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
                 toggleTimeline: { [weak self] in self?.toggleCommandTimeline(nil) },
                 beginRenaming: { [weak self] in self?.beginRenaming($0) },
                 finishRenaming: { [weak self] in self?.finishRenaming($0, to: $1) })))
+        tabBar.movesWindow = false
         statusBar = PassthroughHostingView(rootView: StatusBar(
             model: model, preferences: preferences, monitor: environment.systemMonitor, explainer: environment.explainer,
             explain: { [weak self] pane in self?.explainLastFailure(in: pane) }))
@@ -782,6 +784,15 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     func select(_ tab: TerminalTab) {
         model.selectedID = tab.id
         installSelectedTab()
+    }
+
+    /// Puts `tab` at `index` among the tabs; the others keep their order.
+    func move(_ tab: TerminalTab, to index: Int) {
+        guard let from = model.tabs.firstIndex(where: { $0 === tab }) else { return }
+        let to = min(max(index, 0), model.tabs.count - 1)
+        guard to != from else { return }
+        model.tabs.remove(at: from)
+        model.tabs.insert(tab, at: to)
     }
 
     /// Shows the pane with this session ID. Returns false if it isn't in this window.

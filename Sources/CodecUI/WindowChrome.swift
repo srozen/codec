@@ -25,6 +25,8 @@ final class WindowModel: ObservableObject {
 struct TabBarActions {
     var select: (TerminalTab) -> Void
     var close: (TerminalTab) -> Void
+    /// Puts a tab at another place among the tabs, as when it's dragged along the bar.
+    var move: (TerminalTab, Int) -> Void = { _, _ in }
     var newTab: () -> Void
     var showPalette: () -> Void
     var toggleFileTree: () -> Void = {}
@@ -36,10 +38,29 @@ struct TabBarActions {
 
 struct TabBar: View {
     static let height: CGFloat = 40
+    private static let row = "tabs"
 
     @ObservedObject var model: WindowModel
     @ObservedObject var preferences: Preferences
     let actions: TabBarActions
+    /// Each tab's frame in the row, as laid out.
+    @State private var frames: [UUID: CGRect] = [:]
+    /// The tabs stay in their order while one is dragged: it follows the pointer, the others slide
+    /// aside to show where it will land, and it moves there when it's let go. Kept apart, so the
+    /// others' sliding is animated and the dragged tab's following isn't.
+    @State private var drag: TabDrag?
+    @State private var dragDistance: CGFloat = 0
+    @State private var dropIndex = 0
+
+    /// A tab being dragged along the bar.
+    private struct TabDrag {
+        let id: UUID
+        let index: Int
+        /// The tabs' frames when the drag began, in order.
+        let frames: [CGRect]
+        /// How far the others slide to make room: its width and the gap after it.
+        var room: CGFloat { frames[index].width + 4 }
+    }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -47,10 +68,17 @@ struct TabBar: View {
                           active: model.fileTreeVisible, action: actions.toggleFileTree)
             HStack(spacing: 4) {
                 ForEach(Array(model.tabs.enumerated()), id: \.element.id) { index, tab in
+                    let dragged = drag?.id == tab.id
                     TabButton(tab: tab, index: index, selected: tab.id == model.selectedID,
                               renaming: tab.id == model.renamingTabID, theme: preferences.theme, actions: actions)
+                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.row)) } action: { frames[tab.id] = $0 }
+                        .offset(x: dragged ? dragDistance : drag.map { Self.slide(index, from: $0.index, to: dropIndex, by: $0.room) } ?? 0)
+                        .zIndex(dragged ? 1 : 0)
+                        .shadow(color: .black.opacity(dragged ? 0.25 : 0), radius: 6, y: 2)
+                        .gesture(reorderGesture(for: tab), including: tab.id == model.renamingTabID ? .subviews : .all)
                 }
             }
+            .coordinateSpace(.named(Self.row))
             .layoutPriority(1)
 
             BarIconButton(systemImage: "plus", help: "New Tab (⌘T)", action: actions.newTab)
@@ -73,6 +101,49 @@ struct TabBar: View {
             Rectangle().fill(preferences.theme.dividerColor).frame(height: 1)
         }
         .animation(.snappy(duration: 0.2), value: model.tabs.map(\.id))
+    }
+
+    /// Dragging a tab along the bar selects it and shows where it will land; letting go puts it there.
+    private func reorderGesture(for tab: TerminalTab) -> some Gesture {
+        DragGesture(minimumDistance: 6, coordinateSpace: .named(Self.row))
+            .onChanged { value in
+                if drag?.id != tab.id {
+                    let laidOut = model.tabs.compactMap { frames[$0.id] }
+                    guard laidOut.count == model.tabs.count, let index = model.tabs.firstIndex(where: { $0 === tab }) else { return }
+                    drag = TabDrag(id: tab.id, index: index, frames: laidOut)
+                    dropIndex = index
+                    if tab.id != model.selectedID { actions.select(tab) }
+                }
+                guard let drag else { return }
+                dragDistance = value.location.x - value.startLocation.x
+                let target = Self.landingIndex(of: drag.index, drawnAt: drag.frames[drag.index].midX + dragDistance, among: drag.frames)
+                if target != dropIndex {
+                    withAnimation(.snappy(duration: 0.2)) { dropIndex = target }
+                }
+            }
+            .onEnded { _ in
+                guard drag != nil else { return }
+                // The tab's slot and its offset change together, so it glides from under the pointer
+                // into its slot while the others, already slid aside, stay where they are.
+                withAnimation(.snappy(duration: 0.2)) {
+                    actions.move(tab, dropIndex)
+                    self.drag = nil
+                    dragDistance = 0
+                }
+            }
+    }
+
+    /// Where a dragged tab will land: after every other tab whose middle its own middle (drawn at
+    /// `middle`) has passed. `frames` are the tabs' frames in order when the drag began.
+    static func landingIndex(of index: Int, drawnAt middle: CGFloat, among frames: [CGRect]) -> Int {
+        frames.indices.filter { $0 != index && frames[$0].midX < middle }.count
+    }
+
+    /// How far the tab at `index` slides aside while the one at `from` is dragged to `to`.
+    static func slide(_ index: Int, from: Int, to: Int, by room: CGFloat) -> CGFloat {
+        if from < to, (from + 1...to).contains(index) { return -room }
+        if to < from, (to..<from).contains(index) { return room }
+        return 0
     }
 }
 

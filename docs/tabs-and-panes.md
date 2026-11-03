@@ -8,7 +8,7 @@ Tabs live in the title bar. ⌘T opens one in the current directory; ⌘1…⌘9
 
 A tab is titled after what's running in it. To name it yourself, double-click it, right-click › Rename Tab…, or press ⇧⌘R. Clear the name to go back to the automatic title.
 
-Middle-click a tab to close it.
+Drag a tab along the tab bar to put it elsewhere; ⌘1…⌘9 follow the new order, and so does the window when Codec reopens it. Middle-click a tab to close it.
 
 ## Splits
 

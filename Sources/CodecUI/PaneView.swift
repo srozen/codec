@@ -130,6 +130,11 @@ extension NSView {
 /// gets pushed down by its height), and can let the mouse through to the views underneath.
 final class PassthroughHostingView<Content: View>: NSHostingView<Content> {
     var capturesMouse = true
+    /// Off for chrome in the title bar whose drags mean something else (moving a tab): AppKit would
+    /// otherwise move the window. Its empty space still does, through `WindowDragGesture`.
+    var movesWindow = true
+
+    override var mouseDownCanMoveWindow: Bool { movesWindow && super.mouseDownCanMoveWindow }
 
     required init(rootView: Content) {
         super.init(rootView: rootView)

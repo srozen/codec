@@ -40,7 +40,8 @@ public protocol GitRunning: Sendable {
     func run(_ arguments: [String], in directory: URL) async throws -> (status: Int32, output: String, errors: String)
 }
 
-/// Runs `/usr/bin/git` as a subprocess, without a terminal and without prompting.
+/// Runs `/usr/bin/git` as a subprocess, without a terminal, without prompting, and without taking
+/// locks it doesn't need.
 public struct ProcessGitRunner: GitRunning {
     public init() {}
 
@@ -54,6 +55,11 @@ public struct ProcessGitRunner: GitRunning {
             // Never wait for a password or an editor that nobody can see.
             environment["GIT_TERMINAL_PROMPT"] = "0"
             environment["GIT_EDITOR"] = "true"
+            // `git status` otherwise rewrites the index to refresh its file stats, holding
+            // .git/index.lock while it does. The file tree runs it whenever the repository changes,
+            // which is just when another app (an IDE, git in another terminal) is committing or
+            // staging, and that app then fails because the index is locked.
+            environment["GIT_OPTIONAL_LOCKS"] = "0"
             process.environment = environment
             let output = Pipe(), errors = Pipe()
             process.standardOutput = output

@@ -25,6 +25,10 @@ final class CodecTerminalView: LocalProcessTerminalView {
     var canCut: (() -> Bool)?
     /// Files dropped on the terminal, from Finder or the file tree.
     var onDropFiles: (([URL]) -> Void)?
+    /// The Find menu's items (⌘F, ⌘G, ⇧⌘G, ⌘E), for Codec's find bar in place of SwiftTerm's.
+    var onFind: ((NSFindPanelAction) -> Void)?
+    /// The terminal scrolled, by the user or as output came in.
+    var onScroll: (() -> Void)?
 
     private var relay: BellRelay?
     private var owningGesture = false
@@ -157,6 +161,19 @@ final class CodecTerminalView: LocalProcessTerminalView {
         default:
             return super.validateUserInterfaceItem(item)
         }
+    }
+
+    // MARK: Find
+
+    override func performFindPanelAction(_ sender: Any?) {
+        guard let onFind, let item = sender as? NSMenuItem,
+              let action = NSFindPanelAction(rawValue: UInt(item.tag)) else { return super.performFindPanelAction(sender) }
+        onFind(action)
+    }
+
+    override func scrolled(source: TerminalView, position: Double) {
+        super.scrolled(source: source, position: position)
+        onScroll?()
     }
 
     fileprivate func ringBell() {

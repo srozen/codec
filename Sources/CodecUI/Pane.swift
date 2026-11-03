@@ -250,9 +250,11 @@ final class Pane: LocalProcessTerminalViewDelegate {
     }
 
     private func tick() {
-        if activity.drain() > 0, !session.unseenOutput, host?.isInFront(self) == false {
+        let printed = activity.drain() > 0
+        if printed, !session.unseenOutput, host?.isInFront(self) == false {
             session.unseenOutput = true
         }
+        if printed { view.finder.contentChanged() }
         ticks += 1
         if ticks % 4 == 0 { pollProcess() }
         if session.running != nil, timeline.running?.fullScreen == false,
@@ -1028,6 +1030,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
 
     func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {
         rowsMayHaveMoved = true
+        view.finder.contentChanged()
     }
 
     func setTerminalTitle(source: LocalProcessTerminalView, title: String) {}

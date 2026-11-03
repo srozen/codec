@@ -19,7 +19,9 @@ zsh's own selection (the region) is what's highlighted, in the theme's selection
 - **Triple-click** selects the line.
 - **⌥-drag** selects a rectangular block.
 
-Copy on select is a setting (Settings › Shell › Selection). The scrollback keeps 10,000 lines; ⌘F searches it, ⌘K clears it.
+Copy on select is a setting (Settings › Shell › Selection). The scrollback keeps 10,000 lines; ⌘K clears it.
+
+⌘F searches the scrollback. Every match on screen is tinted and the current one is outlined; the bar counts them ("3 of 14"), and marks down the pane's right edge show where the rest are. Return or ⌘G goes to the next match, ⇧Return or ⇧⌘G to the previous one (↓ and ↑ do too), wrapping around; Esc closes the bar. **Aa** matches case, **ab** whole words, **.\*** a regular expression. With text selected, ⌘F (or ⌘E) searches for it. Matches keep up as the pane prints more.
 
 ## A command's output (zsh)
 

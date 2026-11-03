@@ -643,8 +643,9 @@ final class Pane: LocalProcessTerminalViewDelegate {
     }
 
     /// Every name on the screen that's a file or folder, each looked for where the command that printed
-    /// it ran. The prompt's are marked too: telling its lines from output by command blocks went wrong
-    /// once a block was found again on its own output, and a prompt with no command has no block.
+    /// it ran. The prompt's are marked too: only command blocks tell its lines from output, a prompt
+    /// where only Return was pressed has none, and a block found in the wrong place would leave output
+    /// unmarked.
     private func openableNames(in grid: TerminalGrid) -> [OpenableName] {
         relocateBlocksIfNeeded()
         let end = newestBlockEnd
@@ -861,8 +862,8 @@ final class Pane: LocalProcessTerminalViewDelegate {
                   max(live.liveTopRow - block.prompt, 0), CodecTerminalView.scrollback))) else { return nil }
         let screen = Pane.screenRows(snapshot)
         // Row numbers start over when the scrollback is cleared, so check the command is still on its line.
-        guard CommandBlocks.locate(command: entry.screenCommand, in: screen.rows, cursorRow: commandLine,
-                                   promptLines: 1)?.output == block.output else { return nil }
+        guard CommandBlocks.locate(command: entry.screenCommand, line: block.commandLine, in: screen.rows,
+                                   cursorRow: commandLine, promptLines: 1)?.output == block.output else { return nil }
         let end: Int
         if let index = blocks.blocks.firstIndex(of: block), let next = blocks.blocks.dropFirst(index + 1).first {
             end = next.prompt
@@ -887,8 +888,9 @@ final class Pane: LocalProcessTerminalViewDelegate {
         else { return }
         rowsMayHaveMoved = false
         let placed = timeline.entries.filter { $0.block != nil }
-        let found = CommandBlocks.relocate(commands: placed.map(\.screenCommand), in: Pane.screenRows(snapshot).rows,
-                                           lastRow: end - 1, promptLines: session.promptLines)
+        let found = CommandBlocks.relocate(commands: placed.map { ($0.screenCommand, $0.block?.commandLine) },
+                                           in: Pane.screenRows(snapshot).rows, lastRow: end - 1,
+                                           promptLines: session.promptLines)
         timeline.setBlocks(Dictionary(uniqueKeysWithValues: zip(placed.map(\.id), found)))
         blocks.replace(with: found.compactMap { $0 })
     }

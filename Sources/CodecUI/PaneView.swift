@@ -2,12 +2,15 @@ import AppKit
 import SwiftUI
 import CodecCore
 
-/// The terminal plus the pane's overlays: bell indicator, exit banner and the inactive-pane dimmer.
+/// The terminal plus the pane's overlays: find bar and highlights, bell indicator, exit banner and the
+/// inactive-pane dimmer.
 final class PaneView: NSView {
     let terminal = CodecTerminalView(frame: .zero)
     let scanlines = ScanlineView()
     /// Marks a command the user went back to.
     let commandMark = CommandMarkView()
+    /// Find in the terminal: its bar and its highlights.
+    private(set) lazy var finder = TerminalFinder(terminal: terminal)
     let overlay: PassthroughHostingView<PaneOverlay>
     private let dimmer = PassthroughView()
     private let keyCatcher = KeyCatcherView()
@@ -30,7 +33,13 @@ final class PaneView: NSView {
         dimmer.wantsLayer = true
         dimmer.alphaValue = 0
 
-        for view in [terminal, scanlines, commandMark, dimmer, overlay, keyCatcher] as [NSView] {
+        // The bar gives way in a narrow pane, running off its left edge, rather than widen it.
+        let barRoom = finder.bar.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 14)
+        barRoom.priority = .defaultLow
+        terminal.onFind = { [weak self] action in self?.finder.perform(action) }
+        terminal.onScroll = { [weak self] in self?.finder.refreshHighlights() }
+
+        for view in [terminal, finder.highlights, scanlines, commandMark, finder.bar, dimmer, overlay, keyCatcher] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
@@ -43,7 +52,15 @@ final class PaneView: NSView {
             keyCatcher.heightAnchor.constraint(equalToConstant: 0),
             keyCatcher.topAnchor.constraint(equalTo: topAnchor),
             keyCatcher.leadingAnchor.constraint(equalTo: leadingAnchor),
-        ] + [scanlines, commandMark, dimmer, overlay].flatMap { $0.constraintsFilling(self) })
+            finder.bar.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            finder.bar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            barRoom,
+        ] + [finder.highlights, scanlines, commandMark, dimmer, overlay].flatMap { $0.constraintsFilling(self) })
+    }
+
+    override func layout() {
+        super.layout()
+        if finder.isOpen { finder.refreshHighlights() }
     }
 
     @available(*, unavailable)
@@ -61,6 +78,7 @@ final class PaneView: NSView {
     }
 
     func apply(theme: CodecTheme, scanlines enabled: Bool) {
+        finder.apply(theme: theme)
         scanlines.isHidden = !enabled
         scanlines.lineColor = theme.isDark ? .black : NSColor(white: 0, alpha: 0.5)
         scanlines.needsDisplay = true

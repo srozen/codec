@@ -23,7 +23,8 @@
 | ⌘↑ / ⌘↓ | Previous / next command |
 | ⇧⌘C / ⇧⌘A | Copy / select the last command's output |
 | ⌘K | Clear buffer |
-| ⌘F, ⌘G, ⇧⌘G | Find, find next, find previous |
+| ⌘F, ⌘G, ⇧⌘G | Find in the scrollback, next match, previous match |
+| ⌘E | Find the selected text |
 | ⌘+ / ⌘− / ⌘0 | Font size |
 | ⇧⌘B | Switch branch |
 

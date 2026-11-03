@@ -47,6 +47,7 @@ struct ScreenshotTour {
         try await intel(env, project: project)
         try await history(env, project: project)
         try await editor(env, project: project)
+        try await openFile(env, project: project)
         try await branches(env, project: project)
         try await themes(env, project: project)
         try await usualDuration(env, project: project)
@@ -130,6 +131,38 @@ struct ScreenshotTour {
         controller.openFile(file, pin: true, focus: false)
         try await settle(seconds: 2)
         try await capture(controller.window!, as: "editor")
+    }
+
+    /// ⌘ held down: every name a click would open marked, and the one under the pointer tagged with
+    /// the file that opens.
+    private func openFile(_ env: TestEnvironment, project: URL) async throws {
+        let (controller, pane) = try await window(env, project: project, size: NSSize(width: 900, height: 480))
+        defer { close(controller) }
+        try await run("ls", in: pane)
+        try await run("ls Sources/CodecCore | head -8", in: pane)
+        try point(pane, at: "FileTree.swift")
+        pane.refreshFileLink(modifiers: .command)
+        try await settle(seconds: 0.5)
+        try await capture(controller.window!, as: "open-file")
+    }
+
+    /// Puts the pointer on the last `name` on screen, as the terminal lays out its cells.
+    private func point(_ pane: Pane, at name: String) throws {
+        let grid = try #require(TerminalGrid(terminal: pane.terminal))
+        for row in grid.rows.indices.reversed() {
+            let cells = grid.cells(ofRow: row)
+            let characters = cells.map(\.character)
+            let target = Array(name)
+            guard characters.count >= target.count else { continue }
+            for start in (0...(characters.count - target.count)).reversed()
+            where Array(characters[start..<(start + target.count)]) == target
+                && (start == 0 || characters[start - 1] == " ") {
+                let point = grid.center(row: row, column: cells[start + 1].column)
+                pane.pointerLocation = { point }
+                return
+            }
+        }
+        Issue.record("\(name) isn't on screen")
     }
 
     /// Two panes, and the branch switcher open on the status bar's branch.

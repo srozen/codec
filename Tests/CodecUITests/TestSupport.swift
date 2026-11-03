@@ -42,6 +42,8 @@ final class FakeHost: PaneHost {
     }
     private(set) var explained: [TimelineEntry] = []
     func explainFailure(of entry: TimelineEntry, in pane: Pane) { explained.append(entry) }
+    private(set) var openedFiles: [URL] = []
+    func openFile(_ url: URL, from pane: Pane) { openedFiles.append(url) }
 }
 
 /// Never reports anything, so tests don't depend on the machine's load.

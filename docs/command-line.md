@@ -19,6 +19,10 @@ zsh's own selection (the region) is what's highlighted, in the theme's selection
 - **Triple-click** selects the line.
 - **⌥-drag** selects a rectangular block.
 
+## Opening files and links
+
+⌘-click a file's name in the output to open it in the [editor](files-and-editor.md#editor), or a folder's to open it in Finder. It works on what `ls` lists, the paths `git status` and `grep` print, and a compiler's `Sources/App/Main.swift:42:7`. Codec looks for the name where the command that printed it ran, then in the folders it was given, so after `ls Sources` its files open too; on the command line you're typing, in the shell's directory. Names that aren't files are left alone. ⌘-click a URL to open it in the browser.
+
 Copy on select is a setting (Settings › Shell › Selection). The scrollback keeps 10,000 lines; ⌘K clears it.
 
 ⌘F searches the scrollback. Every match on screen is tinted and the current one is outlined; the bar counts them ("3 of 14"), and marks down the pane's right edge show where the rest are. Return or ⌘G goes to the next match, ⇧Return or ⇧⌘G to the previous one (↓ and ↑ do too), wrapping around; Esc closes the bar. **Aa** matches case, **ab** whole words, **.\*** a regular expression. With text selected, ⌘F (or ⌘E) searches for it. Matches keep up as the pane prints more.

@@ -145,6 +145,74 @@ struct ZshSelectionTests {
     }
 }
 
+/// ⌘-click on a file's name in the output opens it.
+@Suite("Opening listed files", .serialized, .timeLimit(.minutes(1)),
+       .enabled(if: FileManager.default.isExecutableFile(atPath: "/bin/zsh")))
+@MainActor
+struct OpenListedFileTests {
+    private func zshPane(_ env: TestEnvironment, host: FakeHost, directory: String) throws -> (Pane, NSWindow) {
+        let config = env.directory.appendingPathComponent("zdotdir")
+        try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+        try "PS1='%# '\n".write(to: config.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8)
+        setenv("ZDOTDIR", config.path, 1)
+        defer { unsetenv("ZDOTDIR") }
+        let pane = env.makePane(directory: directory, host: host)
+        let window = makeTestWindow(size: NSSize(width: 800, height: 400))
+        window.contentView = pane.view
+        pane.view.layoutSubtreeIfNeeded()
+        return (pane, window)
+    }
+
+    private func click(_ pane: Pane, at point: NSPoint, in window: NSWindow, modifiers: NSEvent.ModifierFlags) {
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: modifiers,
+                                           timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                           context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1)!
+            if type == .leftMouseDown { pane.terminal.mouseDown(with: event) } else { pane.terminal.mouseUp(with: event) }
+        }
+    }
+
+    /// The center of the last cell showing `target` on screen, which is output rather than the command typed.
+    private func point(of target: String, in pane: Pane) throws -> NSPoint {
+        let grid = try #require(TerminalGrid(terminal: pane.terminal))
+        for (row, snapshot) in grid.rows.enumerated().reversed() {
+            if let range = snapshot.text.range(of: target, options: .backwards) {
+                return grid.center(row: row, column: snapshot.text.distance(from: snapshot.text.startIndex, to: range.lowerBound))
+            }
+        }
+        Issue.record("\(target) isn't on screen")
+        return .zero
+    }
+
+    @Test func commandClickOpensAFileListedFromAFolderTheCommandWasGiven() async throws {
+        let env = try TestEnvironment(shell: "/bin/zsh", integration: true)
+        defer { env.tearDown() }
+        let project = env.directory.appendingPathComponent("project")
+        let sources = project.appendingPathComponent("Sources")
+        try FileManager.default.createDirectory(at: sources, withIntermediateDirectories: true)
+        try "".write(to: sources.appendingPathComponent("listed.swift"), atomically: true, encoding: .utf8)
+        let host = FakeHost()
+        let (pane, window) = try zshPane(env, host: host, directory: project.path)
+        defer { pane.shutDown(); window.close() }
+        #expect(await waitUntil { pane.isAtCommandLine })
+        pane.terminal.send(txt: "ls Sources; echo done-listing\r")
+        #expect(await waitUntil { pane.lastOutputRange != nil && pane.isAtCommandLine })
+        #expect(await waitUntil { pane.terminal.visibleRowsText(0..<10).joined().contains("done-listing") })
+
+        let name = try point(of: "listed.swift", in: pane)
+        // A plain click selects as usual; it takes ⌘ to open.
+        click(pane, at: name, in: window, modifiers: [])
+        #expect(host.openedFiles.isEmpty)
+        click(pane, at: name, in: window, modifiers: .command)
+        #expect(host.openedFiles.map { $0.resolvingSymlinksInPath().path }
+                == [sources.appendingPathComponent("listed.swift").resolvingSymlinksInPath().path])
+
+        // A word that names no file is left to the terminal.
+        click(pane, at: try point(of: "done-listing", in: pane), in: window, modifiers: .command)
+        #expect(host.openedFiles.count == 1)
+    }
+}
+
 /// The branch in the prompt opens the branch picker.
 @Suite("Branch in the prompt", .serialized, .timeLimit(.minutes(1)),
        .enabled(if: FileManager.default.isExecutableFile(atPath: "/bin/zsh")))

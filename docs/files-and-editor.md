@@ -24,7 +24,7 @@ The left sidebar has two tabs: Files and [Intel](intel.md).
 
 ## Editor
 
-Click a file in the tree to see it beside the terminal. The next click replaces it, as a preview tab (in italics); double-click, press Return, or start typing to keep it in a tab of its own.
+Click a file in the tree to see it beside the terminal, or ⌘-click its name in a pane, wherever `ls`, `git status` or a compiler printed it (see [the command line](command-line.md#opening-files-and-links)). The next click replaces it, as a preview tab (in italics); double-click, press Return, or start typing to keep it in a tab of its own.
 
 Code is colored by Codec's own highlighter, from the theme's palette: Swift, JavaScript and TypeScript, Python, Ruby, Go, Rust, C, C++ and Objective-C, Java, Kotlin, C#, PHP, Lua, SQL, shell scripts and Dockerfiles, JSON, YAML, TOML and INI, HTML and XML, CSS, and Markdown.
 

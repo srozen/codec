@@ -19,6 +19,8 @@ protocol PaneHost: AnyObject {
     func showHistory(for pane: Pane, request: IntegrationEvent.HistoryRequest, typed: String)
     /// Explain Failure, from the terminal's context menu: show the command in the Commands sidebar and explain it.
     func explainFailure(of entry: TimelineEntry, in pane: Pane)
+    /// ⌘-click on the name of a file in the terminal: show it in the editor, or a folder in Finder.
+    func openFile(_ url: URL, from pane: Pane)
 }
 
 /// One shell in one pane: owns the process, the terminal view and the pane's `Session`.
@@ -61,12 +63,19 @@ final class Pane: LocalProcessTerminalViewDelegate {
         terminal.contextMenuProvider = { [weak self] event in self?.contextMenu(at: event.locationInWindow) }
         terminal.shouldOwnPress = { [weak self] event in
             guard let self else { return false }
-            return self.pressBranch(event) || self.beginCommandLineGesture(event)
+            return self.pressFile(event) || self.pressBranch(event) || self.beginCommandLineGesture(event)
         }
         terminal.onOwnedDrag = { [weak self] event in self?.continueCommandLineGesture(event) }
         terminal.onOwnedRelease = { [weak self] _ in
             guard let self else { return }
-            if self.pressedBranch { self.pressedBranch = false } else { self.endCommandLineGesture() }
+            if let file = self.pressedFile {
+                self.pressedFile = nil
+                self.host?.openFile(file, from: self)
+            } else if self.pressedBranch {
+                self.pressedBranch = false
+            } else {
+                self.endCommandLineGesture()
+            }
         }
         terminal.addSubview(branchHotspot)
         terminal.onDropFiles = { [weak self] urls in self?.insertPaths(urls) }
@@ -492,16 +501,55 @@ final class Pane: LocalProcessTerminalViewDelegate {
     /// Selects the path, URL, email, `host:port`… under a point, where the terminal's own word
     /// selection stops at punctuation.
     func selectWholeToken(at point: NSPoint) {
-        guard let grid = TerminalGrid(terminal: terminal) else { return }
+        guard let grid = TerminalGrid(terminal: terminal), let token = token(at: point, in: grid),
+              terminal.getSelection() != token.text else { return }
+        terminal.selectByDragging(from: grid.center(row: token.first.row, column: token.first.column),
+                                  to: grid.trailingEdge(row: token.last.row, column: token.last.column))
+    }
+
+    /// The token under a window point, as a double-click selects it, with its first and last cells.
+    private func token(at point: NSPoint, in grid: TerminalGrid)
+        -> (text: String, first: (row: Int, column: Int), last: (row: Int, column: Int))? {
         let cell = grid.cell(at: point)
         guard let line = grid.logicalLine(containing: cell.row),
               let index = line.cells.firstIndex(where: { $0.row == cell.row && $0.column == cell.column }),
-              let range = SmartSelection.range(in: line.characters, at: index) else { return }
-        let token = String(line.characters[range])
-        guard terminal.getSelection() != token else { return }
-        let first = line.cells[range.lowerBound], last = line.cells[range.upperBound - 1]
-        terminal.selectByDragging(from: grid.center(row: first.row, column: first.column),
-                                  to: grid.trailingEdge(row: last.row, column: last.column))
+              let range = SmartSelection.range(in: line.characters, at: index) else { return nil }
+        return (String(line.characters[range]), line.cells[range.lowerBound], line.cells[range.upperBound - 1])
+    }
+
+    // MARK: - Opening files
+
+    /// A file or folder ⌘-pressed, opened when the press ends.
+    private var pressedFile: URL?
+
+    /// Takes a ⌘-click on the name of a file or folder that exists, as `ls` lists it or a compiler
+    /// reports it. Anything else, URLs included, the terminal handles.
+    func pressFile(_ event: NSEvent) -> Bool {
+        guard event.type == .leftMouseDown, event.clickCount == 1,
+              event.modifierFlags.intersection([.shift, .option, .command, .control]) == .command,
+              terminal.currentMouseMode == .off,
+              let path = file(at: event.locationInWindow) else { return false }
+        pressedFile = URL(fileURLWithPath: path)
+        return true
+    }
+
+    /// The file or folder named at a window point. Its name is relative to where the command that
+    /// printed it ran, or to a folder the command was given (`ls Sources`); on the command line being
+    /// typed, to the shell's directory.
+    func file(at point: NSPoint) -> String? {
+        guard let grid = TerminalGrid(terminal: terminal), let token = token(at: point, in: grid) else { return nil }
+        let row = grid.viewportTop + token.first.row
+        let entry = newestBlockEnd.map { row < $0 } == true ? command(atRow: row) : nil
+        let directories = FileReference.directories(command: entry?.command ?? "", in: entry?.directory ?? session.directory)
+        return FileReference.resolve(token.text, in: directories)
+    }
+
+    /// The command, running or finished, whose prompt or output holds an absolute row.
+    private func command(atRow row: Int) -> TimelineEntry? {
+        relocateBlocksIfNeeded()
+        guard let index = blocks.index(containing: row) else { return nil }
+        let block = blocks.blocks[index]
+        return timeline.entries.last { $0.block == block }
     }
 
     // MARK: - Command output

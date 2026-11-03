@@ -916,6 +916,14 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         remove(pane)
     }
 
+    func openFile(_ url: URL, from pane: Pane) {
+        if FileReference.isDirectory(url.path) {
+            NSWorkspace.shared.open(url)
+        } else {
+            openFile(url, pin: true, focus: false)
+        }
+    }
+
     // MARK: - History
 
     private var historyPopover: NSPopover?

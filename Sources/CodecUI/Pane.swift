@@ -44,6 +44,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
     private var oscObservation: TerminalOscObservation?
     private var promptRefresh: AnyCancellable?
     private(set) var isShutDown = false
+    private var fileLinkMonitor: Any?
 
     /// A pane with a shell in `directory`, showing first what it showed last time when there's `contents`.
     init(directory: String?, environment: AppEnvironment, restoring contents: SavedPaneContents? = nil) {
@@ -79,6 +80,15 @@ final class Pane: LocalProcessTerminalViewDelegate {
         }
         terminal.addSubview(branchHotspot)
         terminal.onDropFiles = { [weak self] urls in self?.insertPaths(urls) }
+        // SwiftTerm doesn't let a subclass see ⌘ go down or the pointer move; a monitor can. While ⌘
+        // is held, SwiftTerm has the window report every move.
+        fileLinkMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .mouseMoved]) { [weak self] event in
+            MainActor.assumeIsolated {
+                guard let self, let window = self.terminal.window, event.window === window else { return }
+                self.updateFileLink(at: window.mouseLocationOutsideOfEventStream, modifiers: event.modifierFlags)
+            }
+            return event
+        }
         terminal.onRelease = { [weak self] clicks, dragged, point in
             self?.terminalGestureEnded(clicks: clicks, dragged: dragged, at: point)
         }
@@ -239,6 +249,8 @@ final class Pane: LocalProcessTerminalViewDelegate {
         oscObservation?.cancel()
         promptRefresh?.cancel()
         branchPopover?.close()
+        if let fileLinkMonitor { NSEvent.removeMonitor(fileLinkMonitor) }
+        fileLinkMonitor = nil
         if terminal.process.running { terminal.terminate() }
         environment.notifier.clear(id: session.id.uuidString)
     }
@@ -538,10 +550,51 @@ final class Pane: LocalProcessTerminalViewDelegate {
     /// typed, to the shell's directory.
     func file(at point: NSPoint) -> String? {
         guard let grid = TerminalGrid(terminal: terminal), let token = token(at: point, in: grid) else { return nil }
-        let row = grid.viewportTop + token.first.row
+        return file(named: token.text, at: grid.viewportTop + token.first.row)
+    }
+
+    private func file(named name: String, at row: Int) -> String? {
         let entry = newestBlockEnd.map { row < $0 } == true ? command(atRow: row) : nil
         let directories = FileReference.directories(command: entry?.command ?? "", in: entry?.directory ?? session.directory)
-        return FileReference.resolve(token.text, in: directories)
+        return FileReference.resolve(name, in: directories)
+    }
+
+    /// The name last looked at under the pointer, and whether it named a file, so moving within it
+    /// doesn't ask the disk again.
+    private var fileLinkToken: (text: String, row: Int, visibleRow: Int, column: Int, isFile: Bool)?
+
+    /// While ⌘ is held over a name a ⌘-click would open, underlines it and shows the pointing hand.
+    func updateFileLink(at point: NSPoint, modifiers: NSEvent.ModifierFlags) {
+        guard !isShutDown, modifiers.intersection([.shift, .option, .command, .control]) == .command,
+              terminal.currentMouseMode == .off, terminal.window != nil,
+              terminal.bounds.contains(terminal.convert(point, from: nil)),
+              let grid = TerminalGrid(terminal: terminal), let token = token(at: point, in: grid) else {
+            fileLinkToken = nil
+            return hideFileLink(pointer: point)
+        }
+        let row = grid.viewportTop + token.first.row
+        if let seen = fileLinkToken, seen.text == token.text, seen.row == row,
+           seen.visibleRow == token.first.row, seen.column == token.first.column {
+            guard seen.isFile else { return hideFileLink(pointer: point) }
+        } else {
+            let isFile = file(named: token.text, at: row) != nil
+            fileLinkToken = (token.text, row, token.first.row, token.first.column, isFile)
+            guard isFile else { return hideFileLink(pointer: point) }
+        }
+        let link = view.fileLink
+        link.show((token.first.row...token.last.row).map { row in
+            let start = row == token.first.row ? token.first.column : 0
+            let end = row == token.last.row ? token.last.column + 1 : grid.columns
+            return link.convert(grid.frame(row: row, columns: start..<end), from: nil)
+        })
+        NSCursor.pointingHand.set()
+    }
+
+    private func hideFileLink(pointer point: NSPoint) {
+        guard !view.fileLink.frames.isEmpty else { return }
+        view.fileLink.show([])
+        fileLinkToken = nil
+        if terminal.bounds.contains(terminal.convert(point, from: nil)) { NSCursor.iBeam.set() }
     }
 
     /// The command, running or finished, whose prompt or output holds an absolute row.

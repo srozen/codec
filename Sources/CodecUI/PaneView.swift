@@ -2,13 +2,15 @@ import AppKit
 import SwiftUI
 import CodecCore
 
-/// The terminal plus the pane's overlays: find bar and highlights, bell indicator, exit banner and the
-/// inactive-pane dimmer.
+/// The terminal plus the pane's overlays: find bar and highlights, the file ⌘-click would open, bell
+/// indicator, exit banner and the inactive-pane dimmer.
 final class PaneView: NSView {
     let terminal = CodecTerminalView(frame: .zero)
     let scanlines = ScanlineView()
     /// Marks a command the user went back to.
     let commandMark = CommandMarkView()
+    /// Underlines the file name under the pointer while ⌘ is held.
+    let fileLink = FileLinkView()
     /// Find in the terminal: its bar and its highlights.
     private(set) lazy var finder = TerminalFinder(terminal: terminal)
     let overlay: PassthroughHostingView<PaneOverlay>
@@ -39,7 +41,7 @@ final class PaneView: NSView {
         terminal.onFind = { [weak self] action in self?.finder.perform(action) }
         terminal.onScroll = { [weak self] in self?.finder.refreshHighlights() }
 
-        for view in [terminal, finder.highlights, scanlines, commandMark, finder.bar, dimmer, overlay, keyCatcher] as [NSView] {
+        for view in [terminal, finder.highlights, fileLink, scanlines, commandMark, finder.bar, dimmer, overlay, keyCatcher] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
@@ -55,7 +57,7 @@ final class PaneView: NSView {
             finder.bar.topAnchor.constraint(equalTo: topAnchor, constant: 8),
             finder.bar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             barRoom,
-        ] + [finder.highlights, scanlines, commandMark, dimmer, overlay].flatMap { $0.constraintsFilling(self) })
+        ] + [finder.highlights, fileLink, scanlines, commandMark, dimmer, overlay].flatMap { $0.constraintsFilling(self) })
     }
 
     override func layout() {
@@ -79,6 +81,7 @@ final class PaneView: NSView {
 
     func apply(theme: CodecTheme, scanlines enabled: Bool) {
         finder.apply(theme: theme)
+        fileLink.color = theme.accent
         scanlines.isHidden = !enabled
         scanlines.lineColor = theme.isDark ? .black : NSColor(white: 0, alpha: 0.5)
         scanlines.needsDisplay = true
@@ -155,6 +158,30 @@ final class PassthroughHostingView<Content: View>: NSHostingView<Content> {
 /// A view the mouse goes through, for overlays like the inactive-pane dimmer.
 final class PassthroughView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// A line under the name of the file a ⌘-click would open, like a link's.
+final class FileLinkView: NSView {
+    var color: NSColor = .controlAccentColor {
+        didSet { needsDisplay = true }
+    }
+    /// The name's cells, a rect per row it spans, in this view's coordinates.
+    private(set) var frames: [NSRect] = []
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func show(_ frames: [NSRect]) {
+        guard frames != self.frames else { return }
+        self.frames = frames
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        color.setFill()
+        for frame in frames {
+            NSRect(x: frame.minX, y: frame.minY + 1, width: frame.width, height: 1).fill()
+        }
+    }
 }
 
 /// The mark over a command the user went back to; it fades after a moment.

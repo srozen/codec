@@ -213,6 +213,41 @@ struct OpenListedFileTests {
     }
 }
 
+extension OpenListedFileTests {
+    @Test func holdingCommandOverAFileUnderlinesIt() async throws {
+        let env = try TestEnvironment(shell: "/bin/zsh", integration: true)
+        defer { env.tearDown() }
+        let project = env.directory.appendingPathComponent("project")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        try "".write(to: project.appendingPathComponent("hovered.txt"), atomically: true, encoding: .utf8)
+        let host = FakeHost()
+        let (pane, window) = try zshPane(env, host: host, directory: project.path)
+        defer { pane.shutDown(); window.close() }
+        #expect(await waitUntil { pane.isAtCommandLine })
+        pane.terminal.send(txt: "ls; echo done-listing\r")
+        #expect(await waitUntil { pane.lastOutputRange != nil && pane.isAtCommandLine })
+        #expect(await waitUntil { pane.terminal.visibleRowsText(0..<10).joined().contains("done-listing") })
+
+        let name = try point(of: "hovered.txt", in: pane)
+        let link = pane.view.fileLink
+        pane.updateFileLink(at: name, modifiers: [])
+        #expect(link.frames.isEmpty)
+
+        pane.updateFileLink(at: name, modifiers: .command)
+        let grid = try #require(TerminalGrid(terminal: pane.terminal))
+        let cell = grid.cell(at: name)
+        #expect(link.frames == [link.convert(grid.frame(row: cell.row, columns: cell.column..<(cell.column + 11)), from: nil)])
+
+        // Moving onto a word that isn't a file, or letting go of ⌘, takes the line away.
+        pane.updateFileLink(at: try point(of: "done-listing", in: pane), modifiers: .command)
+        #expect(link.frames.isEmpty)
+        pane.updateFileLink(at: name, modifiers: .command)
+        #expect(!link.frames.isEmpty)
+        pane.updateFileLink(at: name, modifiers: [])
+        #expect(link.frames.isEmpty)
+    }
+}
+
 /// The branch in the prompt opens the branch picker.
 @Suite("Branch in the prompt", .serialized, .timeLimit(.minutes(1)),
        .enabled(if: FileManager.default.isExecutableFile(atPath: "/bin/zsh")))

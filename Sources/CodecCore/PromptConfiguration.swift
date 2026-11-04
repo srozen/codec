@@ -210,8 +210,9 @@ public struct PromptConfiguration: Codable, Equatable, Sendable {
         self.spaceAboveCommandLine = spaceAboveCommandLine
     }
 
+    /// Codec's own prompt, until you pick your shell's in Settings.
     public static let `default` = PromptConfiguration(
-        style: .shell,
+        style: .codec,
         layout: .twoLines,
         segments: [
             Segment(.directory, enabled: true, color: .blue),

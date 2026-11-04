@@ -98,8 +98,23 @@ public struct ShellIntegration: Sendable {
 
     # Runs first, so $? is still the command's status.
     _codec_capture_status() { _codec_status=$? }
+    # Sets $? for whatever runs next.
+    _codec_return() { return $1 }
 
-    # Runs last, after themes have built PS1.
+    # Tells Codec how many lines the prompt takes, so it can find where each command's prompt begins.
+    _codec_report_prompt() {
+      local newlines=${(%)PS1//[^$'\n']/}
+      _codec_osc "6973;prompt;$(( ${#newlines} + 1 ))"
+      _codec_reported_region=0
+    }
+
+    # Ends the prompt with the 133;B mark, where the command line starts. In PS1, so that redrawing
+    # the prompt (on resize, or when a theme repaints it) marks it again.
+    _codec_mark_prompt() {
+      [[ "$PS1" == *$'\e]133;B'* ]] || PS1+=$'%{\e]133;B\a%}'
+    }
+
+    # Runs after the other hooks, so after most themes have built PS1.
     _codec_precmd() {
       if (( _codec_running )); then
         _codec_running=0
@@ -116,11 +131,19 @@ public struct ShellIntegration: Sendable {
       [[ -n "$CODEC_PROMPT_FILE" && -r "$CODEC_PROMPT_FILE" ]] && source "$CODEC_PROMPT_FILE"
       # cl=line: clicking on the command line moves the cursor there.
       _codec_osc "133;A;cl=line"
-      # How many lines the prompt takes, so Codec can find where each command's prompt begins.
-      local newlines=${(%)PS1//[^$'\n']/}
-      _codec_osc "6973;prompt;$(( ${#newlines} + 1 ))"
-      _codec_reported_region=0
-      [[ "$PS1" == *$'\e]133;B'* ]] || PS1+=$'%{\e]133;B\a%}'
+      _codec_report_prompt
+      _codec_mark_prompt
+    }
+
+    # Some themes build PS1 after Codec's hook ran: Powerlevel10k moves its own hook back to the end at
+    # every prompt. The prompt they drew has no mark then, and its line count was taken from the old
+    # one. The line editor starts once the prompt is drawn, with the cursor where the command line
+    # begins: report both from there (the mark only while nothing is typed, or it would land after it).
+    _codec_line_init() {
+      [[ "$PS1" == *$'\e]133;B'* ]] && return 0
+      _codec_report_prompt >/dev/tty
+      [[ -z $BUFFER ]] && _codec_osc "133;B" >/dev/tty
+      _codec_mark_prompt
     }
 
     _codec_preexec() {
@@ -172,15 +195,23 @@ public struct ShellIntegration: Sendable {
       while (( end < $#BUFFER )) && [[ ${BUFFER[end+1]} != [[:space:]] ]]; do (( end++ )); done
       MARK=$start CURSOR=$end REGION_ACTIVE=1
     }
-    # Re-runs the prompt hooks (yours too, such as vcs_info) and redraws, keeping what's typed.
+    # Re-runs the prompt hooks (yours too, such as vcs_info) and redraws, keeping what's typed. Each
+    # hook, and the prompt, sees the last command's status in $?, as before the prompt: otherwise a
+    # prompt that shows it (%? or %(?..)) would show this widget's instead.
     _codec_refresh_prompt() {
       local hook
       for hook in $precmd_functions; do
-        [[ $hook == _codec_* ]] || $hook
+        [[ $hook == _codec_* ]] && continue
+        _codec_return $_codec_status
+        $hook
       done
       # The prompt file counts prompts to put a blank line before all but the first; this is the same prompt again.
       (( ${_codec_prompt_count:-0} > 0 )) && (( _codec_prompt_count-- ))
       [[ -n "$CODEC_PROMPT_FILE" && -r "$CODEC_PROMPT_FILE" ]] && source "$CODEC_PROMPT_FILE"
+      # A hook may have built PS1 anew, and a new prompt style may take more or fewer lines.
+      _codec_mark_prompt
+      _codec_report_prompt >/dev/tty
+      _codec_return $_codec_status
       zle reset-prompt
     }
     _codec_recalled() { typeset -g _codec_recalled_line=$BUFFER; _codec_clear_suggestion }
@@ -259,6 +290,7 @@ public struct ShellIntegration: Sendable {
         [[ $(bindkey -M $map $'\e[3~') == *undefined-key ]] && bindkey -M $map $'\e[3~' delete-char
       done
       autoload -Uz add-zle-hook-widget && add-zle-hook-widget line-pre-redraw _codec_collapse_on_move
+      add-zle-hook-widget line-init _codec_line_init
       add-zle-hook-widget line-pre-redraw _codec_suggest
       add-zle-hook-widget line-finish _codec_clear_suggestion
       add-zle-hook-widget line-finish _codec_forget_recalled

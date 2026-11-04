@@ -1033,12 +1033,14 @@ final class Pane: LocalProcessTerminalViewDelegate {
     private var runningDirectory: String?
 
     /// Puts a command on the command line in place of what's typed, as a paste so nothing in it is
-    /// taken as a key, and runs it if asked. False when the shell isn't at its prompt.
+    /// taken as a key, and runs it if asked. Left there, it gets no suggestion after it until it's
+    /// edited. False when the shell isn't at its prompt.
     @discardableResult
     func replaceCommandLine(with command: String, run: Bool) -> Bool {
         guard isAtCommandLine else { return false }
         terminal.send(CommandLineEditing.Action.selectAll.sequence)
-        terminal.send(txt: "\u{1b}[200~" + command.replacingOccurrences(of: "\u{1b}", with: "") + "\u{1b}[201~" + (run ? "\r" : ""))
+        terminal.send(txt: "\u{1b}[200~" + command.replacingOccurrences(of: "\u{1b}", with: "") + "\u{1b}[201~")
+        terminal.send(run ? [0x0d] : CommandLineEditing.Action.recalled.sequence)
         return true
     }
 

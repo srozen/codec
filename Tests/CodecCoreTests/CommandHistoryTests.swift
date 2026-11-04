@@ -24,6 +24,16 @@ struct CommandHistoryTests {
         ])
     }
 
+    @Test func recallsWhatStartsWithTheTypedTextThenWhatContainsItNewestFirst() {
+        // Unlike the search: case and the current folder don't matter, only how recent.
+        #expect(sample.recall("git").map(\.command) == ["Git log", "git status", "git commit -m 'Fix'"])
+        // An older command starting with it comes before newer ones that only contain it.
+        #expect(sample.recall("m").map(\.command) == ["make test", "cd ~/Development", "npm run dev", "git commit -m 'Fix'"])
+        #expect(sample.recall("status").first?.match == 4..<10)
+        #expect(sample.recall("  ").map(\.command) == sample.items(matching: "").map(\.command))
+        #expect(sample.recall("xyz").isEmpty)
+    }
+
     @Test func listsTheMostRecentFirstMergingRepeats() {
         let items = sample.items(matching: "")
         #expect(items.map(\.command) == ["cd ~/Development", "npm run dev", "Git log", "git status", "git commit -m 'Fix'", "make test"])

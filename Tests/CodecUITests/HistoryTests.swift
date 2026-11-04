@@ -210,11 +210,187 @@ struct OverlayKeyboardTests {
     @Test func escapeClosesTheHistoryMenu() async throws {
         let env = try TestEnvironment()
         defer { env.tearDown() }
+        env.environment.history.record(HistoryEntry(command: "make test", date: Date(), directory: env.directory.path, exitCode: 0))
         let (controller, window, pane) = try makeWindow(env)
         defer { window.close() }
         controller.showHistory(for: pane, request: .menu, typed: "")
         #expect(await waitUntil { controller.isShowingHistoryMenu })
         #expect(controller.handleOverlayKey(key(53, "\u{1b}", in: window)))
         #expect(await waitUntil { !controller.isShowingHistoryMenu })
+    }
+}
+
+@Suite("History menu on the command line", .serialized, .timeLimit(.minutes(1)),
+       .enabled(if: FileManager.default.isExecutableFile(atPath: "/bin/zsh")))
+@MainActor
+struct HistoryMenuLineTests {
+    private func environment(suggestions: Bool = false) throws -> TestEnvironment {
+        let env = try TestEnvironment(shell: "/bin/zsh", integration: true)
+        // Most tests leave out the dimmed suggestion after the cursor, which would read as part of the line.
+        env.preferences.suggestCommands = suggestions
+        for (offset, command) in ["echo older", "echo newer"].enumerated() {
+            env.environment.history.record(HistoryEntry(command: command, date: Date(timeIntervalSinceNow: Double(offset - 10)),
+                                                        directory: env.directory.path, exitCode: 0))
+        }
+        return env
+    }
+
+    private func makeWindow(_ env: TestEnvironment) throws -> (TerminalWindowController, NSWindow, Pane) {
+        let config = env.directory.appendingPathComponent("zdotdir")
+        try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+        try "PS1='%# '\nHISTFILE=\(config.path)/.zsh_history\n".write(to: config.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8)
+        setenv("ZDOTDIR", config.path, 1)
+        defer { unsetenv("ZDOTDIR") }
+        let controller = TerminalWindowController(directory: env.directory.path, environment: env.environment)
+        let window = try #require(controller.window)
+        window.setContentSize(NSSize(width: 1000, height: 600))
+        window.orderBack(nil)
+        return (controller, window, try #require(controller.model.selected?.focused))
+    }
+
+    /// The prompt's row: the last one with anything on it.
+    private func line(_ pane: Pane) -> String {
+        pane.terminal.terminalContentSnapshot(region: .history(maximumScrollbackRows: 100))?.rows
+            .map { $0.text.trimmingCharacters(in: .whitespaces) }
+            .last { !$0.isEmpty } ?? ""
+    }
+
+    /// Presses a key the way the app does: the window's key monitor sees it first, and what it doesn't
+    /// use goes on to the terminal.
+    private func press(_ code: UInt16, _ characters: String, function: Bool = false, in window: NSWindow,
+                       _ controller: TerminalWindowController) throws {
+        let event = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: function ? [.function, .numericPad] : [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+            characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code))
+        if !controller.handleOverlayKey(event) { window.sendEvent(event) }
+    }
+
+    private func up(_ window: NSWindow, _ controller: TerminalWindowController) throws {
+        try press(126, "\u{F700}", function: true, in: window, controller)
+    }
+
+    private func down(_ window: NSWindow, _ controller: TerminalWindowController) throws {
+        try press(125, "\u{F701}", function: true, in: window, controller)
+    }
+
+    @Test func upPutsEachCommandOnTheLineAndDownGoesBackToWhatWasTyped() async throws {
+        let env = try environment()
+        defer { env.tearDown() }
+        let (controller, window, pane) = try makeWindow(env)
+        defer { window.close() }
+        #expect(await waitUntil { pane.isAtCommandLine })
+        pane.terminal.send(txt: "echo")
+        #expect(await waitUntil { line(pane) == "% echo" })
+
+        // ↑ from the shell: the newest match is on the line straight away, and the keyboard stays there.
+        controller.showHistory(for: pane, request: .menu, typed: "echo")
+        #expect(await waitUntil { line(pane) == "% echo newer" })
+        #expect(controller.isShowingHistoryMenu)
+        #expect(window.firstResponder === pane.terminal)
+        try up(window, controller)
+        #expect(await waitUntil { line(pane) == "% echo older" })
+        // Past the oldest, it stays put.
+        try up(window, controller)
+        try down(window, controller)
+        #expect(await waitUntil { line(pane) == "% echo newer" })
+        try down(window, controller)
+        #expect(await waitUntil { line(pane) == "% echo" })
+        #expect(!controller.isShowingHistoryMenu)
+        #expect(pane.session.lastCommand == nil)
+    }
+
+    @Test func returnRunsTheCommandOnTheLine() async throws {
+        let env = try environment()
+        defer { env.tearDown() }
+        let (controller, window, pane) = try makeWindow(env)
+        defer { window.close() }
+        #expect(await waitUntil { pane.isAtCommandLine })
+
+        controller.showHistory(for: pane, request: .menu, typed: "")
+        #expect(await waitUntil { line(pane) == "% echo newer" })
+        try up(window, controller)
+        #expect(await waitUntil { line(pane) == "% echo older" })
+        try press(36, "\r", in: window, controller)
+        #expect(!controller.isShowingHistoryMenu)
+        #expect(await waitUntil { pane.session.lastCommand?.command == "echo older" })
+    }
+
+    /// Any other key edits the command on the line, as it would after zsh's own ↑.
+    @Test func otherKeysCloseTheMenuAndEditTheLine() async throws {
+        let env = try environment()
+        defer { env.tearDown() }
+        let (controller, window, pane) = try makeWindow(env)
+        defer { window.close() }
+        #expect(await waitUntil { pane.isAtCommandLine })
+        pane.terminal.send(txt: "echo")
+        #expect(await waitUntil { line(pane) == "% echo" })
+
+        controller.showHistory(for: pane, request: .menu, typed: "echo")
+        #expect(await waitUntil { line(pane) == "% echo newer" })
+        try press(51, "\u{7f}", in: window, controller)
+        #expect(!controller.isShowingHistoryMenu)
+        #expect(await waitUntil { line(pane) == "% echo newe" })
+        try press(0, "r", in: window, controller)
+        try press(18, "!", in: window, controller)
+        #expect(await waitUntil { line(pane) == "% echo newer!" })
+        #expect(pane.session.lastCommand == nil)
+    }
+
+    @Test func escapePutsBackWhatWasTyped() async throws {
+        let env = try environment()
+        defer { env.tearDown() }
+        let (controller, window, pane) = try makeWindow(env)
+        defer { window.close() }
+        #expect(await waitUntil { pane.isAtCommandLine })
+        pane.terminal.send(txt: "echo")
+        #expect(await waitUntil { line(pane) == "% echo" })
+
+        controller.showHistory(for: pane, request: .menu, typed: "echo")
+        #expect(await waitUntil { line(pane) == "% echo newer" })
+        // An ↑ that reached the shell just before the menu opened is one more step back.
+        controller.showHistory(for: pane, request: .menu, typed: "echo newer")
+        #expect(await waitUntil { line(pane) == "% echo older" })
+        try press(53, "\u{1b}", in: window, controller)
+        #expect(await waitUntil { line(pane) == "% echo" })
+        #expect(!controller.isShowingHistoryMenu)
+        #expect(pane.session.lastCommand == nil)
+    }
+
+    @Test func nothingMatchingLeavesTheLineAlone() async throws {
+        let env = try environment()
+        defer { env.tearDown() }
+        let (controller, _, pane) = try makeWindow(env)
+        defer { controller.window?.close() }
+        #expect(await waitUntil { pane.isAtCommandLine })
+        pane.terminal.send(txt: "zzz")
+        #expect(await waitUntil { line(pane) == "% zzz" })
+        controller.showHistory(for: pane, request: .menu, typed: "zzz")
+        #expect(!controller.isShowingHistoryMenu)
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(line(pane) == "% zzz")
+    }
+
+    /// A recalled command shows no suggestion after it until it's edited, as with zsh-autosuggestions.
+    @Test func aRecalledCommandSuggestsNothingUntilEdited() async throws {
+        let env = try environment(suggestions: true)
+        defer { env.tearDown() }
+        let (controller, window, pane) = try makeWindow(env)
+        defer { window.close() }
+        #expect(await waitUntil { pane.isAtCommandLine })
+        // In the shell's own history, which suggestions come from.
+        pane.terminal.send(txt: "echo newer && echo more\r")
+        #expect(await waitUntil { pane.session.lastCommand?.command == "echo newer && echo more" })
+        #expect(await waitUntil { env.environment.history.history.entries.last?.command == "echo newer && echo more" })
+
+        controller.showHistory(for: pane, request: .menu, typed: "echo n")
+        #expect(await waitUntil { line(pane) == "% echo newer && echo more" })
+        try up(window, controller)
+        #expect(await waitUntil { line(pane) == "% echo newer" })
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(line(pane) == "% echo newer")
+        // Edited, it suggests again.
+        try press(49, " ", in: window, controller)
+        #expect(await waitUntil { line(pane) == "% echo newer && echo more" })
     }
 }

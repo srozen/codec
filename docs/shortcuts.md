@@ -34,7 +34,7 @@
 
 | Keys | Action |
 |---|---|
-| ↑ | History menu (at the prompt) |
+| ↑ | Previous command, with the history menu (at the prompt): ↑ / ↓ step through it, Return runs it, Esc goes back |
 | ⌃R, ⌘Y | History search (⌃R at the prompt, ⌘Y anywhere) |
 | →, ⌥→ | Take the suggested command, or its next word |
 | ⌘← / ⌘→ | Move to the start / end of the line |

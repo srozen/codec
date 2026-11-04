@@ -928,7 +928,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     private var historyPopover: NSPopover?
     private var historyPopoverClosed: NSObjectProtocol?
-    var isShowingHistoryMenu: Bool { historyPopover?.isShown == true }
+    /// While the ↑ menu is open: where it has got to, and the pane whose command line shows it.
+    private var historyMenu: HistoryMenuModel?
+    private weak var historyMenuPane: Pane?
+    var isShowingHistoryMenu: Bool { historyMenu != nil }
     private(set) var isShowingHistoryPanel = false
 
     func showHistory(for pane: Pane, request: IntegrationEvent.HistoryRequest, typed: String) {
@@ -968,11 +971,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         showHistoryPanel(for: pane, typed: "")
     }
 
-    private func historyView(for pane: Pane, style: HistoryView.Style, typed: String,
-                             dismiss: @escaping () -> Void) -> HistoryView {
+    private func historyView(for pane: Pane, typed: String, dismiss: @escaping () -> Void) -> HistoryView {
         // Picks up commands other terminals added to the shell's history file.
         environment.history.load()
-        return HistoryView(store: environment.history, style: style, theme: preferences.theme, codeFont: preferences.font(),
+        return HistoryView(store: environment.history, theme: preferences.theme, codeFont: preferences.font(),
                            directory: pane.session.directory, canInsert: pane.isAtCommandLine, query: typed,
                            onChoose: { [weak self, weak pane] choice in
                                dismiss()
@@ -992,41 +994,116 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         if let pane { window?.makeFirstResponder(pane.view.preferredResponder) }
     }
 
-    /// ↑ at the prompt: a menu just above the cursor.
+    /// ↑ at the prompt, as in any shell: the newest command matching what's typed goes on the line,
+    /// with a menu of the others just above it. The keyboard stays on the command line: ↑ and ↓ step
+    /// through the menu and Esc puts back what was typed, and any other key closes the menu and does
+    /// what it always does there, so Return runs the command and ⌫ edits it.
     private func showHistoryMenu(for pane: Pane, typed: String) {
-        historyPopover?.close()
+        // An ↑ that reached the shell just before the menu opened.
+        if isShowingHistoryMenu, historyMenuPane === pane { return stepHistoryMenu(older: true) }
+        closeHistoryMenu()
         guard let grid = TerminalGrid(terminal: pane.terminal) else { return showHistoryPanel(for: pane, typed: typed) }
+        // Commands other terminals added to the shell's history file show up from the next ↑ on.
+        environment.history.load()
+        guard let menu = HistoryMenuModel(typed: typed, items: environment.history.history.recall(typed, limit: 60)) else {
+            return NSSound.beep()
+        }
         let popover = NSPopover()
         popover.behavior = .transient
-        let controller = NSHostingController(rootView: historyView(for: pane, style: .menu, typed: typed) { [weak popover] in
-            popover?.performClose(nil)
-        })
+        let controller = NSHostingController(rootView: HistoryMenuView(
+            model: menu, theme: preferences.theme, codeFont: preferences.font(),
+            onPick: { [weak self] index in self?.pickFromHistoryMenu(index) },
+            onForget: { [weak self] command in self?.forgetFromHistoryMenu(command) }))
         controller.sizingOptions = .preferredContentSize
         popover.contentViewController = controller
         historyPopoverClosed = NotificationCenter.default.addObserver(
-            forName: NSPopover.didCloseNotification, object: popover, queue: .main) { [weak self, weak pane] _ in
+            forName: NSPopover.didCloseNotification, object: popover, queue: .main) { [weak self, weak pane, weak popover] _ in
             MainActor.assumeIsolated {
-                guard let self else { return }
+                // A menu that closed after the next one opened leaves the next one be.
+                guard let self, self.historyPopover === popover else { return }
                 if let observer = self.historyPopoverClosed { NotificationCenter.default.removeObserver(observer) }
                 self.historyPopoverClosed = nil
                 self.historyPopover = nil
+                self.historyMenu = nil
+                self.historyMenuPane = nil
                 self.stopWatchingOverlayKeys()
                 if let pane, !self.model.paletteOpen { self.window?.makeFirstResponder(pane.view.preferredResponder) }
             }
         }
         historyPopover = popover
+        historyMenu = menu
+        historyMenuPane = pane
         popover.show(relativeTo: pane.terminal.convert(grid.caret, from: nil), of: pane.terminal, preferredEdge: .maxY)
+        window?.makeKey()
+        window?.makeFirstResponder(pane.view.preferredResponder)
         watchOverlayKeys()
-        focusSearchField(in: controller.view)
+        pane.replaceCommandLine(with: menu.command, run: false)
+    }
+
+    /// A key pressed while the ↑ menu is open. True when the menu used it up; any other key closes
+    /// the menu and goes on to the command line.
+    private func handleHistoryMenuKey(_ event: NSEvent) -> Bool {
+        let plain = event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty
+        switch event.keyCode {
+        case 126 where plain: stepHistoryMenu(older: true)
+        case 125 where plain: stepHistoryMenu(older: false)
+        case 53: cancelHistoryMenu()
+        default:
+            closeHistoryMenu()
+            // Clicking the menu can leave it the key window; the key belongs to the command line.
+            guard let window, event.window !== window else { return false }
+            window.makeKey()
+            window.sendEvent(event)
+        }
+        return true
+    }
+
+    /// ↑ or ↓ in the menu: the next command on the line. ↓ past the newest goes back to what was typed.
+    private func stepHistoryMenu(older: Bool) {
+        guard let menu = historyMenu, let pane = historyMenuPane else { return }
+        if older {
+            guard menu.older() else { return NSSound.beep() }
+        } else if !menu.newer() {
+            return cancelHistoryMenu()
+        }
+        pane.replaceCommandLine(with: menu.command, run: false)
+    }
+
+    /// A click on a command: on the line to edit.
+    private func pickFromHistoryMenu(_ index: Int) {
+        guard let menu = historyMenu, let pane = historyMenuPane else { return }
+        menu.select(index)
+        pane.replaceCommandLine(with: menu.command, run: false)
+        closeHistoryMenu()
+    }
+
+    private func forgetFromHistoryMenu(_ command: String) {
+        guard let menu = historyMenu, let pane = historyMenuPane else { return }
+        environment.history.forget(command)
+        guard menu.remove(command) else { return cancelHistoryMenu() }
+        pane.replaceCommandLine(with: menu.command, run: false)
+    }
+
+    /// Esc: the menu goes, and what was typed comes back.
+    private func cancelHistoryMenu() {
+        if let menu = historyMenu { historyMenuPane?.replaceCommandLine(with: menu.typed, run: false) }
+        closeHistoryMenu()
+    }
+
+    /// Closes the menu at once, leaving the command line as it is.
+    private func closeHistoryMenu() {
+        historyMenu = nil
+        historyMenuPane = nil
+        historyPopover?.close()
     }
 
     /// ⌃R at the prompt, or ⌘Y: the full search, over the window like the command palette.
     private func showHistoryPanel(for pane: Pane, typed: String) {
-        historyPopover?.close()
+        closeHistoryMenu()
         if model.paletteOpen { hideCommandPalette() }
         model.paletteOpen = true
         isShowingHistoryPanel = true
-        let view = historyView(for: pane, style: .panel, typed: typed) { [weak self] in self?.hideCommandPalette() }
+        let view = historyView(for: pane, typed: typed) { [weak self] in self?.hideCommandPalette() }
         palette.rootView = AnyView(
             ZStack(alignment: .top) {
                 Color.black.opacity(0.001)
@@ -1045,7 +1122,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     private var overlayKeyMonitor: Any?
 
-    /// Puts the keyboard in an overlay's search field. Opened from the shell (⌃R, ↑), the overlay
+    /// Puts the keyboard in an overlay's search field. Opened from the shell (⌃R), the overlay
     /// appears outside a key event, and SwiftUI's own focus request doesn't always land.
     /// SwiftUI builds the field a little later the first time, and its own focus handling can let go
     /// of it again while it settles. So for up to a second this keeps putting the keyboard back in the
@@ -1082,8 +1159,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         return responder === field || responder.isDescendant(of: field) || (responder as? NSText)?.delegate === field
     }
 
-    /// While the palette, the history panel or the history menu is open: Esc closes it, and typing
-    /// goes to its search field, wherever the keyboard ended up.
+    /// While the palette or the history panel is open: Esc closes it, and typing goes to its search
+    /// field, wherever the keyboard ended up. While the ↑ menu is open, ↑, ↓ and Esc go to the menu.
     private func watchOverlayKeys() {
         guard overlayKeyMonitor == nil else { return }
         overlayKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -1102,18 +1179,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     func handleOverlayKey(_ event: NSEvent) -> Bool {
         let menuWindow = historyPopover?.contentViewController?.view.window
         guard event.window === window || (menuWindow != nil && event.window === menuWindow) else { return false }
-        if let popover = historyPopover, popover.isShown {
-            if event.keyCode == 53 {
-                popover.performClose(nil)
-                return true
-            }
-            if let content = popover.contentViewController?.view, let field = Self.firstTextField(in: content),
-               let menuWindow, !Self.isEditing(field, in: menuWindow) {
-                menuWindow.makeKey()
-                menuWindow.makeFirstResponder(field)
-            }
-            return false
-        }
+        if isShowingHistoryMenu { return handleHistoryMenuKey(event) }
         guard model.paletteOpen else {
             stopWatchingOverlayKeys()
             return false

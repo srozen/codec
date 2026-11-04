@@ -11,11 +11,9 @@ enum HistoryChoice: Equatable {
     case copy(String)
 }
 
-/// The command history, searchable. As a menu, it opens above the prompt with the newest command
-/// nearest the prompt, so ↑ walks back in time; as a panel, it's a full search with filters.
+/// The command history, searchable, with filters: ⌃R at the prompt, or ⌘Y. (↑ has its own menu,
+/// `HistoryMenuView`.)
 struct HistoryView: View {
-    enum Style { case menu, panel }
-
     enum Scope: String, CaseIterable, Identifiable {
         case all, here, failed
         var id: String { rawValue }
@@ -29,7 +27,6 @@ struct HistoryView: View {
     }
 
     @ObservedObject var store: HistoryStore
-    let style: Style
     let theme: CodecTheme
     let codeFont: NSFont
     /// The focused pane's directory, to prefer and filter by.
@@ -44,10 +41,9 @@ struct HistoryView: View {
     @State private var selection = 0
     @FocusState private var fieldFocused: Bool
 
-    init(store: HistoryStore, style: Style, theme: CodecTheme, codeFont: NSFont, directory: String?, canInsert: Bool,
+    init(store: HistoryStore, theme: CodecTheme, codeFont: NSFont, directory: String?, canInsert: Bool,
          query: String, onChoose: @escaping (HistoryChoice) -> Void, onDismiss: @escaping () -> Void) {
         self.store = store
-        self.style = style
         self.theme = theme
         self.codeFont = codeFont
         self.directory = directory
@@ -63,30 +59,24 @@ struct HistoryView: View {
         case .here: directory.map(HistoryFilter.directory) ?? .all
         case .failed: .failed
         }
-        return store.history.items(matching: query, filter: filter, directory: directory, limit: style == .menu ? 60 : 400)
+        return store.history.items(matching: query, filter: filter, directory: directory, limit: 400)
     }
 
     var body: some View {
         let items = items
         VStack(spacing: 0) {
-            if style == .panel {
-                searchField
-                Divider().opacity(0.5)
-                scopePicker
-            }
+            searchField
+            Divider().opacity(0.5)
+            scopePicker
             list(items)
-            if style == .menu {
-                Divider().opacity(0.5)
-                searchField
-            }
             footer
         }
-        .frame(width: style == .menu ? 560 : 720)
+        .frame(width: 720)
         .fixedSize(horizontal: false, vertical: true)
         .onChange(of: query) { selection = 0 }
         .onChange(of: scope) { selection = 0 }
-        .onKeyPress(.upArrow) { move(style == .menu ? 1 : -1, count: items.count); return .handled }
-        .onKeyPress(.downArrow) { move(style == .menu ? -1 : 1, count: items.count); return .handled }
+        .onKeyPress(.upArrow) { move(-1, count: items.count); return .handled }
+        .onKeyPress(.downArrow) { move(1, count: items.count); return .handled }
         .onKeyPress(keys: [.return], phases: .down) { press in
             choose(items, run: press.modifiers.contains(.command))
             return .handled
@@ -104,15 +94,15 @@ struct HistoryView: View {
 
     private var searchField: some View {
         HStack(spacing: 10) {
-            Image(systemName: style == .menu ? "clock.arrow.circlepath" : "magnifyingglass")
+            Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
-            TextField(style == .menu ? "Filter history" : "Search command history", text: $query)
+            TextField("Search command history", text: $query)
                 .textFieldStyle(.plain)
-                .font(style == .menu ? .system(size: 13, design: .monospaced) : .system(size: 15))
+                .font(.system(size: 15))
                 .focused($fieldFocused)
         }
-        .padding(.horizontal, style == .menu ? 12 : 16)
-        .padding(.vertical, style == .menu ? 9 : 13)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
     }
 
     private var scopePicker: some View {
@@ -144,9 +134,8 @@ struct HistoryView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1) {
-                    let ordered = style == .menu ? Array(items.enumerated()).reversed() : Array(items.enumerated())
-                    ForEach(ordered, id: \.element.id) { index, item in
-                        if style == .panel, query.isEmpty, let header = dayHeader(at: index, in: items) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        if query.isEmpty, let header = dayHeader(at: index, in: items) {
                             Text(header)
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(.secondary)
@@ -154,7 +143,7 @@ struct HistoryView: View {
                                 .padding(.top, index == 0 ? 4 : 10)
                                 .padding(.bottom, 2)
                         }
-                        HistoryRow(item: item, style: style, selected: index == selection, theme: theme, codeFont: codeFont)
+                        HistoryRow(item: item, compact: false, selected: index == selection, theme: theme, codeFont: codeFont)
                             .id(item.id)
                             .onTapGesture { selection = index; choose(items, run: false) }
                             .contextMenu { rowMenu(item) }
@@ -168,8 +157,8 @@ struct HistoryView: View {
                 }
                 .padding(6)
             }
-            .frame(maxHeight: style == .menu ? 270 : 440)
-            .defaultScrollAnchor(style == .menu ? .bottom : .top)
+            .frame(maxHeight: 440)
+            .defaultScrollAnchor(.top)
             .onChange(of: selection) { _, new in
                 if items.indices.contains(new) { proxy.scrollTo(items[new].id) }
             }
@@ -213,26 +202,17 @@ struct HistoryView: View {
     @ViewBuilder
     private var footer: some View {
         HStack(spacing: 14) {
-            hint("↩", canInsert ? "Insert" : "Copy")
-            if canInsert { hint("⌘↩", "Run") }
-            hint("⌘⌫", "Remove")
+            KeyHint(key: "↩", label: canInsert ? "Insert" : "Copy")
+            if canInsert { KeyHint(key: "⌘↩", label: "Run") }
+            KeyHint(key: "⌘⌫", label: "Remove")
             Spacer()
-            hint("esc", "Close")
+            KeyHint(key: "esc", label: "Close")
         }
         .font(.system(size: 11))
         .foregroundStyle(.secondary)
         .padding(.horizontal, 14)
         .padding(.vertical, 7)
         .background(Color.primary.opacity(0.03))
-    }
-
-    private func hint(_ key: String, _ label: String) -> some View {
-        HStack(spacing: 4) {
-            Text(key).font(.system(size: 10, weight: .semibold, design: .rounded))
-                .padding(.horizontal, 4).padding(.vertical, 1)
-                .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.08)))
-            Text(label)
-        }
     }
 
     private func move(_ delta: Int, count: Int) {
@@ -247,10 +227,26 @@ struct HistoryView: View {
     }
 }
 
+/// A key and what it does, for a footer.
+struct KeyHint: View {
+    let key: String
+    let label: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(key).font(.system(size: 10, weight: .semibold, design: .rounded))
+                .padding(.horizontal, 4).padding(.vertical, 1)
+                .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.08)))
+            Text(label)
+        }
+    }
+}
+
 /// One command: highlighted like the shell would color it, with where and how it last ran.
-private struct HistoryRow: View {
+/// Compact, it leaves out how often, where and how long, and sits a little tighter.
+struct HistoryRow: View {
     let item: HistoryItem
-    let style: HistoryView.Style
+    let compact: Bool
     let selected: Bool
     let theme: CodecTheme
     let codeFont: NSFont
@@ -265,10 +261,10 @@ private struct HistoryRow: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            if item.count > 1, style == .panel {
+            if item.count > 1, !compact {
                 Text("×\(item.count)").font(.system(size: 11).monospacedDigit()).foregroundStyle(.tertiary)
             }
-            if style == .panel, let directory = item.latest.directory {
+            if !compact, let directory = item.latest.directory {
                 Text((directory as NSString).abbreviatingWithTildeInPath)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
@@ -276,7 +272,7 @@ private struct HistoryRow: View {
                     .truncationMode(.head)
                     .frame(maxWidth: 190, alignment: .trailing)
             }
-            if style == .panel, let duration = item.latest.duration, duration >= 1 {
+            if !compact, let duration = item.latest.duration, duration >= 1 {
                 Text(Formatting.duration(duration)).font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary)
             }
             if item.latest.date != .distantPast {
@@ -287,7 +283,7 @@ private struct HistoryRow: View {
             }
         }
         .padding(.horizontal, 10)
-        .frame(height: style == .menu ? 28 : 32)
+        .frame(height: compact ? 28 : 32)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
             .fill(selected ? Color.accentColor.opacity(0.22) : .clear))
         .contentShape(Rectangle())

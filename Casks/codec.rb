@@ -2,8 +2,8 @@
 #   brew tap srozen/codec https://github.com/srozen/codec
 #   brew install --cask srozen/codec/codec
 cask "codec" do
-  version "0.1.4"
-  sha256 "d61753b54e21d23122dd5dda7e144803f1fbfc084cfd517ecba236e7cc655ef9"
+  version "0.1.5"
+  sha256 "447e5d48a60276309030cb33a57701200abb50b2bfaa99c56c6088c3d7f4ccd0"
 
   url "https://github.com/srozen/codec/releases/download/v#{version}/Codec-#{version}.dmg"
   name "Codec"

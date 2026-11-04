@@ -138,6 +138,16 @@ public struct GitRepository: Sendable {
             .split(separator: "\0").map(String.init)
     }
 
+    /// A file as the last commit has it, or nil if it isn't in it (new, untracked, ignored, or not in
+    /// a repository at all). `path` is relative to the directory. The text is as git stores it:
+    /// without checkout filters, which can be slow (Git LFS fetches files).
+    public func committedText(of path: String) async -> String? {
+        guard let result = try? await git.run(["cat-file", "blob", "HEAD:./" + path], in: directory),
+              result.status == 0 else { return nil }
+        // The editor doesn't count a byte order mark as text either.
+        return result.output.hasPrefix("\u{FEFF}") ? String(result.output.dropFirst()) : result.output
+    }
+
     /// Whether git accepts `name` as a new branch name.
     public func isValidBranchName(_ name: String) async throws -> Bool {
         guard !name.isEmpty else { return false }

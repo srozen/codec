@@ -3,20 +3,6 @@ import AppKit
 import CodecCore
 @testable import CodecUI
 
-private let hasGit = FileManager.default.fileExists(atPath: "/Library/Developer/CommandLineTools/usr/bin/git")
-    || FileManager.default.fileExists(atPath: "/Applications/Xcode.app")
-
-private func git(_ arguments: [String], in directory: URL) throws {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-    process.arguments = ["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "init.defaultBranch=main"] + arguments
-    process.currentDirectoryURL = directory
-    process.standardOutput = FileHandle.nullDevice
-    process.standardError = FileHandle.nullDevice
-    try process.run()
-    process.waitUntilExit()
-}
-
 /// A repository with a committed file that's since changed, an untracked one and an ignored one.
 private func makeProject(in env: TestEnvironment) throws -> URL {
     let project = env.directory.appendingPathComponent("project", isDirectory: true)

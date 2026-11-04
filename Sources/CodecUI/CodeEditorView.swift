@@ -97,6 +97,7 @@ final class CodeEditorView: NSView {
                                                name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
 
         NotificationCenter.default.addObserver(self, selector: #selector(textChanged), name: NSText.didChangeNotification, object: textView)
+        document.onLineChanges = { [weak self] in self?.gutter.redraw() }
         apply(theme: theme, font: font)
     }
 
@@ -263,13 +264,18 @@ final class EditorTextView: NSTextView {
     }
 }
 
-/// Line numbers beside the text, with the current line's brighter. A view of its own beside the
-/// scroll view, following the text as it scrolls.
+/// Line numbers beside the text, with the current line's brighter, and marks of the lines changed
+/// since the last commit: a bar beside added (green) and modified (yellow) lines, as the file tree
+/// colors files, and a red notch where lines were deleted. A view of its own beside the scroll
+/// view, following the text as it scrolls.
 final class LineNumberGutter: NSView {
     private weak var editor: EditorTextView?
     private var font: NSFont = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
     private var color: NSColor = .secondaryLabelColor
     private var currentColor: NSColor = .labelColor
+    private var addedColor: NSColor = .systemGreen
+    private var modifiedColor: NSColor = .systemYellow
+    private var deletedColor: NSColor = .systemRed
     private var width: NSLayoutConstraint!
 
     override var isFlipped: Bool { true }
@@ -293,6 +299,9 @@ final class LineNumberGutter: NSView {
         font = NSFont.monospacedDigitSystemFont(ofSize: max(9, editorFont.pointSize - 2), weight: .regular)
         color = theme.background.blended(withFraction: 0.38, of: theme.foreground) ?? .secondaryLabelColor
         currentColor = theme.background.blended(withFraction: 0.8, of: theme.foreground) ?? .labelColor
+        addedColor = theme.ansi[2]
+        modifiedColor = theme.ansi[3]
+        deletedColor = theme.ansi[1]
         textChanged()
     }
 
@@ -326,6 +335,7 @@ final class LineNumberGutter: NSView {
         }
         if position > characters.location { number -= 1; position = text.lineRange(for: NSRange(location: characters.location, length: 0)).location }
         let offset = editor.textContainerOrigin.y - visible.minY
+        let changes = editor.document?.lineChanges ?? LineChanges()
         func label(_ number: Int, in lineRect: NSRect, current: Bool) {
             let string = "\(number)" as NSString
             let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: current ? currentColor : color]
@@ -333,18 +343,49 @@ final class LineNumberGutter: NSView {
             let y = lineRect.minY + offset + (lineRect.height - size.height) / 2
             string.draw(at: NSPoint(x: bounds.width - size.width - 10, y: y), withAttributes: attributes)
         }
+        // Between the numbers and the text.
+        let markX = bounds.width - 6
+        func deletion(at y: CGFloat) {
+            let notch = NSBezierPath()
+            notch.move(to: NSPoint(x: markX - 1, y: y - 3.5))
+            notch.line(to: NSPoint(x: markX + 4, y: y))
+            notch.line(to: NSPoint(x: markX - 1, y: y + 3.5))
+            notch.close()
+            deletedColor.setFill()
+            notch.fill()
+        }
+        func marks(_ index: Int, in lineRect: NSRect, last: Bool) {
+            if let kind = changes.lines[index] {
+                (kind == .added ? addedColor : modifiedColor).setFill()
+                NSRect(x: markX, y: lineRect.minY + offset, width: 3, height: lineRect.height).fill()
+            }
+            if changes.deletions.contains(index) { deletion(at: lineRect.minY + offset) }
+            if last, changes.deletions.contains(index + 1) { deletion(at: lineRect.maxY + offset) }
+        }
         while position < text.length, position <= NSMaxRange(characters) {
             let line = text.lineRange(for: NSRange(location: position, length: 0))
             let glyph = layoutManager.glyphIndexForCharacter(at: line.location)
             let lineRect = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
             label(number, in: lineRect, current: line.location == caretLine)
+            if !changes.isEmpty {
+                // A wrapped line's bar runs down all its rows.
+                var whole = lineRect
+                if changes.lines[number - 1] != nil, line.length > 1 {
+                    let lastGlyph = layoutManager.glyphIndexForCharacter(at: NSMaxRange(line) - 1)
+                    whole = whole.union(layoutManager.lineFragmentRect(forGlyphAt: lastGlyph, effectiveRange: nil))
+                }
+                marks(number - 1, in: whole, last: NSMaxRange(line) == text.length && !text.hasSuffix("\n"))
+            }
             number += 1
             position = NSMaxRange(line)
         }
         // The empty line after a final newline.
         if text.length == 0 || text.hasSuffix("\n") {
             let extra = layoutManager.extraLineFragmentRect
-            if !extra.isEmpty { label(number, in: extra, current: caretLine == text.length) }
+            if !extra.isEmpty {
+                label(number, in: extra, current: caretLine == text.length)
+                marks(number - 1, in: extra, last: true)
+            }
         }
     }
 }

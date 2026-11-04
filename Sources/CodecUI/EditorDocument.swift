@@ -51,8 +51,20 @@ final class EditorDocument: ObservableObject, Identifiable {
     /// Bumped whenever the text changes, for views that follow it (the Markdown preview).
     @Published private(set) var revision = 0
     private(set) var indentation: Indentation = .spaces(4)
+    /// The lines that differ from the last commit, or from the saved file when it isn't in one, for
+    /// the marks in the editor's gutter. Not published: it changes as often as the text, and only
+    /// the gutter needs it.
+    private(set) var lineChanges = LineChanges()
+    /// Called when `lineChanges` changes.
+    var onLineChanges: (() -> Void)?
 
     private var savedText = ""
+    /// The file as the last commit has it; nil when it isn't committed.
+    private var committedText: String?
+    private var committedTextTask: Task<Void, Never>?
+    private var committedTextPending = false
+    private var lineChangesTask: Task<Void, Never>?
+    private var lineChangesPending = false
     private var watcher: DispatchSourceFileSystemObject?
     private var isLoading = false
 
@@ -114,6 +126,9 @@ final class EditorDocument: ObservableObject, Identifiable {
         isDirty = false
         changedOnDisk = false
         revision += 1
+        updateLineChanges()
+        // A checkout or a reset changes the file and the commit together.
+        refreshCommittedText()
     }
 
     // MARK: Editing
@@ -125,6 +140,7 @@ final class EditorDocument: ObservableObject, Identifiable {
         if dirty != isDirty { isDirty = dirty }
         if dirty, !isPinned { isPinned = true }
         revision += 1
+        updateLineChanges()
     }
 
     func save() throws {
@@ -137,6 +153,7 @@ final class EditorDocument: ObservableObject, Identifiable {
         isMissing = false
         // An atomic write replaces the file: follow the new one.
         watch()
+        updateLineChanges()
     }
 
     /// Throws away unsaved changes and reads the file again.
@@ -146,6 +163,66 @@ final class EditorDocument: ObservableObject, Identifiable {
         undoManager.removeAllActions()
         load()
         watch()
+    }
+
+    // MARK: Changed lines
+
+    /// Reads the last commit's version of the file again, as the lines' changes are measured from
+    /// it: when it's opened, and after anything that may have committed (a command, another app).
+    func refreshCommittedText() {
+        guard isEditable else { return }
+        guard committedTextTask == nil else { return committedTextPending = true }
+        let repository = GitRepository(directory: url.deletingLastPathComponent())
+        let name = url.lastPathComponent
+        committedTextTask = Task { [weak self] in
+            let text = await repository.committedText(of: name)
+            guard let self else { return }
+            committedTextTask = nil
+            if text != committedText {
+                committedText = text
+                updateLineChanges()
+            }
+            if committedTextPending {
+                committedTextPending = false
+                refreshCommittedText()
+            }
+        }
+    }
+
+    /// Waits for the last commit's version and the changes measured from it, for tests.
+    func lineChangesSettled() async {
+        while committedTextTask != nil || lineChangesTask != nil {
+            await committedTextTask?.value
+            await lineChangesTask?.value
+        }
+    }
+
+    /// Measures the changes again. Small files are measured right away, so a new line's mark
+    /// arrives with it; big ones in the background, one measure at a time.
+    private func updateLineChanges() {
+        guard isEditable else { return setLineChanges(LineChanges()) }
+        guard lineChangesTask == nil else { return lineChangesPending = true }
+        let old = committedText ?? savedText, new = storage.string
+        if storage.length + (old as NSString).length < 50_000 {
+            return setLineChanges(LineChanges(from: old, to: new))
+        }
+        lineChangesTask = Task { [weak self] in
+            let changes = await Task.detached(priority: .userInitiated) { LineChanges(from: old, to: new) }.value
+            guard let self else { return }
+            lineChangesTask = nil
+            // Even a measure of an older text is closer than the one shown.
+            setLineChanges(changes)
+            if lineChangesPending {
+                lineChangesPending = false
+                updateLineChanges()
+            }
+        }
+    }
+
+    private func setLineChanges(_ changes: LineChanges) {
+        guard changes != lineChanges else { return }
+        lineChanges = changes
+        onLineChanges?()
     }
 
     // MARK: Watching the disk
@@ -215,6 +292,18 @@ final class EditorModel: ObservableObject {
     /// Asks whether to save a document with unsaved changes before closing it. Calls back with true
     /// to go ahead (saved or discarded), false to keep it open.
     var confirmClose: (EditorDocument, @escaping (Bool) -> Void) -> Void = { _, done in done(true) }
+    private var observers: Set<AnyCancellable> = []
+
+    init() {
+        // A command (a commit, a checkout) or another app may have changed what's committed.
+        for name in [Pane.commandDidFinish, NSApplication.didBecomeActiveNotification] {
+            NotificationCenter.default.publisher(for: name)
+                .sink { [weak self] _ in
+                    MainActor.assumeIsolated { self?.documents.forEach { $0.refreshCommittedText() } }
+                }
+                .store(in: &observers)
+        }
+    }
 
     var selected: EditorDocument? { documents.first { $0.id == selectedID } }
     var hasUnsavedChanges: Bool { documents.contains(where: \.isDirty) }

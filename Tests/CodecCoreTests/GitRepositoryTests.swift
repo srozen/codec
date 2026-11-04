@@ -119,6 +119,23 @@ struct GitRepositoryTests {
         let temp = try TemporaryDirectory()
         let repository = GitRepository(directory: try temp.directory("plain"))
         await #expect(throws: GitError.self) { try await repository.branches() }
+        #expect(await repository.committedText(of: "anything.txt") == nil)
+    }
+
+    @Test func readsAFileAsTheLastCommitHasIt() async throws {
+        let temp = try TemporaryDirectory()
+        let clone = try makeClone(in: temp)
+        try "two\n".write(to: clone.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(at: clone.appendingPathComponent("Sources"), withIntermediateDirectories: true)
+        try commit("Sources/deep.txt", "deep\n", message: "second", in: clone)
+        try "changed\n".write(to: clone.appendingPathComponent("Sources/deep.txt"), atomically: true, encoding: .utf8)
+        try "new\n".write(to: clone.appendingPathComponent("new.txt"), atomically: true, encoding: .utf8)
+
+        // `commit` adds everything, so file.txt's change is committed too.
+        #expect(await GitRepository(directory: clone).committedText(of: "file.txt") == "two\n")
+        // Relative to the directory, not the repository's root.
+        #expect(await GitRepository(directory: clone.appendingPathComponent("Sources")).committedText(of: "deep.txt") == "deep\n")
+        #expect(await GitRepository(directory: clone).committedText(of: "new.txt") == nil)
     }
 }
 

@@ -19,7 +19,7 @@ Three targets, compiled in Swift 6 language mode (strict concurrency):
 
 | Target | What's in it |
 |---|---|
-| `CodecCore` | Logic with no UI, all of it unit-tested: the split layout tree and pane geometry, shell integration scripts and environment, integration event parsing, bell and exit policies, preferences, git branch lookup and switching, smart selection, command block tracking, each pane's command timeline and kept output, Intel files and their variables, syntax highlighting, Markdown rendering, file types, command history ranking and storage, process inspection, system sampling, versions and release lookup for the update check, and downloading, checking and putting a new version in place. |
+| `CodecCore` | Logic with no UI, all of it unit-tested: the split layout tree and pane geometry, shell integration scripts and environment, integration event parsing, bell and exit policies, preferences, git branch lookup and switching, the changed lines of a file (a line diff), smart selection, command block tracking, each pane's command timeline and kept output, Intel files and their variables, syntax highlighting, Markdown rendering, file types, command history ranking and storage, process inspection, system sampling, versions and release lookup for the update check, and downloading, checking and putting a new version in place. |
 | `CodecUI` | AppKit and SwiftUI: app delegate and menus, window controller, tabs, panes, chrome, sidebars, editor, palette, settings, sounds, notifications, the update check and installing. |
 | `Codec` | The executable; calls `CodecApp.run()`. |
 

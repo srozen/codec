@@ -31,9 +31,12 @@ Code is colored by Codec's own highlighter, from the theme's palette: Swift, Jav
 Editing works as you'd expect from a code editor:
 
 - line numbers, and the current line highlighted,
+- changed lines marked beside their numbers: a green bar for added lines, yellow for modified ones (the file tree's colors), and a red notch where lines were deleted,
 - Return keeps the indentation, and adds a level after `{` or `:`,
 - Tab and ⇧Tab indent and outdent the selected lines in the file's own style,
 - ⌘/ toggles comments, ⌘F finds, undo is per file.
+
+The marks compare the text, saved or not, with the file as the last commit has it, so they show everything you'd commit. They follow as you type, and catch up when a command finishes (a commit, a checkout) or you come back from another app. A file that isn't committed (new, untracked, ignored, or outside a repository) is compared with its saved version instead: the marks show your unsaved edits, and go when you save.
 
 ⌘S saves. ⌘W closes the file while the editor has the keyboard (⌥⌘W from anywhere), and Codec asks before throwing away unsaved changes. If a file changes on disk it reloads, or, when you have edits, asks whether to reload or keep yours.
 

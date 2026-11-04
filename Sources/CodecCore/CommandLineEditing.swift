@@ -29,6 +29,9 @@ public enum CommandLineEditing {
         case copy
         /// Redraws the prompt with fresh information (after switching branches), keeping what's typed.
         case refreshPrompt
+        /// Marks the command line as put there whole (from history), so it suggests nothing more until
+        /// it's edited, as zsh-autosuggestions does after ↑.
+        case recalled
 
         /// `ESC [ <code> ~`
         public var sequence: [UInt8] { Array("\u{1b}[\(rawValue)~".utf8) }

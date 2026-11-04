@@ -183,6 +183,7 @@ public struct ShellIntegration: Sendable {
       [[ -n "$CODEC_PROMPT_FILE" && -r "$CODEC_PROMPT_FILE" ]] && source "$CODEC_PROMPT_FILE"
       zle reset-prompt
     }
+    _codec_recalled() { typeset -g _codec_recalled_line=$BUFFER; _codec_clear_suggestion }
     _codec_cut() { (( REGION_ACTIVE )) && { _codec_copy; zle kill-region }; REGION_ACTIVE=0; return 0 }
     _codec_delete_to_start() {
       if (( REGION_ACTIVE )); then zle kill-region; REGION_ACTIVE=0; else zle backward-kill-line; fi
@@ -237,7 +238,7 @@ public struct ShellIntegration: Sendable {
                     _codec_select_to_start _codec_select_to_end _codec_mark _codec_unmark _codec_step_left \
                     _codec_step_right _codec_select_all _codec_select_word _codec_cut _codec_delete_to_start \
                     _codec_move_to_start _codec_move_to_end _codec_save_cursor _codec_restore_cursor \
-                    _codec_set_anchor _codec_to_anchor _codec_copy _codec_refresh_prompt; do
+                    _codec_set_anchor _codec_to_anchor _codec_copy _codec_refresh_prompt _codec_recalled; do
         zle -N $widget
       done
       local map
@@ -253,13 +254,14 @@ public struct ShellIntegration: Sendable {
           $'\e[57010~' _codec_delete_to_start $'\e[57011~' _codec_move_to_start $'\e[57012~' _codec_move_to_end \
           $'\e[57013~' _codec_save_cursor $'\e[57014~' _codec_restore_cursor \
           $'\e[57015~' _codec_set_anchor $'\e[57016~' _codec_to_anchor $'\e[57017~' _codec_copy \
-          $'\e[57018~' _codec_refresh_prompt
+          $'\e[57018~' _codec_refresh_prompt $'\e[57019~' _codec_recalled
         # Forward delete, if nothing else claims it.
         [[ $(bindkey -M $map $'\e[3~') == *undefined-key ]] && bindkey -M $map $'\e[3~' delete-char
       done
       autoload -Uz add-zle-hook-widget && add-zle-hook-widget line-pre-redraw _codec_collapse_on_move
       add-zle-hook-widget line-pre-redraw _codec_suggest
       add-zle-hook-widget line-finish _codec_clear_suggestion
+      add-zle-hook-widget line-finish _codec_forget_recalled
       # Show the selection in the theme's selection color, unless the user styled it.
       [[ -n $CODEC_SELECTION_STYLE && ${(j: :)zle_highlight} != *region:* ]] && zle_highlight+=(region:$CODEC_SELECTION_STYLE)
     }
@@ -279,13 +281,14 @@ public struct ShellIntegration: Sendable {
       _codec_suggesting || return 0
       _codec_clear_suggestion
       (( CURSOR == $#BUFFER && ! REGION_ACTIVE && PENDING == 0 )) || return 0
-      [[ -n $BUFFER && $BUFFER != *$'\n'* && $KEYMAP != vicmd ]] || return 0
+      [[ -n $BUFFER && $BUFFER != *$'\n'* && $KEYMAP != vicmd && $BUFFER != "$_codec_recalled_line" ]] || return 0
       # The most recent command that starts with what's typed and goes further.
       local match=${history[(r)${(b)BUFFER}?*]}
       [[ -n $match && $match != *$'\n'* ]] || return 0
       POSTDISPLAY=${match#$BUFFER}
       region_highlight+=("$#BUFFER $(( $#BUFFER + $#POSTDISPLAY )) $_codec_suggestion_style,memo=codec")
     }
+    _codec_forget_recalled() { _codec_recalled_line= }
     _codec_take_suggestion() {
       [[ -n $POSTDISPLAY ]] && (( CURSOR == $#BUFFER )) || return 1
       BUFFER+=$POSTDISPLAY

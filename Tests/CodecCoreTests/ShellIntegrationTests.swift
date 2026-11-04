@@ -54,6 +54,15 @@ private final class EventLog: Sendable {
     let events = Mutex<[TerminalOscEvent]>([])
 }
 
+private extension PromptConfiguration {
+    /// The user's own prompt, from their zsh configuration.
+    static var shellPrompt: PromptConfiguration {
+        var prompt = PromptConfiguration.default
+        prompt.style = .shell
+        return prompt
+    }
+}
+
 /// Runs a real interactive zsh with the integration loaded, in a headless terminal.
 private final class ZshHarness: @unchecked Sendable {
     let temp: TemporaryDirectory
@@ -73,7 +82,8 @@ private final class ZshHarness: @unchecked Sendable {
         }
         integration = ShellIntegration(directory: temp.url.appendingPathComponent("integration"))
         try integration.install()
-        if let prompt { try integration.writePrompt(prompt) }
+        // Without one given, the prompt from the .zshrc, as the tests set it.
+        try integration.writePrompt(prompt ?? .shellPrompt)
 
         var base = [
             "HOME": realPath(home), "TERM": "xterm-256color", "LANG": "en_US.UTF-8",
@@ -172,6 +182,11 @@ private final class ZshHarness: @unchecked Sendable {
         log.events.withLock { $0.filter { $0.code == code }.map { String(decoding: $0.payload, as: UTF8.self) } }
     }
 
+    /// The columns the cursor was at when the 133;B marks arrived, in arrival order.
+    var promptEndColumns: [Int] {
+        log.events.withLock { $0.filter { $0.code == 133 && $0.payload == Array("B".utf8) }.map(\.cursor.col) }
+    }
+
     /// Polls until `condition` holds or the timeout passes.
     func wait(timeout: Duration = .seconds(15), until condition: () -> Bool) async -> Bool {
         let deadline = ContinuousClock.now + timeout
@@ -242,6 +257,42 @@ struct ZshIntegrationTests {
         #expect(await zsh.wait { zsh.payloads(9999).contains("custom-zdotdir") })
         zsh.send("print -rn -- $'\\e]9999;'\"$ZDOTDIR\"$'\\a'\r")
         #expect(await zsh.wait { zsh.payloads(9999).contains(config.url.path) })
+    }
+
+    /// Regression: Powerlevel10k moves its hook after Codec's at every prompt and builds PS1 anew there,
+    /// so the prompts it drew had no 133;B mark and their line count was the previous prompt's.
+    @Test func marksPromptsThemesBuildAfterCodecsHook() async throws {
+        let zsh = try ZshHarness(homeFiles: [".zshrc": """
+            _theme_precmd() {
+              PROMPT="top"$'\\n''>> '
+              [[ $precmd_functions[-1] == _theme_precmd ]] || precmd_functions=(${precmd_functions:#_theme_precmd} _theme_precmd)
+            }
+            precmd_functions+=(_theme_precmd)
+
+            """])
+        #expect(await zsh.waitForPrompt())
+        #expect(await zsh.run("true"))
+        #expect(await zsh.waitForPrompt())
+        #expect(zsh.promptEndColumns.last == 3)
+        #expect(zsh.payloads(6973).last { $0.hasPrefix("prompt;") } == "prompt;2")
+    }
+
+    /// Regression: redrawing the prompt (after switching branches, or saving a new prompt) ran the
+    /// prompt hooks with $? set to 1, so prompts that show the last status showed a failure.
+    @Test(arguments: [("true", 0), ("false", 1)])
+    func redrawingThePromptKeepsTheLastStatus(command: String, status: Int) async throws {
+        let zsh = try ZshHarness(homeFiles: [".zshrc": """
+            _theme_precmd() { print -rn -- $'\\e]9999;status='$?$'\\a' >/dev/tty; PROMPT='%# ' }
+            precmd_functions+=(_theme_precmd)
+
+            """])
+        #expect(await zsh.run(command))
+        #expect(await zsh.waitForPrompt())
+        let marks = zsh.promptEndColumns.count
+        zsh.sendBytes(CommandLineEditing.Action.refreshPrompt.sequence)
+        // The redrawn prompt is marked again, so Codec still knows where the command line starts.
+        #expect(await zsh.wait { zsh.promptEndColumns.count > marks })
+        #expect(zsh.payloads(9999).suffix(2) == ["status=\(status)", "status=\(status)"])
     }
 }
 
@@ -322,7 +373,7 @@ struct ZshPromptTests {
         #expect(await zsh.wait { zsh.reportedPrompts.count == 2 })
         #expect(zsh.reportedPrompts.last?.contains("λ") == true)
 
-        try zsh.integration.writePrompt(.default)
+        try zsh.integration.writePrompt(.shellPrompt)
         #expect(await zsh.run("true"))
         zsh.reportPrompt()
         #expect(await zsh.wait { zsh.reportedPrompts.count == 3 })

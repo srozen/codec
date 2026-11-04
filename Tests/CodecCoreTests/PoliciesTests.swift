@@ -135,7 +135,7 @@ struct PreferencesTests {
         defer { defaults.removePersistentDomain(forName: suite) }
         let first = Preferences(defaults: defaults)
         #expect(first.prompt == .default)
-        first.prompt.style = .codec
+        first.prompt.style = .shell
         first.prompt.symbol = "λ"
         first.prompt.segments.swapAt(0, 1)
         let second = Preferences(defaults: defaults)

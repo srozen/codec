@@ -2,7 +2,7 @@
 
 ## The prompt builder
 
-Settings › Prompt › Edit Prompt… lets you keep your shell's own prompt (PS1) or use the Codec prompt, built from chips:
+In zsh, Codec draws its own prompt by default, built from chips. Settings › Prompt › Edit Prompt… lets you change it, or go back to your shell's own prompt (PS1), themes such as Oh My Zsh or Powerlevel10k included:
 
 - **Add** a chip by clicking or dragging it in; **drag** to reorder; **×** to remove; **right-click** to recolor.
 - **Chips**: working directory, git branch (with `*` for uncommitted changes), git changes (`3 • +10 -2`), Python environment, Kubernetes context, the last command's duration and exit status, background jobs, user@host, time and date.

@@ -22,7 +22,7 @@ Open Settings with ⌘,. Changes apply as you make them, unless a setting says i
 
 ## Prompt
 
-Your shell's prompt, or the Codec prompt and its builder. See [Prompt and status bar](prompt-and-status-bar.md).
+The Codec prompt (the default) and its builder, or your shell's own prompt. See [Prompt and status bar](prompt-and-status-bar.md).
 
 ## Alerts
 

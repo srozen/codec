@@ -26,6 +26,10 @@ protocol PaneHost: AnyObject {
 /// One shell in one pane: owns the process, the terminal view and the pane's `Session`.
 @MainActor
 final class Pane: LocalProcessTerminalViewDelegate {
+    /// Posted when a command finishes: it may have changed the files or the repository, which the
+    /// editor's marks of changed lines follow.
+    static let commandDidFinish = Notification.Name("CodecPaneCommandDidFinish")
+
     let session = Session()
     /// Every command run here, for the Commands sidebar.
     let timeline = PaneTimeline()
@@ -400,6 +404,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
         }
         runningCommandText = nil
         refreshGitBranch()
+        NotificationCenter.default.post(name: Self.commandDidFinish, object: self)
         let reaction = preferences.attentionPolicy.reactionToFinishedCommand(
             duration: duration, paneInFront: host?.isInFront(self) ?? false)
         let program = CommandNames.program(of: command)

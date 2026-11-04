@@ -68,6 +68,50 @@ struct EditorDocumentTests {
         #expect(await waitUntil { document.isMissing })
     }
 
+    @Test func marksUnsavedLinesOutsideARepository() async throws {
+        let files = try Files()
+        defer { files.env.tearDown() }
+        let document = EditorDocument(url: try files.write("notes.txt", "one\ntwo\nthree\n"))
+        await document.lineChangesSettled()
+        #expect(document.lineChanges.isEmpty)
+        var notified = 0
+        document.onLineChanges = { notified += 1 }
+
+        document.storage.replaceCharacters(in: NSRange(location: 4, length: 3), with: "TWO")
+        document.textDidChange()
+        #expect(document.lineChanges == LineChanges(lines: [1: .modified]))
+        #expect(notified == 1)
+        try document.save()
+        #expect(document.lineChanges.isEmpty)
+        #expect(notified == 2)
+    }
+
+    @Test(.enabled(if: hasGit)) func marksLinesChangedSinceTheLastCommit() async throws {
+        let files = try Files()
+        defer { files.env.tearDown() }
+        let url = try files.write("project/main.swift", "let a = 1\nlet b = 2\n")
+        let project = url.deletingLastPathComponent()
+        try git(["init", "-q"], in: project)
+        try git(["add", "."], in: project)
+        try git(["commit", "-qm", "first"], in: project)
+        try files.write("project/main.swift", "let a = 1\nlet b = 3\nlet c = 4\n")
+
+        let model = EditorModel()
+        let document = model.open(url, pin: true)
+        // Saved, but not committed: one line changed into two.
+        #expect(await waitUntil { document.lineChanges == LineChanges(lines: [1: .modified, 2: .modified]) })
+        document.storage.replaceCharacters(in: NSRange(location: 0, length: 0), with: "// new\n")
+        document.textDidChange()
+        #expect(document.lineChanges == LineChanges(lines: [0: .added, 2: .modified, 3: .modified]))
+        try document.save()
+        #expect(document.lineChanges.lines.count == 3)
+
+        // A command commits it.
+        try git(["commit", "-qam", "second"], in: project)
+        NotificationCenter.default.post(name: Pane.commandDidFinish, object: nil)
+        #expect(await waitUntil { document.lineChanges.isEmpty })
+    }
+
     @Test func recognizesWhatItCantEdit() throws {
         let files = try Files()
         defer { files.env.tearDown() }
@@ -172,6 +216,38 @@ struct CodeEditorTests {
         #expect(await waitUntil { view.color(at: 2) == CodecTheme.codec.color(for: .keyword) })
         view.textView.undoManager?.undo()
         #expect(view.document.text == "x")
+    }
+
+    @Test func theGutterMarksChangedLines() throws {
+        let files = try Files()
+        defer { files.env.tearDown() }
+        let (view, window) = try editor("a.txt", "one\ntwo\nthree\n", files: files)
+        defer { window.close() }
+        let gutter = try #require(view.subviews.first { $0 is LineNumberGutter })
+        // How many points down the gutter, between the numbers and the text, are drawn in `color`.
+        func rowsMarked(_ color: NSColor) -> CGFloat {
+            let image = gutter.bitmapImageRepForCachingDisplay(in: gutter.bounds)!
+            gutter.cacheDisplay(in: gutter.bounds, to: image)
+            let scale = CGFloat(image.pixelsWide) / gutter.bounds.width
+            let column = Int((gutter.bounds.width - 4.5) * scale)
+            let wanted = color.usingColorSpace(image.colorSpace)!
+            let rows = (0..<image.pixelsHigh).filter { row in
+                guard let pixel = image.colorAt(x: column, y: row), pixel.alphaComponent > 0.9 else { return false }
+                return abs(pixel.redComponent - wanted.redComponent) < 0.08 && abs(pixel.greenComponent - wanted.greenComponent) < 0.08
+                    && abs(pixel.blueComponent - wanted.blueComponent) < 0.08
+            }
+            return CGFloat(rows.count) / scale
+        }
+        let modified = CodecTheme.codec.ansi[3], added = CodecTheme.codec.ansi[2]
+        #expect(rowsMarked(modified) == 0)
+
+        view.textView.setSelectedRange(NSRange(location: 4, length: 3))
+        view.textView.insertText("TWO\nfour", replacementRange: view.textView.selectedRange())
+        #expect(view.document.lineChanges == LineChanges(lines: [1: .modified, 2: .modified]))
+        // A bar two lines high.
+        let lineHeight = view.textView.layoutManager!.defaultLineHeight(for: view.textView.font!)
+        #expect(abs(rowsMarked(modified) - 2 * lineHeight) <= 1, "\(rowsMarked(modified)) for lines \(lineHeight) high")
+        #expect(rowsMarked(added) == 0)
     }
 
     @Test func returnIndentsTabIndentsLinesAndCommentsToggle() throws {

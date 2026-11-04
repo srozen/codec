@@ -126,6 +126,13 @@ struct ScreenshotTour {
         defer { close(controller) }
         controller.toggleFileTree(nil)
         let file = project.appendingPathComponent("Sources/CodecCore/FuzzyMatch.swift")
+        // Edits not committed yet, for the gutter's marks: a line added, one changed, one deleted.
+        let source = try String(contentsOf: file, encoding: .utf8)
+            .replacingOccurrences(of: "            score += 1\n",
+                                  with: "            // Every match counts; runs and word starts count for more.\n            score += 1\n")
+            .replacingOccurrences(of: "{ score += 3 }", with: "{ score += 4 }")
+            .replacingOccurrences(of: "        // Shorter candidates win ties.\n", with: "")
+        try source.write(to: file, atomically: true, encoding: .utf8)
         controller.sidebar.reveal(file)
         try await run("grep -n 'func rank' Sources/CodecCore/*.swift", in: pane)
         controller.openFile(file, pin: true, focus: false)

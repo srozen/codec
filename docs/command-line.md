@@ -45,10 +45,16 @@ As you type, the rest of the most recent matching command appears dimmed after t
 
 ![The history search](images/history.png)
 
-↑ at the prompt opens a menu just above it, filtered by what you've typed, the newest command nearest the prompt:
+↑ at the prompt works as in any shell: it puts your last command on the line, and each ↑ goes one further back. If you've typed something, it goes through commands starting with it, then commands containing it, newest first. A menu just above the prompt shows where you are among them, the newest nearest the prompt.
 
-- ↑ / ↓ to browse, type to narrow it down,
-- Return puts the command on the line, ⌘Return runs it.
+The keyboard stays on the command line the whole time:
+
+- ↑ / ↓ move through the menu, the line following along,
+- Return runs the command on the line,
+- any other key (⌫, typing, ←, →, Tab…) closes the menu and edits the command, as it would after zsh's own ↑,
+- Esc, or ↓ past the newest command, puts back what you'd typed.
+
+Click a command to put it on the line, or right-click it to copy it or remove it from history. When nothing matches what you've typed, ↑ just beeps. To search everything instead, use the history search below.
 
 ## History search
 

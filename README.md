@@ -44,7 +44,7 @@ Intel is plain Markdown in folders: yours in `~/.codec/intel`, and your team's i
 
 <img src="docs/images/history.png" alt="The history search, grouped by day, with folders, durations and failures">
 
-↑ at the prompt opens a menu of what you've typed before, filtered as you type. ⌃R or ⌘Y opens the full search: every command with the folder it ran in, how long it took, whether it failed, ranked by how well it matches, then by whether it ran here. As you type, the rest of your last matching command waits dimmed after the cursor; → takes it.
+↑ at the prompt walks back through what you've run, as in any shell, with a menu above the prompt showing where you are. ⌃R or ⌘Y opens the full search: every command with the folder it ran in, how long it took, whether it failed, ranked by how well it matches, then by whether it ran here. As you type, the rest of your last matching command waits dimmed after the cursor; → takes it.
 
 → [The command line](docs/command-line.md)
 

@@ -100,27 +100,7 @@ public struct CommandHistory: Equatable, Sendable {
     /// ran in `directory` come first, then the most recent.
     public func items(matching query: String, filter: HistoryFilter = .all, directory: String? = nil,
                       limit: Int = 200) -> [HistoryItem] {
-        var merged: [String: (item: HistoryItem, order: Int, directories: Set<String>)] = [:]
-        var order = 0
-        for entry in entries.reversed() {
-            if var existing = merged[entry.command] {
-                existing.item.count += 1
-                if let directory = entry.directory { existing.directories.insert(directory) }
-                // Fill in what the shell's file doesn't know from Codec's own record.
-                if existing.item.latest.source == .shell, entry.source == .codec {
-                    existing.item.latest.directory = entry.directory
-                    existing.item.latest.exitCode = entry.exitCode
-                    existing.item.latest.duration = entry.duration
-                    existing.item.latest.source = .codec
-                }
-                merged[entry.command] = existing
-            } else {
-                merged[entry.command] = (HistoryItem(command: entry.command, latest: entry, count: 1, match: nil), order,
-                                         entry.directory.map { [$0] } ?? [])
-                order += 1
-            }
-        }
-        var candidates = merged.values.filter { candidate in
+        var candidates = merged().filter { candidate in
             switch filter {
             case .all: true
             case .directory(let path): candidate.directories.contains(path)
@@ -162,6 +142,53 @@ public struct CommandHistory: Equatable, Sendable {
         }
         .prefix(limit)
         .map(\.item)
+    }
+
+    /// Commands to walk back through with ↑ from what's typed, the way a shell does: those starting
+    /// with it, newest first, then those containing it, newest first. Ignores case; with nothing
+    /// typed, every command, newest first.
+    public func recall(_ typed: String, limit: Int = 200) -> [HistoryItem] {
+        let candidates = merged().sorted { $0.order < $1.order }.map(\.item)
+        guard !typed.trimmingCharacters(in: .whitespaces).isEmpty else { return Array(candidates.prefix(limit)) }
+        let lowered = typed.lowercased()
+        var starting: [HistoryItem] = [], containing: [HistoryItem] = []
+        for var item in candidates {
+            let lower = item.command.lowercased()
+            if lower.hasPrefix(lowered) {
+                item.match = 0..<typed.count
+                starting.append(item)
+            } else if let range = lower.range(of: lowered) {
+                let start = lower.distance(from: lower.startIndex, to: range.lowerBound)
+                item.match = start..<(start + typed.count)
+                containing.append(item)
+            }
+        }
+        return Array((starting + containing).prefix(limit))
+    }
+
+    /// Every command once, with `order` counting from the most recent, and every directory it ran in.
+    private func merged() -> [(item: HistoryItem, order: Int, directories: Set<String>)] {
+        var merged: [String: (item: HistoryItem, order: Int, directories: Set<String>)] = [:]
+        var order = 0
+        for entry in entries.reversed() {
+            if var existing = merged[entry.command] {
+                existing.item.count += 1
+                if let directory = entry.directory { existing.directories.insert(directory) }
+                // Fill in what the shell's file doesn't know from Codec's own record.
+                if existing.item.latest.source == .shell, entry.source == .codec {
+                    existing.item.latest.directory = entry.directory
+                    existing.item.latest.exitCode = entry.exitCode
+                    existing.item.latest.duration = entry.duration
+                    existing.item.latest.source = .codec
+                }
+                merged[entry.command] = existing
+            } else {
+                merged[entry.command] = (HistoryItem(command: entry.command, latest: entry, count: 1, match: nil), order,
+                                         entry.directory.map { [$0] } ?? [])
+                order += 1
+            }
+        }
+        return Array(merged.values)
     }
 
     // MARK: Codec's history file

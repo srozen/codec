@@ -80,6 +80,8 @@ final class TestEnvironment {
         preferences.shellPath = shell
         preferences.shellIntegration = integration
         preferences.codecSounds = false
+        // Tests that run zsh set the prompt they look for in .zshrc; those about the Codec prompt pick it.
+        preferences.prompt.style = .shell
 
         let shellIntegration = ShellIntegration(directory: directory.appendingPathComponent("integration"))
         if integration { try shellIntegration.install() }

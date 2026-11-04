@@ -15,9 +15,12 @@ struct PromptConfigurationTests {
         runs.map(\.text).joined()
     }
 
-    @Test func defaultsToTheUsersOwnPrompt() {
-        #expect(PromptConfiguration.default.style == .shell)
-        #expect(PromptConfiguration.default.preview().isEmpty)
+    @Test func defaultsToTheCodecPrompt() throws {
+        #expect(PromptConfiguration.default.style == .codec)
+        #expect(!PromptConfiguration.default.preview().isEmpty)
+        // Settings saved before the default changed keep the prompt they chose.
+        let saved = #"{"style":"shell"}"#
+        #expect(try JSONDecoder().decode(PromptConfiguration.self, from: Data(saved.utf8)).style == .shell)
     }
 
     @Test func holdsEveryKindExactlyOnce() {
@@ -176,7 +179,9 @@ struct PromptConfigurationTests {
     // MARK: zsh
 
     @Test func shellStyleRestoresTheUsersPrompt() {
-        let script = PromptConfiguration.default.zshScript()
+        var configuration = PromptConfiguration.default
+        configuration.style = .shell
+        let script = configuration.zshScript()
         #expect(script.contains("PROMPT=$_codec_user_prompt"))
         #expect(!script.contains("_codec_prompt_render"))
     }
@@ -396,7 +401,7 @@ struct PromptConfigurationTests {
     @Test(.enabled(if: FileManager.default.isExecutableFile(atPath: "/bin/zsh")))
     func generatesValidZsh() throws {
         let temp = try TemporaryDirectory()
-        var configurations = [PromptConfiguration.default]
+        var configurations = [codec { $0.style = .shell }]
         for layout in PromptConfiguration.Layout.allCases {
             for directory in PromptConfiguration.DirectoryStyle.allCases {
                 for appearance in PromptConfiguration.Appearance.allCases {

@@ -12,13 +12,15 @@ struct SettingsView: View {
     let preferences: Preferences
     let sounds: any SoundPlaying
     var history: HistoryStore?
+    /// The answers about which virtual environments to activate, to forget them.
+    var venvDecisions: VenvDecisions?
     var updates: Updates?
 
     var body: some View {
         TabView {
             AppearanceSettings(prefs: preferences)
                 .tabItem { Label("Appearance", systemImage: "paintpalette") }
-            ShellSettings(prefs: preferences, history: history)
+            ShellSettings(prefs: preferences, history: history, venvDecisions: venvDecisions)
                 .tabItem { Label("Shell", systemImage: "terminal") }
             PromptSettings(prefs: preferences)
                 .tabItem { Label("Prompt", systemImage: "chevron.right.square") }
@@ -34,9 +36,9 @@ struct SettingsView: View {
     /// The Settings window: resizable, sized to fit the screen, with each tab scrolling on its own.
     @MainActor
     static func makeWindow(preferences: Preferences, sounds: any SoundPlaying, history: HistoryStore? = nil,
-                           updates: Updates? = nil) -> NSWindow {
+                           venvDecisions: VenvDecisions? = nil, updates: Updates? = nil) -> NSWindow {
         let controller = NSHostingController(rootView: SettingsView(preferences: preferences, sounds: sounds, history: history,
-                                                                    updates: updates))
+                                                                    venvDecisions: venvDecisions, updates: updates))
         controller.sizingOptions = [.minSize]
         let window = NSWindow(contentViewController: controller)
         window.title = "Settings"
@@ -157,7 +159,9 @@ private struct ThemeCard: View {
 private struct ShellSettings: View {
     @ObservedObject var prefs: Preferences
     var history: HistoryStore?
+    var venvDecisions: VenvDecisions?
     @State private var confirmingClear = false
+    @State private var answersForgotten = false
 
     var body: some View {
         Form {
@@ -181,6 +185,21 @@ private struct ShellSettings: View {
                 Text("Command line")
             } footer: {
                 Text("Suggestions appear dimmed after the cursor: → or End takes them, ⌥→ one word. Friendlier completion ignores case, matches inside names (“dev” finds “Development”), forgives a typo in longer words and lets you pick with the arrows. Settings from your .zshrc win. Applies to new panes; zsh only.")
+                    .foregroundStyle(.secondary)
+            }
+            Section {
+                Toggle("Activate a project’s Python environment (.venv)", isOn: $prefs.activateVenvs)
+                if let venvDecisions {
+                    Button("Forget My Answers") {
+                        try? venvDecisions.clear()
+                        answersForgotten = true
+                    }
+                    .disabled(answersForgotten || venvDecisions.isEmpty)
+                }
+            } header: {
+                Text("Project environments")
+            } footer: {
+                Text("When you go into a folder with a .venv, or below one, Codec asks once whether to activate it, then does on the way in and deactivates it on the way out. One you activate yourself, or that mise activates, is left alone. The status bar shows the environment and the tool versions mise picked; click them for where each comes from. Applies to new panes; zsh only.")
                     .foregroundStyle(.secondary)
             }
             Section {

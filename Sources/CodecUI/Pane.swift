@@ -29,6 +29,9 @@ final class Pane: LocalProcessTerminalViewDelegate {
     /// Posted when a command finishes: it may have changed the files or the repository, which the
     /// editor's marks of changed lines follow.
     static let commandDidFinish = Notification.Name("CodecPaneCommandDidFinish")
+    /// Posted when the user decided whether to activate a virtual environment, its path the object:
+    /// every pane asking about it takes the answer.
+    static let venvDecided = Notification.Name("CodecPaneVenvDecided")
 
     let session = Session()
     /// Every command run here, for the Commands sidebar.
@@ -50,6 +53,9 @@ final class Pane: LocalProcessTerminalViewDelegate {
     private(set) var isShutDown = false
     private var fileLinkMonitor: Any?
     private var fileLinkObservers: [NSObjectProtocol] = []
+    private var venvObserver: NSObjectProtocol?
+    /// Virtual environments the user put off deciding about here: not asked about again in this pane.
+    private var venvsPutOff: Set<String> = []
     /// Where the pointer is, in window coordinates; tests put it where they like.
     lazy var pointerLocation: () -> NSPoint? = { [weak self] in self?.terminal.window?.mouseLocationOutsideOfEventStream }
 
@@ -63,6 +69,16 @@ final class Pane: LocalProcessTerminalViewDelegate {
         view.onDismiss = { [weak self] in
             guard let self else { return }
             self.host?.paneDidFinish(self)
+        }
+        view.onVenvDecision = { [weak self] venv, decision in self?.decide(venv, decision) }
+        venvObserver = NotificationCenter.default.addObserver(forName: Self.venvDecided, object: nil, queue: .main) { [weak self] note in
+            let path = note.object as? String
+            MainActor.assumeIsolated {
+                guard let self, let path, self.session.pendingVenv?.path == path else { return }
+                // The shell looks again at the prompt: now, if it's waiting at one, or after the running command.
+                self.session.pendingVenv = nil
+                self.refreshPrompt()
+            }
         }
 
         terminal.processDelegate = self
@@ -226,6 +242,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
         env["CODEC_SUGGESTIONS"] = preferences.suggestCommands ? "1" : "0"
         env["CODEC_HISTORY_KEYS"] = preferences.historyKeys ? "1" : "0"
         env["CODEC_COMPLETION"] = preferences.friendlyCompletion ? "1" : "0"
+        env["CODEC_VENV"] = preferences.activateVenvs ? "1" : "0"
         // Suggestions in the theme's muted color; the completion menu's pick in its selection color.
         env["CODEC_SUGGESTION_STYLE"] = "fg=" + (theme.background.blended(withFraction: 0.45, of: theme.foreground) ?? theme.foreground).hexString
         env["CODEC_MENU_SELECTION"] = theme.selection.sgrBackground
@@ -277,6 +294,8 @@ final class Pane: LocalProcessTerminalViewDelegate {
         fileLinkMonitor = nil
         fileLinkObservers.forEach(NotificationCenter.default.removeObserver)
         fileLinkObservers = []
+        if let venvObserver { NotificationCenter.default.removeObserver(venvObserver) }
+        venvObserver = nil
         if terminal.process.running { terminal.terminate() }
         environment.notifier.clear(id: session.id.uuidString)
     }
@@ -362,6 +381,10 @@ final class Pane: LocalProcessTerminalViewDelegate {
         case .historyRequest(let request, let typed):
             host?.showHistory(for: self, request: request, typed: typed)
             return
+        case .toolchain:
+            session.apply(event)
+            if let pending = session.pendingVenv, venvsPutOff.contains(pending.path) { session.pendingVenv = nil }
+            return
         case .commandStarted:
             runningCommandText = nil
             runningDirectory = session.directory
@@ -389,7 +412,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
             let usual = usualDuration(of: started)
             session.running?.usual = usual
             timeline.begin(command: started, directory: session.directory, started: session.running?.started ?? Date(),
-                           block: block, usualDuration: usual)
+                           block: block, usualDuration: usual, toolchain: session.toolchain)
         }
         guard case .commandFinished(let exitCode, let duration) = event else { return }
         let finished = timeline.running
@@ -419,6 +442,23 @@ final class Pane: LocalProcessTerminalViewDelegate {
         perform(reaction,
                 title: exitCode == 0 ? "“\(program)” finished" : "“\(program)” failed",
                 body: "\(outcome) · \(session.abbreviatedDirectory)")
+    }
+
+    /// The user's answer about activating a virtual environment: remembered for every pane when they
+    /// allowed or refused it, only in this one when they put it off.
+    func decide(_ venv: Toolchain.PythonEnvironment, _ decision: VenvDecisions.Decision?) {
+        guard let decision else {
+            venvsPutOff.insert(venv.path)
+            if session.pendingVenv?.path == venv.path { session.pendingVenv = nil }
+            return
+        }
+        do {
+            try environment.shellIntegration?.venvDecisions.set(decision, for: venv.path)
+        } catch {
+            Log.pane.error("Couldn't record the answer about \(venv.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return NSSound.beep()
+        }
+        NotificationCenter.default.post(name: Self.venvDecided, object: venv.path)
     }
 
     /// How long `command` usually takes here, from the history; nil when that's not known, or not shown.

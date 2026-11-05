@@ -14,8 +14,10 @@ final class PaneTimeline: ObservableObject {
     var entries: [TimelineEntry] { value.entries }
     var running: TimelineEntry? { value.running }
 
-    func begin(command: String, directory: String, started: Date, block: CommandBlocks.Block?, usualDuration: TimeInterval?) {
-        value.begin(command: command, directory: directory, started: started, block: block, usualDuration: usualDuration)
+    func begin(command: String, directory: String, started: Date, block: CommandBlocks.Block?, usualDuration: TimeInterval?,
+               toolchain: Toolchain? = nil) {
+        value.begin(command: command, directory: directory, started: started, block: block, usualDuration: usualDuration,
+                    toolchain: toolchain)
     }
 
     func setRunningUsualDuration(_ usual: TimeInterval?) {
@@ -116,7 +118,8 @@ final class CommandTimelineSidebar: NSView {
     private var restoringSelection = false
 
     enum Row: Equatable {
-        case directory(String)
+        /// Where the commands below ran, and with what Python environment and tool versions.
+        case directory(String, Toolchain?)
         case entry(TimelineEntry)
 
         var entry: TimelineEntry? {
@@ -260,11 +263,11 @@ final class CommandTimelineSidebar: NSView {
         let atEnd = scrollToEnd || isScrolledToEnd
         let entries = pane?.timeline.listed(matching: query, failedOnly: headerModel.failedOnly) ?? []
         var rows: [Row] = []
-        var directory: String?
+        var context: (directory: String, toolchain: Toolchain?)?
         for entry in entries {
-            if entry.directory != directory {
-                directory = entry.directory
-                rows.append(.directory(entry.directory))
+            if context?.directory != entry.directory || context?.toolchain != entry.toolchain {
+                context = (entry.directory, entry.toolchain)
+                rows.append(.directory(entry.directory, entry.toolchain))
             }
             rows.append(.entry(entry))
         }
@@ -328,8 +331,9 @@ final class CommandTimelineSidebar: NSView {
 
     private func configure(_ view: NSView, for row: Row) {
         switch row {
-        case .directory(let directory):
-            (view as? TimelineDirectoryCell)?.show((directory as NSString).abbreviatingWithTildeInPath, theme: theme)
+        case .directory(let directory, let toolchain):
+            (view as? TimelineDirectoryCell)?.show((directory as NSString).abbreviatingWithTildeInPath, toolchain: toolchain,
+                                                   theme: theme)
         case .entry(let entry):
             guard let cell = view as? TimelineCell else { return }
             cell.show(entry, query: query, inScrollback: isInScrollback(entry), theme: theme, codeFont: codeFont)
@@ -732,12 +736,13 @@ final class TimelineRowView: NSTableRowView {
     }
 }
 
-/// Where the commands below ran.
+/// Where the commands below ran, and the Python environment and tool versions they ran with.
 final class TimelineDirectoryCell: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("TimelineDirectoryCell")
 
     private let icon = NSImageView()
     private let label = NSTextField(labelWithString: "")
+    private let tools = NSTextField(labelWithString: "")
 
     init() {
         super.init(frame: .zero)
@@ -746,16 +751,24 @@ final class TimelineDirectoryCell: NSTableCellView {
         icon.symbolConfiguration = .init(pointSize: 10, weight: .medium)
         label.font = .systemFont(ofSize: 11, weight: .semibold)
         label.lineBreakMode = .byTruncatingHead
-        for view in [icon, label] {
+        tools.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+        tools.lineBreakMode = .byTruncatingTail
+        for view in [icon, label, tools] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
+        // The folder gives way before the versions, which are short.
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        tools.setContentCompressionResistancePriority(.defaultLow + 1, for: .horizontal)
+        tools.setContentHuggingPriority(.required, for: .horizontal)
         NSLayoutConstraint.activate([
             icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
             icon.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 2),
             label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 5),
             label.centerYAnchor.constraint(equalTo: icon.centerYAnchor),
+            tools.leadingAnchor.constraint(greaterThanOrEqualTo: label.trailingAnchor, constant: 8),
+            tools.firstBaselineAnchor.constraint(equalTo: label.firstBaselineAnchor),
+            tools.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
             label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
         ])
     }
@@ -765,12 +778,18 @@ final class TimelineDirectoryCell: NSTableCellView {
         fatalError("init(coder:) is not supported")
     }
 
-    func show(_ directory: String, theme: CodecTheme) {
+    func show(_ directory: String, toolchain: Toolchain? = nil, theme: CodecTheme) {
         label.stringValue = directory
         label.textColor = .secondaryLabelColor
         icon.contentTintColor = .tertiaryLabelColor
-        toolTip = directory
+        tools.stringValue = toolchain?.shortSummary ?? ""
+        tools.textColor = toolchain?.missing.isEmpty == false ? theme.warning : .tertiaryLabelColor
+        tools.isHidden = toolchain == nil
+        toolTip = [directory, toolchain?.summary].compactMap { $0 }.joined(separator: "\n")
     }
+
+    /// What the heading shows, for tests.
+    var shown: (directory: String, tools: String?) { (label.stringValue, tools.isHidden ? nil : tools.stringValue) }
 }
 
 /// A thin line filled to a fraction, on a faint track of the same color.

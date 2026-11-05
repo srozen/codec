@@ -3,7 +3,11 @@ import Foundation
 /// zsh integration, injected through ZDOTDIR the way kitty and Ghostty do it. The hooks report:
 /// - OSC 133 prompt marks (A/B/C/D), used to jump between commands,
 /// - OSC 7 working directory,
-/// - OSC 6973 `exec;<command>` and `done;<status>;<seconds>` (see `IntegrationEvent`).
+/// - OSC 6973 `exec;<command>` and `done;<status>;<seconds>` (see `IntegrationEvent`),
+/// - OSC 6973 `toolchain;…`: the Python virtual environment and mise's tool versions, when they change.
+///
+/// With `CODEC_VENV` set, it activates a project's `.venv` on the way in and deactivates it on the way
+/// out, once the user said yes; their answers are kept in `venvDecisions`.
 ///
 /// It also adds history suggestions as you type, ↑ and ⌃R for Codec's history, and friendlier Tab
 /// completion, each when Codec sets `CODEC_SUGGESTIONS`, `CODEC_HISTORY_KEYS` or `CODEC_COMPLETION`.
@@ -28,6 +32,8 @@ public struct ShellIntegration: Sendable {
     public var zshScript: URL { zshDirectory.appendingPathComponent("codec-integration.zsh") }
     /// Generated from `PromptConfiguration`; sourced before every prompt, so edits apply to open shells.
     public var promptFile: URL { zshDirectory.appendingPathComponent("prompt.zsh") }
+    /// Which virtual environments the user let Codec activate; read by the shell, written by Codec.
+    public var venvDecisions: VenvDecisions { VenvDecisions(file: directory.appendingPathComponent("venv-decisions")) }
 
     /// Writes the scripts, replacing older versions.
     public func install(fileManager: FileManager = .default) throws {
@@ -63,6 +69,7 @@ public struct ShellIntegration: Sendable {
         result["ZDOTDIR"] = zshDirectory.path
         result["CODEC_SHELL_INTEGRATION"] = zshScript.path
         result["CODEC_PROMPT_FILE"] = promptFile.path
+        result["CODEC_VENV_DECISIONS"] = venvDecisions.file.path
         return result
     }
 
@@ -128,6 +135,8 @@ public struct ShellIntegration: Sendable {
       fi
       local dir=${PWD//\%/%25}
       _codec_osc "7;file://${HOST}${dir// /%20}"
+      _codec_env_check
+      _codec_report_toolchain
       [[ -n "$CODEC_PROMPT_FILE" && -r "$CODEC_PROMPT_FILE" ]] && source "$CODEC_PROMPT_FILE"
       # cl=line: clicking on the command line moves the cursor there.
       _codec_osc "133;A;cl=line"
@@ -154,9 +163,123 @@ public struct ShellIntegration: Sendable {
       _codec_osc "6973;exec;${line//[$'\a\e']/}"
       # The whole command, every line, for Codec's history.
       _codec_osc "6973;command;$(_codec_base64 "$1")"
+      # It may install tools or make a virtual environment: report what's in effect afterwards.
+      [[ ${${(z)1}[1]} == (mise|uv) ]] && _codec_toolchain_stale=1
     }
 
     _codec_base64() { builtin print -rn -- "$1" | command base64 | command tr -d '\n' }
+
+    # --- Python environments and tool versions -----------------------------------------
+    # With CODEC_VENV set, a virtual environment (.venv with a pyvenv.cfg) in the current folder or one
+    # above it is activated on the way in and deactivated on the way out, once the user allowed it: Codec
+    # asks, and keeps the answers in $CODEC_VENV_DECISIONS. One activated some other way (by hand, or by
+    # mise) is left alone, and so is one the user deactivated, until they leave it. Codec's own goes in
+    # front of the PATH as `activate` would put it, without touching the prompt, which Codec draws.
+
+    typeset -g _codec_venv=            # the environment Codec activated
+    typeset -g _codec_venv_pending=    # one found here that the user hasn't decided about
+    typeset -g _codec_venv_dismissed=  # one deactivated by hand, left off while we're in it
+    typeset -g _codec_venv_foreign=    # one activated some other way, as of the last look
+    typeset -g _codec_toolchain_reported=
+    typeset -gi _codec_toolchain_stale=0
+
+    # The nearest .venv from here up, in REPLY.
+    _codec_find_venv() {
+      local dir=$PWD
+      REPLY=
+      while :; do
+        [[ -f $dir/.venv/pyvenv.cfg ]] && { REPLY=$dir/.venv; return 0 }
+        [[ $dir == / || -z $dir ]] && return 1
+        dir=${dir:h}
+      done
+    }
+
+    # allow, deny or nothing (not asked yet) for an environment, in REPLY. The last answer wins.
+    _codec_venv_decision() {
+      REPLY=
+      [[ -n $CODEC_VENV_DECISIONS && -r $CODEC_VENV_DECISIONS ]] || return 0
+      local line
+      for line in "${(@f)$(<$CODEC_VENV_DECISIONS)}"; do
+        [[ ${line#*$'\t'} == "$1" ]] && REPLY=${line%%$'\t'*}
+      done
+      return 0
+    }
+
+    _codec_venv_on() {
+      local line name=
+      for line in "${(@f)$(<$1/pyvenv.cfg)}"; do
+        [[ $line == prompt*=* ]] && { name=${line#*=}; name=${name# } }
+      done
+      _codec_venv=$1
+      export VIRTUAL_ENV=$1 VIRTUAL_ENV_PROMPT=${name:-${1:h:t}}
+      path=($1/bin ${path:#${(b)1}/bin})
+      # `deactivate` works as usual, and keeps it off while you're in the project.
+      (( $+functions[deactivate] )) || deactivate() { _codec_venv_dismissed=$_codec_venv; _codec_venv_off }
+    }
+
+    _codec_venv_off() {
+      [[ -n $_codec_venv ]] || return 0
+      path=(${path:#${(b)_codec_venv}/bin})
+      [[ $VIRTUAL_ENV == "$_codec_venv" ]] && unset VIRTUAL_ENV VIRTUAL_ENV_PROMPT
+      _codec_venv=
+    }
+
+    _codec_env_check() {
+      [[ $CODEC_VENV == 1 ]] || return 0
+      local found
+      _codec_find_venv
+      found=$REPLY
+      [[ -n $_codec_venv_dismissed && $found != "$_codec_venv_dismissed" ]] && _codec_venv_dismissed=
+      _codec_venv_pending=
+      if [[ -n $VIRTUAL_ENV && $VIRTUAL_ENV != "$_codec_venv" ]]; then
+        # Activated by hand or by another tool, perhaps over Codec's: theirs to manage.
+        [[ -n $_codec_venv ]] && { path=(${path:#${(b)_codec_venv}/bin}); _codec_venv= }
+        _codec_venv_foreign=$VIRTUAL_ENV
+        return 0
+      fi
+      if [[ -n $_codec_venv_foreign ]]; then
+        # It was deactivated: not for Codec to bring back while we're in it.
+        [[ $found == "$_codec_venv_foreign" ]] && _codec_venv_dismissed=$found
+        _codec_venv_foreign=
+      fi
+      # Codec's was turned off some other way, or we left it.
+      [[ -n $_codec_venv && -z $VIRTUAL_ENV ]] && { _codec_venv_dismissed=$_codec_venv; _codec_venv_off }
+      [[ -n $_codec_venv && $found != "$_codec_venv" ]] && _codec_venv_off
+      [[ -z $_codec_venv && $functions[deactivate] == *_codec_venv_off* ]] && unfunction deactivate
+      [[ -n $found && $found != "$_codec_venv_dismissed" ]] || return 0
+      _codec_venv_decision $found
+      if [[ $found == "$_codec_venv" ]]; then
+        # Turned down since (from another pane, say).
+        [[ $REPLY == deny ]] && { _codec_venv_off; return 0 }
+        # Another hook (mise's) may have put its folders in front.
+        [[ $path[1] == "$found/bin" ]] || path=($found/bin ${path:#${(b)found}/bin})
+        return 0
+      fi
+      case $REPLY in
+        (allow) _codec_venv_on $found ;;
+        (deny) ;;
+        (*) _codec_venv_pending=$found ;;
+      esac
+      return 0
+    }
+    _codec_env_chpwd() { _codec_env_check }
+
+    _codec_base64_nonempty() { [[ -z $1 ]] || _codec_base64 "$1" }
+
+    # Tells Codec the virtual environment and the tools mise has picked, when any of it may have
+    # changed: mise records its changes to the environment in __MISE_DIFF. Only while mise is active
+    # in this shell (its hook, or its shims on the PATH): otherwise its tools aren't what runs.
+    _codec_report_toolchain() {
+      local mise=0
+      (( $+commands[mise] )) && { (( $+functions[_mise_hook] )) || [[ $PATH == */mise/shims* ]] } && mise=1
+      local state="$PWD|$VIRTUAL_ENV|$_codec_venv|$_codec_venv_pending|$mise|$__MISE_DIFF|$__MISE_SESSION"
+      (( ! _codec_toolchain_stale )) && [[ $state == "$_codec_toolchain_reported" ]] && return 0
+      _codec_toolchain_reported=$state
+      _codec_toolchain_stale=0
+      local tools=
+      (( mise )) && tools=$(command mise ls --current --json 2>/dev/null)
+      _codec_osc "6973;toolchain;$(_codec_base64_nonempty "$VIRTUAL_ENV");$(( $#_codec_venv > 0 ));$(_codec_base64_nonempty "$_codec_venv_pending");$(_codec_base64_nonempty "$tools")"
+    }
 
     # --- Editing the command line like a text field ------------------------------
     # The zsh region (mark to cursor) is the selection. Codec sends the private sequences bound below
@@ -205,6 +328,9 @@ public struct ShellIntegration: Sendable {
         _codec_return $_codec_status
         $hook
       done
+      # Codec may have just been told to activate a virtual environment, or not to.
+      _codec_env_check
+      _codec_report_toolchain >/dev/tty
       # The prompt file counts prompts to put a blank line before all but the first; this is the same prompt again.
       (( ${_codec_prompt_count:-0} > 0 )) && (( _codec_prompt_count-- ))
       [[ -n "$CODEC_PROMPT_FILE" && -r "$CODEC_PROMPT_FILE" ]] && source "$CODEC_PROMPT_FILE"
@@ -415,6 +541,7 @@ public struct ShellIntegration: Sendable {
     _codec_install() {
       precmd_functions=(_codec_capture_status ${precmd_functions:#_codec_install} _codec_precmd)
       preexec_functions+=(_codec_preexec)
+      chpwd_functions+=(_codec_env_chpwd)
       _codec_setup_editing
       _codec_setup_suggestions
       _codec_setup_history_keys

@@ -51,6 +51,7 @@ struct ScreenshotTour {
         try await branches(env, project: project)
         try await themes(env, project: project)
         try await usualDuration(env, project: project)
+        try await environments(env, project: project)
     }
 
     /// Swaps `NSWindow.occlusionState` for one that's always visible, or back.
@@ -198,6 +199,18 @@ struct ScreenshotTour {
         try await settle(seconds: 8)
         try await capture(controller.window!, as: "usual-duration")
         try await waitFor { pane.session.running == nil }
+    }
+
+    /// Going into a project with a Python environment and mise tools: the question whether to
+    /// activate it, and the versions in the status bar, one of them not installed.
+    private func environments(_ env: TestEnvironment, project: URL) async throws {
+        let (controller, pane) = try await window(env, project: project, size: NSSize(width: 1180, height: 560))
+        defer { close(controller) }
+        try await run("cd ~/Developer/storefront", in: pane)
+        try await waitFor { pane.session.pendingVenv != nil && !pane.session.toolchain.tools.isEmpty }
+        try await run("ls", in: pane)
+        try await settle()
+        try await capture(controller.window!, as: "environments")
     }
 
     /// The same split window in each theme, in a grid.
@@ -368,6 +381,32 @@ struct ScreenshotTour {
         try #require(process.terminationStatus == 0, "\(command) failed")
     }
 
+    /// A project with a uv environment and tools from mise, and a `mise` that reports them there.
+    private func makeStorefront(_ home: URL) throws {
+        let store = home.appendingPathComponent("Developer/storefront")
+        let files = [
+            ".venv/pyvenv.cfg": "home = /opt/homebrew/opt/python@3.13/bin\nimplementation = CPython\nversion_info = 3.13.5\nprompt = storefront\n",
+            "mise.toml": "[tools]\nruby = \"3.4.7\"\nnode = \"22\"\n",
+            "pyproject.toml": "[project]\nname = \"storefront\"\n", "uv.lock": "", "Gemfile": "source \"https://rubygems.org\"\n",
+            "package.json": "{}\n", "README.md": "# Storefront\n", "app/.keep": "", "scripts/.keep": "",
+        ]
+        for (path, contents) in files {
+            let file = store.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try contents.write(to: file, atomically: true, encoding: .utf8)
+        }
+        // Its own repository, not the one around the tour's home folder.
+        try shell("git init --quiet -b main", in: store)
+        let source = store.appendingPathComponent("mise.toml").path
+        let installs = home.appendingPathComponent(".local/share/mise/installs").path
+        let tools = #"{"ruby":[{"version":"3.4.7","requested_version":"3.4.7","install_path":"\#(installs)/ruby/3.4.7","source":{"type":"mise.toml","path":"\#(source)"},"installed":true}],"node":[{"version":"22.21.1","requested_version":"22","install_path":"\#(installs)/node/22.21.1","source":{"type":"mise.toml","path":"\#(source)"},"installed":false}]}"#
+        let mise = home.appendingPathComponent("bin/mise")
+        try FileManager.default.createDirectory(at: mise.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "#!/bin/sh\ncase \"$PWD\" in \(store.path)*) echo '\(tools)' ;; *) echo '{}' ;; esac\n"
+            .write(to: mise, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: mise.path)
+    }
+
     /// A home folder with a quiet `.zshrc` and a clone of this repository with a few changes and branches.
     private func makeHome(_ home: URL, project: URL) throws {
         try FileManager.default.createDirectory(at: project.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -376,6 +415,9 @@ struct ScreenshotTour {
             export EDITOR=vim
             HISTFILE=~/.zsh_history
             PS1='%~ %# '
+            # A stand-in for mise, active as `mise activate` makes it, with tools only in the storefront.
+            path=(~/bin $path)
+            _mise_hook() { :; }
             make() {
               if [[ $1 == test ]]; then
                 local i
@@ -387,6 +429,7 @@ struct ScreenshotTour {
             }
             """#
         try (zshrc + "\n").write(to: home.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8)
+        try makeStorefront(home)
         try shell("git clone --quiet '\(Self.repository.path)' '\(project.path)'", in: home)
         try shell("""
             git config user.name 'Solid Snake' && git config user.email snake@example.com && \

@@ -8,7 +8,7 @@ Open it with ⇧⌘L, or the sidebar button at the right end of the tab bar. It 
 
 ## What it shows
 
-Commands are listed oldest first, under the folder they ran in. Each row has:
+Commands are listed oldest first, under the folder they ran in. When a [Python environment or tool versions](prompt-and-status-bar.md#project-environments-zsh) were in effect, the heading shows those too (`py 3.14.6 · ruby 4.0.2`, with `!` after a version that isn't installed), and a new heading starts whenever they change. Each row has:
 
 - a green or red dot for whether it worked (pulsing while it runs),
 - when it ran and how long it took,
@@ -50,7 +50,7 @@ The list survives quitting Codec: when your windows [come back](tabs-and-panes.m
 
 ## Why did it fail?
 
-On a Mac with Apple Intelligence, a failed command offers **Explain**: in the status bar, beside its exit status; in its output viewer; or right-click it, in the terminal or in this list, › Explain Failure. The sidebar opens on the command, with the explanation above its output. Apple's on-device model reads the command, its folder, its exit status and the end of its output, plus earlier lines that look like errors, and says in a couple of sentences what went wrong and what to do. Nothing leaves your Mac. It takes a second or two.
+On a Mac with Apple Intelligence, a failed command offers **Explain**: in the status bar, beside its exit status; in its output viewer; or right-click it, in the terminal or in this list, › Explain Failure. The sidebar opens on the command, with the explanation above its output. Apple's on-device model reads the command, its folder, the Python environment and tool versions it ran with, its exit status and the end of its output, plus earlier lines that look like errors, and says in a couple of sentences what went wrong and what to do. Nothing leaves your Mac. It takes a second or two.
 
 When the fix is a command (`git push --set-upstream origin feature/login`, `npm run build`), it's shown with **Insert**, which puts it on the command line for you to check and run. Codec never runs it for you. It's a small model, so it can be wrong.
 

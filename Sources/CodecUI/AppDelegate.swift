@@ -213,6 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if settingsWindow == nil {
             settingsWindow = SettingsView.makeWindow(preferences: environment.preferences, sounds: environment.sounds,
                                                      history: environment.history,
+                                                     venvDecisions: environment.shellIntegration?.venvDecisions,
                                                      updates: updater.map { updater in
                                                          SettingsView.Updates(version: "\(updater.current)") { [weak updater] in
                                                              updater?.checkNow()

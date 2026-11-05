@@ -3,7 +3,8 @@ import SwiftUI
 import CodecCore
 
 /// The terminal plus the pane's overlays: find bar and highlights, the file ⌘-click would open, bell
-/// indicator, exit banner and the inactive-pane dimmer.
+/// indicator, exit banner, the question whether to activate a Python environment and the
+/// inactive-pane dimmer.
 final class PaneView: NSView {
     let terminal = CodecTerminalView(frame: .zero)
     let scanlines = ScanlineView()
@@ -14,6 +15,9 @@ final class PaneView: NSView {
     /// Find in the terminal: its bar and its highlights.
     private(set) lazy var finder = TerminalFinder(terminal: terminal)
     let overlay: PassthroughHostingView<PaneOverlay>
+    /// Asks whether to activate a virtual environment; only as big as the question, so the rest of
+    /// the pane takes clicks.
+    let venvBanner: PassthroughHostingView<VenvBanner>
     private let dimmer = PassthroughView()
     private let keyCatcher = KeyCatcherView()
     private(set) var isDimmed = false
@@ -26,10 +30,17 @@ final class PaneView: NSView {
     var onDismiss: (() -> Void)? {
         didSet { keyCatcher.onEscape = onDismiss }
     }
+    /// The answer to the virtual environment question: allow, deny, or nil for not now.
+    var onVenvDecision: ((Toolchain.PythonEnvironment, VenvDecisions.Decision?) -> Void)?
 
     init(session: Session, preferences: Preferences) {
         overlay = PassthroughHostingView(rootView: PaneOverlay(session: session, preferences: preferences))
+        venvBanner = PassthroughHostingView(rootView: VenvBanner(session: session, preferences: preferences) { _, _ in })
         super.init(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+        venvBanner.rootView = VenvBanner(session: session, preferences: preferences) { [weak self] venv, decision in
+            self?.onVenvDecision?(venv, decision)
+        }
+        venvBanner.sizingOptions = [.intrinsicContentSize]
         overlay.rootView = PaneOverlay(session: session, preferences: preferences,
                                        onRestart: { [weak self] in self?.onRestart?() },
                                        onClose: { [weak self] in self?.onDismiss?() })
@@ -46,7 +57,8 @@ final class PaneView: NSView {
             self?.onScroll?()
         }
 
-        for view in [terminal, finder.highlights, fileLink, scanlines, commandMark, finder.bar, dimmer, overlay, keyCatcher] as [NSView] {
+        for view in [terminal, finder.highlights, fileLink, scanlines, commandMark, finder.bar, dimmer, venvBanner, overlay,
+                     keyCatcher] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
@@ -59,6 +71,9 @@ final class PaneView: NSView {
             keyCatcher.heightAnchor.constraint(equalToConstant: 0),
             keyCatcher.topAnchor.constraint(equalTo: topAnchor),
             keyCatcher.leadingAnchor.constraint(equalTo: leadingAnchor),
+            venvBanner.topAnchor.constraint(equalTo: topAnchor),
+            venvBanner.centerXAnchor.constraint(equalTo: centerXAnchor),
+            venvBanner.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor),
             finder.bar.topAnchor.constraint(equalTo: topAnchor, constant: 8),
             finder.bar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             barRoom,

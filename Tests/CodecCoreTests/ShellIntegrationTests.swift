@@ -218,6 +218,7 @@ struct ZshIntegrationTests {
             if case .prompt = $0 { return false }
             if case .commandLineSelection = $0 { return false }
             if case .historyFile = $0 { return false }
+            if case .toolchain = $0 { return false }
             return true
         }
         #expect(events.first == .commandStarted("sleep 0.2; false"))
@@ -809,3 +810,122 @@ struct HistoryAndCompletionTests {
     }
 }
 
+
+@Suite("Python environments in zsh", .serialized, .timeLimit(.minutes(1)),
+       .enabled(if: FileManager.default.isExecutableFile(atPath: "/bin/zsh")))
+struct VenvActivationTests {
+    /// A shell in a home with a project holding a virtual environment, `~/app/.venv`.
+    private func shell(rc: String = "", venv: Bool = true, environment: [String: String] = [:]) async throws -> (ZshHarness, String) {
+        let zsh = try ZshHarness(homeFiles: [".zshrc": "PS1='%# '\n" + rc, "app/.venv/pyvenv.cfg": "version_info = 3.14.6\nprompt = app\n",
+                                             "app/src/.keep": ""],
+                                 environment: ["CODEC_VENV": venv ? "1" : "0"].merging(environment) { _, new in new })
+        #expect(await zsh.waitForPrompt())
+        return (zsh, realPath(zsh.home) + "/app/.venv")
+    }
+
+    private func reports(_ zsh: ZshHarness) -> [ToolchainReport] {
+        zsh.payloads(6973).compactMap(IntegrationEvent.init(payload:)).compactMap { event in
+            if case .toolchain(let report) = event { return report }
+            return nil
+        }
+    }
+
+    /// Runs a command, then waits for the toolchain report it leads to (or for the prompt, when nothing changed).
+    private func run(_ zsh: ZshHarness, _ command: String) async -> ToolchainReport? {
+        #expect(await zsh.run(command))
+        #expect(await zsh.waitForPrompt())
+        return reports(zsh).last
+    }
+
+    /// The first folder on the shell's PATH.
+    private func firstOnPath(_ zsh: ZshHarness) async -> String? {
+        let before = zsh.payloads(9999).count
+        zsh.send(#"print -rn -- $'\e]9999;'"$path[1]"$'\a'"# + "\r")
+        guard await zsh.wait(until: { zsh.payloads(9999).count > before }) else { return nil }
+        #expect(await zsh.waitForPrompt())
+        return zsh.payloads(9999).last
+    }
+
+    @Test func asksOnceThenActivatesOnTheWayInAndDeactivatesOnTheWayOut() async throws {
+        let (zsh, venv) = try await shell()
+        // Below the project too.
+        #expect(await run(zsh, "cd app/src") == ToolchainReport(pending: venv))
+        #expect(await firstOnPath(zsh) != venv + "/bin")
+
+        try zsh.integration.venvDecisions.set(.allow, for: venv)
+        // Codec redraws the prompt once the user answered.
+        zsh.sendBytes(CommandLineEditing.Action.refreshPrompt.sequence)
+        #expect(await zsh.wait { reports(zsh).last == ToolchainReport(virtualEnv: venv, activatedByCodec: true) })
+        #expect(await firstOnPath(zsh) == venv + "/bin")
+
+        #expect(await run(zsh, "cd /") == ToolchainReport())
+        #expect(await firstOnPath(zsh) != venv + "/bin")
+        // Back in, without asking.
+        #expect(await run(zsh, "cd ~/app") == ToolchainReport(virtualEnv: venv, activatedByCodec: true))
+    }
+
+    @Test func activatesInTheSameCommandLineAsTheCd() async throws {
+        let (zsh, venv) = try await shell()
+        try zsh.integration.venvDecisions.set(.allow, for: venv)
+        zsh.send(#"cd app && print -rn -- $'\e]9999;'"$VIRTUAL_ENV"$'\a'"# + "\r")
+        #expect(await zsh.wait { zsh.payloads(9999).last == venv })
+    }
+
+    @Test func deactivateKeepsItOffUntilYouLeave() async throws {
+        let (zsh, venv) = try await shell()
+        try zsh.integration.venvDecisions.set(.allow, for: venv)
+        #expect(await run(zsh, "cd app")?.virtualEnv == venv)
+        #expect(await run(zsh, "deactivate") == ToolchainReport())
+        #expect(await run(zsh, "cd src") == ToolchainReport())
+        #expect(await run(zsh, "cd /tmp && cd ~/app") == ToolchainReport(virtualEnv: venv, activatedByCodec: true))
+    }
+
+    @Test func leavesOtherEnvironmentsAlone() async throws {
+        let (zsh, venv) = try await shell()
+        try zsh.integration.venvDecisions.set(.allow, for: venv)
+        #expect(await run(zsh, "export VIRTUAL_ENV=/elsewhere/.venv; cd app") == ToolchainReport(virtualEnv: "/elsewhere/.venv"))
+        // Theirs gone, the project's own is activated.
+        #expect(await run(zsh, "unset VIRTUAL_ENV") == ToolchainReport(virtualEnv: venv, activatedByCodec: true))
+        // The project's, activated by hand: deactivated by hand, Codec doesn't bring it back while here.
+        #expect(await run(zsh, "deactivate; cd /; export VIRTUAL_ENV=$HOME/app/.venv; cd ~/app") == ToolchainReport(virtualEnv: venv))
+        #expect(await run(zsh, "unset VIRTUAL_ENV") == ToolchainReport())
+    }
+
+    @Test func refusedOrTurnedOffItNeverActivates() async throws {
+        let (zsh, venv) = try await shell()
+        try zsh.integration.venvDecisions.set(.deny, for: venv)
+        #expect(await run(zsh, "cd app") == ToolchainReport())
+
+        let (off, _) = try await shell(venv: false)
+        #expect(await run(off, "cd app") == ToolchainReport())
+    }
+
+    @Test func refusingLaterTurnsItOff() async throws {
+        let (zsh, venv) = try await shell()
+        try zsh.integration.venvDecisions.set(.allow, for: venv)
+        #expect(await run(zsh, "cd app")?.virtualEnv == venv)
+        try zsh.integration.venvDecisions.set(.deny, for: venv)
+        zsh.sendBytes(CommandLineEditing.Action.refreshPrompt.sequence)
+        #expect(await zsh.wait { reports(zsh).last == ToolchainReport() })
+    }
+
+    @Test func reportsMisesToolsOnlyWhenTheyMayHaveChanged() async throws {
+        let json = #"{"ruby":[{"version":"4.0.2","installed":true}]}"#
+        let (zsh, _) = try await shell(rc: """
+            path=($HOME/bin $path)
+            _mise_hook() { :; }
+
+            """, environment: [:])
+        try zsh.temp.file("home/bin/mise", "#!/bin/sh\necho '\(json)'\n")
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: zsh.home.appendingPathComponent("bin/mise").path)
+        // Changing folders looks again.
+        #expect(await run(zsh, "rehash; cd /tmp")?.mise.contains("4.0.2") == true)
+        let count = reports(zsh).count
+        #expect(await zsh.run("true"))
+        #expect(await zsh.waitForPrompt())
+        #expect(reports(zsh).count == count)
+        // So does running mise.
+        #expect(await zsh.run("mise --version >/dev/null"))
+        #expect(await zsh.wait { reports(zsh).count == count + 1 })
+    }
+}

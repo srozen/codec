@@ -45,6 +45,10 @@ final class Session: ObservableObject {
     /// How many lines the prompt takes, its command line included.
     var promptLines = 1
     @Published var lastCommand: FinishedCommand?
+    /// The Python environment and tool versions in effect, as the shell last reported them.
+    @Published var toolchain = Toolchain()
+    /// A virtual environment found where the shell is, waiting for the user to say whether to activate it.
+    @Published var pendingVenv: Toolchain.PythonEnvironment?
 
     var abbreviatedDirectory: String {
         (directory as NSString).abbreviatingWithTildeInPath
@@ -75,6 +79,11 @@ final class Session: ObservableObject {
             commandLineSelection = active
         case .clipboard, .commandText, .historyFile, .historyRequest:
             break
+        case .toolchain(let report):
+            let toolchain = report.toolchain()
+            if toolchain != self.toolchain { self.toolchain = toolchain }
+            let pending = report.pending.map { Toolchain.PythonEnvironment.read(at: $0) ?? .init(path: $0) }
+            if pending != pendingVenv { pendingVenv = pending }
         case .commandStarted(let command):
             commandLineSelection = false
             running = RunningCommand(command: command, started: date)

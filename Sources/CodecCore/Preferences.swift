@@ -41,6 +41,11 @@ public final class Preferences: ObservableObject {
     @Published public var historyKeys: Bool { didSet { store(historyKeys, .historyKeys) } }
     /// Tab completion that ignores case, matches inside names and forgives typos (zsh).
     @Published public var friendlyCompletion: Bool { didSet { store(friendlyCompletion, .friendlyCompletion) } }
+    /// Colors file listings (`ls`, eza, completion lists) in the theme's palette, unless the
+    /// user's own color settings say otherwise.
+    @Published public var colorFileListings: Bool { didSet { store(colorFileListings, .colorFileListings) } }
+    /// Makes `ls` run eza, with icons and folders first, when it's installed (zsh).
+    @Published public var ezaForLs: Bool { didSet { store(ezaForLs, .ezaForLs) } }
     /// Keeps the commands you run, with where and how they ran, for the history.
     @Published public var recordHistory: Bool { didSet { store(recordHistory, .recordHistory) } }
     /// Opens the windows, tabs and splits from last time at launch.
@@ -60,8 +65,8 @@ public final class Preferences: ObservableObject {
     private enum Key: String {
         case themeID, fontName, fontSize, opacity, blur, scanlines, dimInactivePanes, bell, notifyInBackground,
              codecSounds, paneSounds, soundVolume, optionAsMeta, exitBehavior, shellIntegration, shellPath,
-             showSystemStats, prompt, copyOnSelect, suggestCommands, historyKeys, friendlyCompletion, recordHistory,
-             restoreWindows, restorePaneContents, showUsualDuration, explainFailures, checkForUpdates
+             showSystemStats, prompt, copyOnSelect, suggestCommands, historyKeys, friendlyCompletion, colorFileListings,
+             ezaForLs, recordHistory, restoreWindows, restorePaneContents, showUsualDuration, explainFailures, checkForUpdates
     }
 
     private static let factoryDefaults: [Key: Any] = [
@@ -86,6 +91,8 @@ public final class Preferences: ObservableObject {
         .suggestCommands: true,
         .historyKeys: true,
         .friendlyCompletion: true,
+        .colorFileListings: true,
+        .ezaForLs: false,
         .recordHistory: true,
         .restoreWindows: true,
         .restorePaneContents: true,
@@ -118,6 +125,8 @@ public final class Preferences: ObservableObject {
         suggestCommands = defaults.bool(forKey: Key.suggestCommands.rawValue)
         historyKeys = defaults.bool(forKey: Key.historyKeys.rawValue)
         friendlyCompletion = defaults.bool(forKey: Key.friendlyCompletion.rawValue)
+        colorFileListings = defaults.bool(forKey: Key.colorFileListings.rawValue)
+        ezaForLs = defaults.bool(forKey: Key.ezaForLs.rawValue)
         recordHistory = defaults.bool(forKey: Key.recordHistory.rawValue)
         restoreWindows = defaults.bool(forKey: Key.restoreWindows.rawValue)
         restorePaneContents = defaults.bool(forKey: Key.restorePaneContents.rawValue)

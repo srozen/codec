@@ -809,3 +809,41 @@ struct HistoryAndCompletionTests {
     }
 }
 
+
+@Suite("Listing files in zsh", .serialized, .timeLimit(.minutes(1)),
+       .enabled(if: FileManager.default.isExecutableFile(atPath: "/bin/zsh")))
+struct ListingTests {
+    /// A zsh whose PATH has a stand-in eza, when `eza` is true, and otherwise only the system's
+    /// folders, so an eza installed on this Mac isn't found. The .zshrc sets it, as a user's would.
+    private func shell(rc: String = "", eza: Bool = true, setting: Bool = true) async throws -> ZshHarness {
+        let path = eza ? "chmod +x ~/bin/eza; path=(~/bin $path)\n" : "path=(/usr/bin /bin)\n"
+        let zsh = try ZshHarness(homeFiles: [".zshrc": "PS1='%# '\n" + path + rc, "bin/eza": "#!/bin/sh\necho eza \"$@\"\n"],
+                                 environment: ["CODEC_EZA": setting ? "1" : "0"])
+        #expect(await zsh.waitForPrompt())
+        return zsh
+    }
+
+    private func lsAlias(_ zsh: ZshHarness) async -> String? {
+        let before = zsh.payloads(9999).count
+        zsh.send(#"print -rn -- $'\e]9999;ls='"${aliases[ls]}"$'\a'"# + "\r")
+        guard await zsh.wait(until: { zsh.payloads(9999).count > before }) else { return nil }
+        return zsh.payloads(9999).last.map { String($0.dropFirst(3)) }
+    }
+
+    @Test func lsRunsEzaWithIcons() async throws {
+        #expect(await lsAlias(try await shell()) == "eza --icons=auto --group-directories-first")
+    }
+
+    @Test func replacesAnAliasThatOnlyTurnsOnColor() async throws {
+        #expect(await lsAlias(try await shell(rc: "alias ls='ls -G'")) == "eza --icons=auto --group-directories-first")
+    }
+
+    @Test func leavesTheUsersOwnLsAlone() async throws {
+        #expect(await lsAlias(try await shell(rc: "alias ls='ls -lah'")) == "ls -lah")
+    }
+
+    @Test func doesNothingWithoutEzaOrTheSetting() async throws {
+        #expect(await lsAlias(try await shell(eza: false)) == "")
+        #expect(await lsAlias(try await shell(setting: false)) == "")
+    }
+}

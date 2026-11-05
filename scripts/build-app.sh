@@ -56,6 +56,9 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$EXECUTABLE" "$APP/Contents/MacOS/Codec"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp build/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# Nerd Fonts' symbols, which the terminal falls back to for icons the chosen font doesn't have.
+mkdir -p "$APP/Contents/Resources/Fonts"
+cp Resources/Fonts/* "$APP/Contents/Resources/Fonts/"
 # Codec sound files are optional and not in the repository; without them the app synthesizes its cues.
 if compgen -G "Resources/Sounds/*.mp3" >/dev/null; then
   mkdir -p "$APP/Contents/Resources/Sounds"

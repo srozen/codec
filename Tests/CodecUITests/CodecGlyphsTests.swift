@@ -34,9 +34,28 @@ struct CodecGlyphsTests {
     /// Claiming more would replace glyphs the terminal's font draws for other programs.
     @Test func claimsOnlyItsOwnCharacters() {
         for scalar in scalars { #expect(CodecGlyphs.shared.placementPolicy(for: scalar) != nil) }
-        for other: Unicode.Scalar in ["8", "|", "\u{2502}", "\u{1FBEF}", "\u{1FBFA}", "\u{E0B4}"] {
-            #expect(CodecGlyphs.shared.placementPolicy(for: other) == nil)
+        // Ordinary symbols the icon font also has (♥ ⚡ ❯) are left to the system, and a private-use
+        // character it lacks to whatever font has it.
+        for other: Unicode.Scalar in ["8", "|", "\u{2502}", "\u{1FBEF}", "\u{1FBFA}", "\u{2665}", "\u{26A1}", "\u{276F}", "\u{E0FF}", "\u{F8FF}"] {
+            #expect(CodecGlyphs.shared.placementPolicy(for: other) == nil, "U+\(String(other.value, radix: 16, uppercase: true))")
         }
+    }
+
+    /// Nerd Fonts' icons (a folder, Swift's bird, git's branch, a power symbol) come from the symbol
+    /// font the glyph font cascades to, placed as icons; Powerline's separators fill their cell.
+    @Test func fallsBackToNerdFontIcons() throws {
+        let font = try #require(CodecGlyphs.shared.fallbackFont(forPointSize: 13))
+        for scalar: Unicode.Scalar in ["\u{F07B}", "\u{E755}", "\u{F418}", "\u{F0001}", "\u{23FB}"] {
+            let policy = try #require(CodecGlyphs.shared.placementPolicy(for: scalar), "U+\(String(scalar.value, radix: 16, uppercase: true))")
+            #expect(policy.placement == .icon)
+            let line = CTLineCreateWithAttributedString(NSAttributedString(string: String(scalar),
+                                                                           attributes: [.init(kCTFontAttributeName as String): font]))
+            let run = try #require((CTLineGetGlyphRuns(line) as? [CTRun])?.first)
+            let runFont = (CTRunGetAttributes(run) as NSDictionary)[kCTFontAttributeName] as! CTFont
+            #expect(CTFontCopyPostScriptName(runFont) as String == "SymbolsNF")
+        }
+        #expect(CodecGlyphs.shared.placementPolicy(for: "\u{E0B4}")?.placement == .stretch)
+        #expect(CodecGlyphs.shared.placementPolicy(for: "\u{E0C0}")?.placement == .stretch)
     }
 
     /// Digits fit as one group: a 1 sits where an 8's right segments are, not stretched across the cell.

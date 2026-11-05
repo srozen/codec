@@ -133,6 +133,12 @@ extension NSColor {
         return "48;2;\(Int(round(c.redComponent * 255)));\(Int(round(c.greenComponent * 255)));\(Int(round(c.blueComponent * 255)))"
     }
 
+    /// A 24-bit foreground color as SGR parameters, as `LS_COLORS` takes them.
+    var sgrForeground: String {
+        let c = usingColorSpace(.sRGB) ?? self
+        return "38;2;\(Int(round(c.redComponent * 255)));\(Int(round(c.greenComponent * 255)));\(Int(round(c.blueComponent * 255)))"
+    }
+
     convenience init(hex: UInt32) {
         self.init(
             srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,

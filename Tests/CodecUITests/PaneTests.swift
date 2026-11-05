@@ -32,6 +32,30 @@ struct PaneTests {
         #expect(shellEnv["CODEC_SHELL_INTEGRATION"] == nil)
     }
 
+    @Test func colorsFileListingsUnlessTurnedOff() throws {
+        let env = try TestEnvironment()
+        defer { env.tearDown() }
+        let pane = env.makePane()
+        defer { pane.shutDown() }
+        let inherited = ProcessInfo.processInfo.environment
+        let colored = pane.shellEnvironment(shell: "/bin/zsh")
+        #expect(colored["CLICOLOR"] == inherited["CLICOLOR"] ?? "1")
+        #expect(colored["LSCOLORS"] == inherited["LSCOLORS"] ?? FileListingColors.bsd)
+        if inherited["LS_COLORS"] == nil {
+            #expect(colored["LS_COLORS"]?.contains("*.swift=91") == true)
+            // Shell scripts in the theme's accent.
+            #expect(colored["LS_COLORS"]?.contains("*.sh=38;2;") == true)
+        }
+        #expect(colored["CODEC_EZA"] == "0")
+
+        env.preferences.colorFileListings = false
+        env.preferences.ezaForLs = true
+        let plain = pane.shellEnvironment(shell: "/bin/zsh")
+        #expect(plain["CLICOLOR"] == inherited["CLICOLOR"])
+        #expect(plain["LS_COLORS"] == inherited["LS_COLORS"])
+        #expect(plain["CODEC_EZA"] == "1")
+    }
+
     @Test func addsIntegrationOnlyForZsh() throws {
         let env = try TestEnvironment(integration: true)
         defer { env.tearDown() }

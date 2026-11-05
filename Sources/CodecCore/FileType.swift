@@ -60,6 +60,42 @@ public enum FileType: String, CaseIterable, Sendable {
         for (type, extensions) in groups { for ext in extensions { map[ext] = type } }
         return map
     }()
+
+    /// The extensions that mean this type, sorted.
+    public var extensions: [String] {
+        Self.byExtension.filter { $0.value == self }.map(\.key).sorted()
+    }
+
+    /// The color a file of this type is shown in: its icon in the file tree, its name in `ls`.
+    public var color: FileColor {
+        switch self {
+        case .swift, .java, .html, .git: .ansi(9)
+        case .javascript, .json, .environment, .archive: .ansi(3)
+        case .typescript, .lua, .readme: .ansi(4)
+        case .python, .sql: .ansi(6)
+        case .ruby, .pdf: .ansi(1)
+        case .go, .xml: .ansi(14)
+        case .rust, .manifest, .license: .ansi(11)
+        case .c, .cpp, .objectiveC, .css, .markdown, .docker: .ansi(12)
+        case .kotlin, .csharp, .yaml, .image: .ansi(5)
+        case .php, .toml, .vector, .video: .ansi(13)
+        case .csv: .ansi(2)
+        case .shell, .audio: .accent
+        case .text, .config, .font: .neutral(0.62)
+        case .lockfile, .binary: .neutral(0.5)
+        case .log, .other: .neutral(0.45)
+        }
+    }
+}
+
+/// A color from the theme, named the way the terminal knows it, so `ls` can show it too.
+public enum FileColor: Equatable, Sendable {
+    /// One of the 16 terminal colors.
+    case ansi(Int)
+    /// The theme's accent.
+    case accent
+    /// The text color washed over the background by this fraction: muted, the lower the more.
+    case neutral(Double)
 }
 
 /// What kind of folder a name suggests.
@@ -77,6 +113,20 @@ public enum FolderType: String, CaseIterable, Sendable {
         case "node_modules", "pods", "vendor", "packages", ".venv", "venv", "carthage", "checkouts": .dependencies
         case "build", ".build", "dist", "out", "target", "deriveddata", "__pycache__", "coverage", ".next": .build
         default: .plain
+        }
+    }
+
+    /// The color a folder of this kind is shown in, in the file tree.
+    public var color: FileColor {
+        switch self {
+        case .plain: .neutral(0.7)
+        case .source: .ansi(12)
+        case .tests: .ansi(10)
+        case .docs: .ansi(11)
+        case .assets: .ansi(13)
+        case .scripts: .ansi(14)
+        case .config: .neutral(0.5)
+        case .dependencies, .build: .neutral(0.36)
         }
     }
 }

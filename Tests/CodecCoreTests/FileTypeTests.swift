@@ -28,4 +28,10 @@ struct FileTypeTests {
     func classifiesFolders(name: String, expected: FolderType) {
         #expect(FolderType.of(folderNamed: name) == expected)
     }
+
+    @Test func listsATypesExtensions() {
+        #expect(FileType.swift.extensions == ["swift"])
+        #expect(FileType.typescript.extensions == ["cts", "mts", "ts", "tsx"])
+        #expect(FileType.other.extensions.isEmpty)
+    }
 }

@@ -308,6 +308,19 @@ struct WindowTests {
         #expect(window.model.selected?.focused.session.directory == sub.path)
     }
 
+    /// How Settings installs eza: the command runs in a new tab as soon as its shell starts.
+    @Test func runsACommandInANewTab() async throws {
+        let env = try TestEnvironment()
+        defer { env.tearDown() }
+        let window = makeWindow(env)
+        defer { close(window) }
+        let marker = env.directory.appendingPathComponent("ran")
+        window.run("touch " + ShellQuoting.quote(marker.path))
+        #expect(window.model.tabs.count == 2)
+        #expect(window.model.selectedID == window.model.tabs[1].id)
+        #expect(await waitUntil { FileManager.default.fileExists(atPath: marker.path) })
+    }
+
     @Test func splitsAndClosesPanes() throws {
         let env = try TestEnvironment()
         defer { env.tearDown() }

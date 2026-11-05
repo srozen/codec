@@ -73,3 +73,13 @@ Codec keeps its own record in `~/Library/Application Support/Codec/history.jsonl
 - Ambiguous completions open a menu you can move through with the arrows, in the theme's colors, folders first.
 
 Codec loads zsh's completion system if your `.zshrc` doesn't, and never overrides completion styles you set yourself. Each of these can be turned off in Settings › Shell.
+
+## Listing files
+
+`ls` shows files in color: folders blue, links cyan, executables green, and every other file in the color its icon has in the [file tree](files-and-editor.md#file-tree), so Swift files are red and Markdown is blue in both. They're the theme's terminal colors, so a listing follows the theme. The same colors go to eza, GNU `ls` and the completion menu, through `CLICOLOR`, `LSCOLORS` and `LS_COLORS`; any of those your own startup files set wins.
+
+With [eza](https://eza.rocks) installed, turn on Settings › Shell › Use eza for ls and `ls` runs `eza --icons=auto --group-directories-first`: an icon by each name, folders first. An `ls` alias or function of your own is left alone, unless all it does is turn on color (`ls -G`). zsh only.
+
+Without eza, Settings offers to install it: Install with Homebrew runs `brew install eza` in a new tab, where you can watch it, and turns the setting on for the panes you open after. Without Homebrew, it links to eza's install instructions.
+
+Icons show whatever font you use. They're Nerd Fonts' symbols, which Codec carries and falls back to when your font doesn't have them, so starship, lsd, Neovim file trees and anything else that prints them shows them too. A font patched with them (a Nerd Font) keeps its own.

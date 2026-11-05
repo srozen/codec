@@ -10,7 +10,7 @@ How to use Codec, a feature at a time. New here? Start with [Getting started](ge
 | [Commands sidebar](commands-sidebar.md) | Every command the pane ran, with its output, to go back to |
 | [Intel](intel.md) | Saved scripts with variables and notes, personal or shared with the project, in folders; the file format |
 | [Files and editor](files-and-editor.md) | The file tree, the editor, Markdown preview |
-| [Prompt and status bar](prompt-and-status-bar.md) | The prompt builder, the status bar, the branch switcher, system meters |
+| [Prompt and status bar](prompt-and-status-bar.md) | The prompt builder, the status bar, the branch switcher, Python environments and tool versions, system meters |
 | [Settings](settings.md) | Themes, fonts, the window, the shell, alerts and sounds, updates |
 | [Keyboard shortcuts](shortcuts.md) | All of them, in one table |
 | [Development](development.md) | Architecture, tests, CI, and retaking the screenshots |

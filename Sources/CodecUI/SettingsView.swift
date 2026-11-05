@@ -12,6 +12,8 @@ struct SettingsView: View {
     let preferences: Preferences
     let sounds: any SoundPlaying
     var history: HistoryStore?
+    /// The answers about which virtual environments to activate, to forget them.
+    var venvDecisions: VenvDecisions?
     /// Runs a command in a new terminal tab: nil where there's no app to open one.
     var runCommand: ((String) -> Void)?
     var updates: Updates?
@@ -20,7 +22,7 @@ struct SettingsView: View {
         TabView {
             AppearanceSettings(prefs: preferences)
                 .tabItem { Label("Appearance", systemImage: "paintpalette") }
-            ShellSettings(prefs: preferences, history: history, runCommand: runCommand)
+            ShellSettings(prefs: preferences, history: history, venvDecisions: venvDecisions, runCommand: runCommand)
                 .tabItem { Label("Shell", systemImage: "terminal") }
             PromptSettings(prefs: preferences)
                 .tabItem { Label("Prompt", systemImage: "chevron.right.square") }
@@ -36,9 +38,11 @@ struct SettingsView: View {
     /// The Settings window: resizable, sized to fit the screen, with each tab scrolling on its own.
     @MainActor
     static func makeWindow(preferences: Preferences, sounds: any SoundPlaying, history: HistoryStore? = nil,
-                           runCommand: ((String) -> Void)? = nil, updates: Updates? = nil) -> NSWindow {
+                           venvDecisions: VenvDecisions? = nil, runCommand: ((String) -> Void)? = nil,
+                           updates: Updates? = nil) -> NSWindow {
         let controller = NSHostingController(rootView: SettingsView(preferences: preferences, sounds: sounds, history: history,
-                                                                    runCommand: runCommand, updates: updates))
+                                                                    venvDecisions: venvDecisions, runCommand: runCommand,
+                                                                    updates: updates))
         controller.sizingOptions = [.minSize]
         let window = NSWindow(contentViewController: controller)
         window.title = "Settings"
@@ -159,10 +163,20 @@ private struct ThemeCard: View {
 private struct ShellSettings: View {
     @ObservedObject var prefs: Preferences
     var history: HistoryStore?
+    var venvDecisions: VenvDecisions?
     var runCommand: ((String) -> Void)?
     @State private var confirmingClear = false
     /// Checked again whenever a window comes forward, so the offer to install goes once it's done.
     @State private var ezaInstalled = Eza.isInstalled()
+    @StateObject private var venvs: VenvDecisionsModel
+
+    init(prefs: Preferences, history: HistoryStore?, venvDecisions: VenvDecisions?, runCommand: ((String) -> Void)?) {
+        self.prefs = prefs
+        self.history = history
+        self.venvDecisions = venvDecisions
+        self.runCommand = runCommand
+        _venvs = StateObject(wrappedValue: VenvDecisionsModel(decisions: venvDecisions))
+    }
 
     var body: some View {
         Form {
@@ -200,6 +214,18 @@ private struct ShellSettings: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
                 ezaInstalled = Eza.isInstalled()
+            }
+            Section {
+                Toggle("Activate a project’s Python environment (.venv)", isOn: $prefs.activateVenvs)
+                if venvDecisions != nil {
+                    VenvDecisionsList(model: venvs)
+                        .onAppear { venvs.reload() }
+                }
+            } header: {
+                Text("Project environments")
+            } footer: {
+                Text("When you go into a folder with a .venv, or below one, Codec asks whether to activate it: Always, This Time, or Never. Your answers are listed above, to change or forget; one about a project that can’t be found is flagged, in case it moved or its disk isn’t connected. Once allowed, Codec activates it on the way in and deactivates it on the way out. One you activate yourself, or that mise activates, is left alone. The status bar counts the environment (a conda one too) and the tool versions mise, pyenv, nvm, asdf and the like picked; click it for the list, with where each comes from. Applies to new panes; zsh only.")
+                    .foregroundStyle(.secondary)
             }
             Section {
                 Toggle("Offer to explain failed commands", isOn: $prefs.explainFailures)

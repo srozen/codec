@@ -82,6 +82,8 @@ public struct TimelineEntry: Identifiable, Codable, Equatable, Sendable {
     public var fullScreen = false
     /// How long it usually takes, as known when it started; see `UsualDuration`.
     public var usualDuration: TimeInterval?
+    /// The Python environment and tool versions it ran with, when there were any.
+    public var toolchain: Toolchain?
 
     public init(id: Int, command: String, screenCommand: String? = nil, directory: String, started: Date,
                 block: CommandBlocks.Block?) {
@@ -131,13 +133,15 @@ public struct CommandTimeline: Codable, Equatable, Sendable {
     /// A command started. Anything still marked running ended without a report (the shell was killed).
     @discardableResult
     public mutating func begin(command: String, screenCommand: String? = nil, directory: String, started: Date,
-                               block: CommandBlocks.Block?, usualDuration: TimeInterval? = nil) -> Int {
+                               block: CommandBlocks.Block?, usualDuration: TimeInterval? = nil,
+                               toolchain: Toolchain? = nil) -> Int {
         abandonRunning()
         let id = nextID
         nextID += 1
         var entry = TimelineEntry(id: id, command: command, screenCommand: screenCommand, directory: directory,
                                   started: started, block: block)
         entry.usualDuration = usualDuration
+        entry.toolchain = toolchain.flatMap { $0.isEmpty ? nil : $0 }
         entries.append(entry)
         if entries.count > limit { entries.removeFirst(entries.count - limit) }
         return id

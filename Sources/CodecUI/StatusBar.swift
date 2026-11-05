@@ -48,6 +48,7 @@ private struct TabStatus: View {
         let pane = tab.focused
         SessionStatus(session: pane.session, theme: theme,
                       onBranchChanged: { [weak pane] in pane?.gitBranchDidChange() },
+                      run: { [weak pane] command in pane?.runAtPrompt(command) ?? false },
                       explain: explain.map { explain in { [weak pane] in if let pane { explain(pane) } } })
             .id(ObjectIdentifier(pane))
     }
@@ -57,6 +58,8 @@ private struct SessionStatus: View {
     @ObservedObject var session: Session
     let theme: CodecTheme
     var onBranchChanged: () -> Void
+    /// Runs a command at the pane's prompt; false when the shell is busy.
+    var run: (String) -> Bool
     /// Explain, beside a failed command; nil when explaining isn't offered.
     var explain: (() -> Void)?
     @State private var choosingBranch = false
@@ -81,6 +84,7 @@ private struct SessionStatus: View {
                                  onSwitched: onBranchChanged, onDismiss: { choosingBranch = false })
                 }
             }
+            ToolchainStatus(session: session, theme: theme, run: run)
             commandStatus
         }
     }

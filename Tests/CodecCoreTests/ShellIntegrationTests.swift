@@ -833,9 +833,16 @@ struct VenvActivationTests {
     }
 
     /// Runs a command, then waits for the toolchain report it leads to (or for the prompt, when nothing changed).
+    /// The report comes before the prompt's line count, which is what's waited for: not `waitForPrompt`,
+    /// which a prompt redrawn by a widget (Codec's refresh, This Time) satisfies one prompt early.
     private func run(_ zsh: ZshHarness, _ command: String) async -> ToolchainReport? {
+        let before = zsh.payloads(6973).count
         #expect(await zsh.run(command))
-        #expect(await zsh.waitForPrompt())
+        #expect(await zsh.wait {
+            let new = zsh.payloads(6973).dropFirst(before)
+            guard let done = new.lastIndex(where: { $0.hasPrefix("done;") }) else { return false }
+            return new[done...].contains { $0.hasPrefix("prompt;") }
+        })
         return reports(zsh).last
     }
 

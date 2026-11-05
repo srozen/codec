@@ -14,13 +14,15 @@ struct SettingsView: View {
     var history: HistoryStore?
     /// The answers about which virtual environments to activate, to forget them.
     var venvDecisions: VenvDecisions?
+    /// Runs a command in a new terminal tab: nil where there's no app to open one.
+    var runCommand: ((String) -> Void)?
     var updates: Updates?
 
     var body: some View {
         TabView {
             AppearanceSettings(prefs: preferences)
                 .tabItem { Label("Appearance", systemImage: "paintpalette") }
-            ShellSettings(prefs: preferences, history: history, venvDecisions: venvDecisions)
+            ShellSettings(prefs: preferences, history: history, venvDecisions: venvDecisions, runCommand: runCommand)
                 .tabItem { Label("Shell", systemImage: "terminal") }
             PromptSettings(prefs: preferences)
                 .tabItem { Label("Prompt", systemImage: "chevron.right.square") }
@@ -36,9 +38,11 @@ struct SettingsView: View {
     /// The Settings window: resizable, sized to fit the screen, with each tab scrolling on its own.
     @MainActor
     static func makeWindow(preferences: Preferences, sounds: any SoundPlaying, history: HistoryStore? = nil,
-                           venvDecisions: VenvDecisions? = nil, updates: Updates? = nil) -> NSWindow {
+                           venvDecisions: VenvDecisions? = nil, runCommand: ((String) -> Void)? = nil,
+                           updates: Updates? = nil) -> NSWindow {
         let controller = NSHostingController(rootView: SettingsView(preferences: preferences, sounds: sounds, history: history,
-                                                                    venvDecisions: venvDecisions, updates: updates))
+                                                                    venvDecisions: venvDecisions, runCommand: runCommand,
+                                                                    updates: updates))
         controller.sizingOptions = [.minSize]
         let window = NSWindow(contentViewController: controller)
         window.title = "Settings"
@@ -160,13 +164,17 @@ private struct ShellSettings: View {
     @ObservedObject var prefs: Preferences
     var history: HistoryStore?
     var venvDecisions: VenvDecisions?
+    var runCommand: ((String) -> Void)?
     @State private var confirmingClear = false
+    /// Checked again whenever a window comes forward, so the offer to install goes once it's done.
+    @State private var ezaInstalled = Eza.isInstalled()
     @StateObject private var venvs: VenvDecisionsModel
 
-    init(prefs: Preferences, history: HistoryStore?, venvDecisions: VenvDecisions?) {
+    init(prefs: Preferences, history: HistoryStore?, venvDecisions: VenvDecisions?, runCommand: ((String) -> Void)?) {
         self.prefs = prefs
         self.history = history
         self.venvDecisions = venvDecisions
+        self.runCommand = runCommand
         _venvs = StateObject(wrappedValue: VenvDecisionsModel(decisions: venvDecisions))
     }
 
@@ -193,6 +201,19 @@ private struct ShellSettings: View {
             } footer: {
                 Text("Suggestions appear dimmed after the cursor: → or End takes them, ⌥→ one word. Friendlier completion ignores case, matches inside names (“dev” finds “Development”), forgives a typo in longer words and lets you pick with the arrows. Settings from your .zshrc win. Applies to new panes; zsh only.")
                     .foregroundStyle(.secondary)
+            }
+            Section {
+                Toggle("Color files by type", isOn: $prefs.colorFileListings)
+                Toggle("Use eza for ls, with icons", isOn: $prefs.ezaForLs)
+                if !ezaInstalled { installEza }
+            } header: {
+                Text("Listing files")
+            } footer: {
+                Text("Colors ls, eza and Tab completion in the theme’s palette, as files are in the file tree, unless your .zshrc sets its own. With eza, ls shows an icon by each name and folders first. Icons show in any font. Applies to new panes; eza in zsh only.")
+                    .foregroundStyle(.secondary)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+                ezaInstalled = Eza.isInstalled()
             }
             Section {
                 Toggle("Activate a project’s Python environment (.venv)", isOn: $prefs.activateVenvs)
@@ -247,6 +268,24 @@ private struct ShellSettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// With Homebrew, installing runs in a new tab, where you can watch it (and answer it), and turns
+    /// eza on for the panes after it. Without, eza's own instructions.
+    @ViewBuilder private var installEza: some View {
+        LabeledContent {
+            if let command = Eza.installCommand(), let runCommand {
+                Button("Install with Homebrew") {
+                    prefs.ezaForLs = true
+                    runCommand(command)
+                }
+                .help("Runs \(command) in a new tab")
+            } else {
+                Link("How to Install eza…", destination: Eza.instructions)
+            }
+        } label: {
+            Text("eza isn’t installed").foregroundStyle(.secondary)
+        }
     }
 }
 

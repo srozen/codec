@@ -29,6 +29,10 @@ struct ScreenshotTour {
         }
         try makeHome(home, project: project)
         setenv("ZDOTDIR", home.path, 1)
+        // swift test sets NO_COLOR, which the panes would pass on to eza; Codec opened from the Finder has none.
+        let noColor = ProcessInfo.processInfo.environment["NO_COLOR"]
+        unsetenv("NO_COLOR")
+        defer { if let noColor { setenv("NO_COLOR", noColor, 1) } }
         var prompt = PromptConfiguration.default
         prompt.style = .codec
         env.preferences.prompt = prompt
@@ -48,6 +52,7 @@ struct ScreenshotTour {
         try await history(env, project: project)
         try await editor(env, project: project)
         try await openFile(env, project: project)
+        try await listing(env, project: project)
         try await branches(env, project: project)
         try await themes(env, project: project)
         try await usualDuration(env, project: project)
@@ -149,11 +154,26 @@ struct ScreenshotTour {
         let (controller, pane) = try await window(env, project: project, size: NSSize(width: 900, height: 480))
         defer { close(controller) }
         try await run("ls", in: pane)
-        try await run("ls Sources/CodecCore | head -8", in: pane)
+        try await run("ls Sources/CodecCore | head -10", in: pane)
         try point(pane, at: "FileTree.swift")
         pane.refreshFileLink(modifiers: .command)
         try await settle(seconds: 0.5)
         try await capture(controller.window!, as: "open-file")
+    }
+
+    /// `ls` through eza, with icons and folders first, then a long listing with git's status; plain
+    /// `ls` where eza isn't installed.
+    private func listing(_ env: TestEnvironment, project: URL) async throws {
+        if !Eza.isInstalled() { Issue.record("eza isn't installed, so the listing shows no icons") }
+        env.preferences.ezaForLs = true
+        defer { env.preferences.ezaForLs = false }
+        let (controller, pane) = try await window(env, project: project, size: NSSize(width: 900, height: 560))
+        defer { close(controller) }
+        try await run("ls", in: pane)
+        // Not piped: eza leaves icons and color out when it isn't writing to a terminal.
+        try await run("ls -l --git --no-user --no-time", in: pane)
+        try await settle()
+        try await capture(controller.window!, as: "listing")
     }
 
     /// Puts the pointer on the last `name` on screen, as the terminal lays out its cells.
@@ -509,6 +529,7 @@ struct ScreenshotTour {
         // `make test` stands in for the test suite: test output for twelve seconds, rather than a real build.
         let zshrc = #"""
             export EDITOR=vim
+            path+=(/opt/homebrew/bin /usr/local/bin)
             HISTFILE=~/.zsh_history
             PS1='%~ %# '
             # A stand-in for mise, active as `mise activate` makes it, with tools only in the storefront.

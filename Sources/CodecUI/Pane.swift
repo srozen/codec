@@ -251,6 +251,10 @@ final class Pane: LocalProcessTerminalViewDelegate {
         // Suggestions in the theme's muted color; the completion menu's pick in its selection color.
         env["CODEC_SUGGESTION_STYLE"] = "fg=" + (theme.background.blended(withFraction: 0.45, of: theme.foreground) ?? theme.foreground).hexString
         env["CODEC_MENU_SELECTION"] = theme.selection.sgrBackground
+        env["CODEC_EZA"] = preferences.ezaForLs ? "1" : "0"
+        if preferences.colorFileListings {
+            env = FileListingColors.environment(env, accent: theme.accent.sgrForeground)
+        }
         if preferences.shellIntegration, let integration = environment.shellIntegration {
             env = integration.environment(env, forShell: shell)
         }

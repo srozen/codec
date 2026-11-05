@@ -56,17 +56,17 @@ enum FileIcons {
         theme.background.blended(withFraction: amount ?? (theme.isDark ? 0.2 : 0.16), of: color) ?? color
     }
 
-    private static func folderColor(_ folder: FolderType, theme: CodecTheme) -> NSColor {
-        switch folder {
-        case .plain: neutral(theme, 0.7)
-        case .source: ansi(12, theme)
-        case .tests: ansi(10, theme)
-        case .docs: ansi(11, theme)
-        case .assets: ansi(13, theme)
-        case .scripts: ansi(14, theme)
-        case .config: neutral(theme, 0.5)
-        case .dependencies, .build: neutral(theme, 0.36)
+    /// A palette color, as the theme draws it.
+    static func color(_ color: FileColor, theme: CodecTheme) -> NSColor {
+        switch color {
+        case .ansi(let index): ansi(index, theme)
+        case .accent: theme.accent
+        case .neutral(let amount): neutral(theme, amount)
         }
+    }
+
+    private static func folderColor(_ folder: FolderType, theme: CodecTheme) -> NSColor {
+        color(folder.color, theme: theme)
     }
 
     // MARK: Marks
@@ -79,57 +79,58 @@ enum FileIcons {
     }
 
     private static func style(for type: FileType, theme: CodecTheme) -> (mark: Mark, color: NSColor) {
-        let a = { (index: Int) in ansi(index, theme) }
-        switch type {
-        case .swift: return (.letters("SW"), a(9))
-        case .javascript: return (.letters("JS"), a(3))
-        case .typescript: return (.letters("TS"), a(4))
-        case .python: return (.letters("PY"), a(6))
-        case .ruby: return (.letters("RB"), a(1))
-        case .go: return (.letters("GO"), a(14))
-        case .rust: return (.letters("RS"), a(11))
-        case .c: return (.letters("C"), a(12))
-        case .cpp: return (.letters("C+"), a(12))
-        case .objectiveC: return (.letters("OC"), a(12))
-        case .java: return (.letters("JV"), a(9))
-        case .kotlin: return (.letters("KT"), a(5))
-        case .csharp: return (.letters("C#"), a(5))
-        case .php: return (.letters("PH"), a(13))
-        case .lua: return (.letters("LU"), a(4))
-        case .sql: return (.letters("SQ"), a(6))
-        case .html: return (.angle, a(9))
-        case .css: return (.letters("#"), a(12))
-        case .shell: return (.prompt, theme.accent)
-        case .markdown: return (.letters("MD"), a(12))
-        case .text: return (.lines, neutral(theme))
-        case .pdf: return (.lines, a(1))
-        case .json: return (.braces, a(3))
-        case .yaml: return (.indented, a(5))
-        case .toml: return (.indented, a(13))
-        case .xml: return (.angle, a(14))
-        case .config: return (.sliders, neutral(theme))
-        case .log: return (.lines, neutral(theme, 0.45))
-        case .csv: return (.grid, a(2))
-        case .image: return (.picture, a(5))
-        case .vector: return (.curve, a(13))
-        case .audio: return (.bars, theme.accent)
-        case .video: return (.play, a(13))
-        case .font: return (.typeface, neutral(theme))
-        case .manifest: return (.cube, a(11))
-        case .lockfile: return (.padlock, neutral(theme, 0.5))
-        case .docker: return (.containers, a(12))
-        case .git: return (.branch, a(9))
-        case .environment: return (.key, a(3))
-        case .license: return (.check, a(11))
-        case .readme: return (.info, a(4))
-        case .archive: return (.zipper, a(3))
-        case .binary: return (.letters("01"), neutral(theme, 0.5))
-        case .other: return (.lines, neutral(theme, 0.45))
-        }
+        (mark(for: type), color(type.color, theme: theme))
     }
 
-    /// The mark a type is drawn with, for tests.
-    static func mark(for type: FileType) -> Mark { style(for: type, theme: .codec).mark }
+    /// The mark a type is drawn with.
+    static func mark(for type: FileType) -> Mark {
+        switch type {
+        case .swift: return .letters("SW")
+        case .javascript: return .letters("JS")
+        case .typescript: return .letters("TS")
+        case .python: return .letters("PY")
+        case .ruby: return .letters("RB")
+        case .go: return .letters("GO")
+        case .rust: return .letters("RS")
+        case .c: return .letters("C")
+        case .cpp: return .letters("C+")
+        case .objectiveC: return .letters("OC")
+        case .java: return .letters("JV")
+        case .kotlin: return .letters("KT")
+        case .csharp: return .letters("C#")
+        case .php: return .letters("PH")
+        case .lua: return .letters("LU")
+        case .sql: return .letters("SQ")
+        case .html: return .angle
+        case .css: return .letters("#")
+        case .shell: return .prompt
+        case .markdown: return .letters("MD")
+        case .text: return .lines
+        case .pdf: return .lines
+        case .json: return .braces
+        case .yaml: return .indented
+        case .toml: return .indented
+        case .xml: return .angle
+        case .config: return .sliders
+        case .log: return .lines
+        case .csv: return .grid
+        case .image: return .picture
+        case .vector: return .curve
+        case .audio: return .bars
+        case .video: return .play
+        case .font: return .typeface
+        case .manifest: return .cube
+        case .lockfile: return .padlock
+        case .docker: return .containers
+        case .git: return .branch
+        case .environment: return .key
+        case .license: return .check
+        case .readme: return .info
+        case .archive: return .zipper
+        case .binary: return .letters("01")
+        case .other: return .lines
+        }
+    }
 
     // MARK: Drawing
 

@@ -209,11 +209,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
     }
 
+    /// Runs `command` in a new tab of the frontmost Codec window (Settings may be in front of it), or
+    /// in a new window when none is open.
+    private func runInNewTab(_ command: String) {
+        if let frontmost = NSApp.orderedWindows.lazy.compactMap({ window in self.windows.first { $0.window === window } }).first {
+            frontmost.run(command)
+        } else {
+            let controller = makeWindow(restoring: nil)
+            open(controller)
+            controller.run(command, inNewTab: false)
+        }
+    }
+
     @objc func showSettings(_ sender: Any?) {
         if settingsWindow == nil {
             settingsWindow = SettingsView.makeWindow(preferences: environment.preferences, sounds: environment.sounds,
                                                      history: environment.history,
                                                      venvDecisions: environment.shellIntegration?.venvDecisions,
+                                                     runCommand: { [weak self] in self?.runInNewTab($0) },
                                                      updates: updater.map { updater in
                                                          SettingsView.Updates(version: "\(updater.current)") { [weak updater] in
                                                              updater?.checkNow()

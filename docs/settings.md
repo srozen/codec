@@ -16,6 +16,7 @@ Open Settings with ⌘,. Changes apply as you make them, unless a setting says i
 - **Shell**: the program panes run (your login shell by default), and whether Option acts as Meta.
 - **Shell integration**: what makes the zsh features work. See [Getting started › Shell integration](getting-started.md#shell-integration-zsh).
 - **Command line**: suggestions from history as you type, ↑ and ⌃R for the history menu and search, friendlier Tab completion (these apply to new panes; your `.zshrc` settings win), and [how long commands usually take](commands-sidebar.md#how-long-it-usually-takes).
+- **Listing files**: whether `ls`, eza and Tab completion show files in the theme's colors, and whether `ls` runs eza, with icons (with a button to install eza when it's missing). See [The command line › Listing files](command-line.md#listing-files). These apply to new panes.
 - **Project environments**: whether to [activate a project's Python environment](prompt-and-status-bar.md#project-environments-zsh) (`.venv`) when you go into it, and your answer for each project: change it, forget it so Codec asks again, or remove the ones about projects that can't be found anymore, which are flagged.
 - **Apple Intelligence**: whether failed commands offer to be [explained](commands-sidebar.md#why-did-it-fail) by Apple's on-device model.
 - **History**: whether Codec records the commands you run, and a button to forget everything recorded so far. Forgetting also hides older commands from your shell's history file in Codec, without changing the file.

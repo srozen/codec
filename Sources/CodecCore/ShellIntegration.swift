@@ -10,7 +10,8 @@ import Foundation
 /// out, once the user said yes; their answers are kept in `venvDecisions`.
 ///
 /// It also adds history suggestions as you type, ↑ and ⌃R for Codec's history, and friendlier Tab
-/// completion, each when Codec sets `CODEC_SUGGESTIONS`, `CODEC_HISTORY_KEYS` or `CODEC_COMPLETION`.
+/// completion, each when Codec sets `CODEC_SUGGESTIONS`, `CODEC_HISTORY_KEYS` or `CODEC_COMPLETION`, and
+/// makes `ls` run eza when it sets `CODEC_EZA`.
 ///
 /// The user's own startup files still load, unchanged: the bootstrap `.zshenv` restores `ZDOTDIR`
 /// before zsh looks for `.zprofile` and `.zshrc`.
@@ -558,6 +559,17 @@ public struct ShellIntegration: Sendable {
       unsetopt LIST_BEEP
     }
 
+    # --- Listing files ------------------------------------------------------------------
+    # ls runs eza, with icons and folders first, when it's installed. An ls alias or function of your
+    # own wins, unless it only turns on color.
+    _codec_setup_listing() {
+      [[ $CODEC_EZA == 1 ]] && (( $+commands[eza] )) || return 0
+      (( $+functions[ls] )) && return 0
+      setopt localoptions extendedglob
+      [[ -z ${aliases[ls]} || ${aliases[ls]} == (command |)ls( ##(-G|--color(=auto|=tty|)))# ]] || return 0
+      alias ls='eza --icons=auto --group-directories-first'
+    }
+
     # Install on the first prompt so these hooks wrap whatever .zshrc set up.
     _codec_install() {
       precmd_functions=(_codec_capture_status ${precmd_functions:#_codec_install} _codec_precmd)
@@ -567,6 +579,7 @@ public struct ShellIntegration: Sendable {
       _codec_setup_suggestions
       _codec_setup_history_keys
       _codec_setup_completion
+      _codec_setup_listing
       [[ -n $HISTFILE ]] && _codec_osc "6973;histfile;$HISTFILE"
       _codec_precmd
     }

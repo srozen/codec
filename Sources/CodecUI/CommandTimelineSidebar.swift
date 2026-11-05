@@ -757,9 +757,9 @@ final class TimelineDirectoryCell: NSTableCellView {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
-        // The folder gives way before the versions, which are short.
+        // The versions give way before the folder, which says where the commands ran.
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        tools.setContentCompressionResistancePriority(.defaultLow + 1, for: .horizontal)
+        tools.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
         tools.setContentHuggingPriority(.required, for: .horizontal)
         NSLayoutConstraint.activate([
             icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
@@ -783,13 +783,18 @@ final class TimelineDirectoryCell: NSTableCellView {
         label.textColor = .secondaryLabelColor
         icon.contentTintColor = .tertiaryLabelColor
         tools.stringValue = toolchain?.shortSummary ?? ""
-        tools.textColor = toolchain?.missing.isEmpty == false ? theme.warning : .tertiaryLabelColor
+        tools.textColor = toolchain?.needingAttention.isEmpty == false ? theme.warning : .tertiaryLabelColor
         tools.isHidden = toolchain == nil
         toolTip = [directory, toolchain?.summary].compactMap { $0 }.joined(separator: "\n")
     }
 
     /// What the heading shows, for tests.
     var shown: (directory: String, tools: String?) { (label.stringValue, tools.isHidden ? nil : tools.stringValue) }
+
+    /// Where the folder and the versions are laid out, and how wide the folder would like to be, for tests.
+    var shownFrames: (directory: NSRect, directoryFittingWidth: CGFloat, tools: NSRect) {
+        (label.frame, label.fittingSize.width, tools.frame)
+    }
 }
 
 /// A thin line filled to a fraction, on a faint track of the same color.

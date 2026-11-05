@@ -8,7 +8,7 @@ Open it with ⇧⌘L, or the sidebar button at the right end of the tab bar. It 
 
 ## What it shows
 
-Commands are listed oldest first, under the folder they ran in. When a [Python environment or tool versions](prompt-and-status-bar.md#project-environments-zsh) were in effect, the heading shows those too (`py 3.14.6 · ruby 4.0.2`, with `!` after a version that isn't installed), and a new heading starts whenever they change. Each row has:
+Commands are listed oldest first, under the folder they ran in. When a [Python environment or tool versions](prompt-and-status-bar.md#project-environments-zsh) were in effect, the heading shows those too (`py 3.14.6 · ruby 4.0.2`, with `!` after a version that isn't installed, or isn't the one the project asks for), and a new heading starts whenever they change. Each row has:
 
 - a green or red dot for whether it worked (pulsing while it runs),
 - when it ran and how long it took,

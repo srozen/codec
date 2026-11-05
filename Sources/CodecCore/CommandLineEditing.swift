@@ -32,6 +32,8 @@ public enum CommandLineEditing {
         /// Marks the command line as put there whole (from history), so it suggests nothing more until
         /// it's edited, as zsh-autosuggestions does after ↑.
         case recalled
+        /// Activates the virtual environment the shell just asked about, this time only.
+        case activateVenvOnce
 
         /// `ESC [ <code> ~`
         public var sequence: [UInt8] { Array("\u{1b}[\(rawValue)~".utf8) }

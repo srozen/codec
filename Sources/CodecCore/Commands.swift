@@ -64,16 +64,18 @@ public enum IntegrationEvent: Equatable, Sendable {
                   let data = Data(base64Encoded: String(fields[1])) else { return nil }
             self = .historyRequest(request, typed: String(decoding: data, as: UTF8.self))
         case "toolchain":
-            // `<venv>;<0|1 activated by Codec>;<pending venv>;<mise json>`, the text fields base64.
+            // `<venv>;<0|1 activated by Codec>;<pending venv>;<mise json>;<KEY=value lines>`, the text fields
+            // base64. A shell started before an update sends no variables.
             let fields = rest.split(separator: ";", omittingEmptySubsequences: false).map(String.init)
-            guard fields.count == 4, fields[1] == "0" || fields[1] == "1" else { return nil }
+            guard fields.count == 4 || fields.count == 5, fields[1] == "0" || fields[1] == "1" else { return nil }
             var text: [String] = []
-            for index in [0, 2, 3] {
+            for index in [0, 2, 3, 4] where index < fields.count {
                 guard let data = Data(base64Encoded: fields[index]) else { return nil }
                 text.append(String(decoding: data, as: UTF8.self))
             }
             self = .toolchain(ToolchainReport(virtualEnv: text[0].isEmpty ? nil : text[0], activatedByCodec: fields[1] == "1",
-                                              pending: text[1].isEmpty ? nil : text[1], mise: text[2]))
+                                              pending: text[1].isEmpty ? nil : text[1], mise: text[2],
+                                              environment: ToolchainReport.environment(fromLines: text.count > 3 ? text[3] : "")))
         case "done":
             let fields = rest.split(separator: ";", omittingEmptySubsequences: false)
             guard fields.count == 2,

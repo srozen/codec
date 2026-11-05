@@ -27,25 +27,42 @@ Along the bottom of the window:
 
 - the **directory**: click to open it in Finder,
 - the **git branch**: click to switch,
-- the **Python environment and tool versions** in effect, when there are any: click them for where each comes from ([below](#project-environments-zsh)),
+- **how many environments** are in effect (the Python environment and each tool version), when there are any: click it for the list, with where each comes from ([below](#project-environments-zsh)),
 - the **running or last command**, with its exit status and how long it took; while a command you've run before is running, how far along it likely is ([how long it usually takes](commands-sidebar.md#how-long-it-usually-takes)). After a failure, **Explain** asks Apple Intelligence [why it failed](commands-sidebar.md#why-did-it-fail).
 
 ## Project environments (zsh)
 
-Codec keeps track of the Python virtual environment and the tool versions each pane's shell is using.
+Codec keeps track of the Python environment and the tool versions each pane's shell is using.
 
-![Going into a project: Codec asks whether to activate its .venv, and the status bar shows the Ruby and Node mise picked, Node not installed](images/environments.png)
+![Going into a project: Codec asks whether to activate its .venv, and the status bar counts the two tools mise picked, with a warning because one isn't installed](images/environments.png)
 
-**Virtual environments.** When you go into a folder with a `.venv` (as `uv venv`, `uv sync` or `python -m venv .venv` make it), or any folder below one, a question shows at the top of the pane: **Activate** it, **Never**, or **×** for not now. Codec remembers the answer for that environment, in every pane. Once you've allowed it, Codec activates it as you go in and deactivates it as you leave, the way `source .venv/bin/activate` and `deactivate` would, with nothing to type. It's active by the time the `cd` returns, so `cd app && python main.py` uses it. A folder you downloaded could ship its own `.venv/bin/python`, which is why Codec asks first.
+**Virtual environments.** When you go into a folder with a `.venv` (as `uv venv`, `uv sync` or `python -m venv .venv` make it), or any folder below one, a question shows at the top of the pane:
+
+- **Always**: activate it now and whenever you're in the project, in every pane. Codec remembers it.
+- **This Time**: activate it in this pane until you leave the project. Nothing is remembered, so the next visit asks again.
+- **Never**: don't, and don't ask again. Codec remembers it.
+- **×**: not now. This pane won't ask about it again; other panes still do.
+
+An answer is for that environment's path, so another clone or worktree of the project is asked about on its own. Once you've allowed it, Codec activates it as you go in and deactivates it as you leave, the way `source .venv/bin/activate` and `deactivate` would, with nothing to type. It's active by the time the `cd` returns, so `cd app && python main.py` uses it. A folder you downloaded could ship its own `.venv/bin/python`, which is why Codec asks first.
 
 - `deactivate` works as usual, and the environment stays off until you leave the project.
 - An environment you activate yourself, or that mise activates (`_.python.venv`), is left alone.
 - Codec never creates environments or installs anything; run `uv sync` for that, and Codec asks about the new `.venv` at the next prompt.
-- Turn it off in Settings › Shell › Project environments, which also has **Forget My Answers**.
+- Settings › Shell › Project environments lists your answers, a project per row: switch one between Activate and Never, or forget it so Codec asks again. Panes already in the project take the change at their prompt. A project whose folder or `.venv` can't be found is flagged (it may have moved, or be on a disk that isn't connected), and **Remove Missing** forgets those; Codec never removes them by itself. The same section turns activation off.
 
-**Tool versions.** If [mise](https://mise.jdx.dev) is active in your shell (`mise activate` in your `.zshrc`, or its shims on your `PATH`), the status bar shows the version of each tool it picked: `ruby 4.0.2`, `node 24.12.0`. Python shows its environment's version and project name. Click them for a popover with where each version comes from (`mise.toml`, `.tool-versions`, `.ruby-version`, or your global `~/.config/mise/config.toml`) and each environment's path. A version a project asks for that isn't installed gets a warning sign; mise runs another version, or none, in its place. **Install with mise** runs `mise install` in the pane.
+![Settings › Shell › Project environments: an answer per project, one on a disk that isn't connected and one whose .venv is gone flagged](images/environment-settings.png)
 
-Codec checks again whenever you change folders, run `mise` or `uv`, or mise changes what's on the `PATH`. Each command in the [Commands sidebar](commands-sidebar.md) records what it ran with, and [Explain](commands-sidebar.md#why-did-it-fail) passes it along: "wrong Ruby" is a common reason for a failure.
+**Tool versions.** Codec also follows which version of each tool your version manager picked for the folder (`ruby 4.0.2`, `node 24.12.0`). The status bar counts them, with the Python environment, in one chip (`8 environments`), so a project with many tools doesn't crowd out the folder and the command; it turns to a warning when one needs attention. Click it for the list: each environment's name, version and path, and where each version comes from.
+
+![The status bar counts 8 environments, with a warning; its list shows the project's virtual environment and each tool mise picked, where each comes from, and Node not installed](images/environment-list.png)
+
+- **mise**, when it's active in your shell (`mise activate` in your `.zshrc`, or its shims on your `PATH`): Codec asks it what it picked, which covers every file it reads (`mise.toml`, `.tool-versions`, `.python-version`…).
+- Otherwise, Codec reads the files and variables of the managers your shell has, without running them: **pyenv**, **rbenv** and **nodenv** (`.python-version`, `.ruby-version`, `.node-version`, then their global version), **asdf** (`.tool-versions`, the nearest that names each tool), **nvm** and **fnm** (`.nvmrc`, `.node-version`), and **chruby** (`.ruby-version`).
+- **Conda**: the active environment's name and Python version, unless it's `base`, which conda activates everywhere by default. A virtual environment, when one is active, comes first.
+
+A version a project asks for that isn't installed gets a warning sign: another version, or none, runs in its place. So does a Node or Ruby that nvm, fnm or chruby put on the `PATH` when the project asks for another, since they switch only when told. The popover offers the fix and runs it in the pane: **Install with mise** (`mise install`, `pyenv install 3.12`…) or **Switch with nvm** (`nvm use`, `fnm use`, `chruby 3.2`).
+
+Codec checks again whenever you change folders, run one of these tools (`mise`, `uv`, `pyenv`, `nvm`, `conda`…), or mise changes what's on the `PATH`. Each command in the [Commands sidebar](commands-sidebar.md) records what it ran with, and [Explain](commands-sidebar.md#why-did-it-fail) passes it along: "wrong Ruby" is a common reason for a failure.
 
 ## System meters
 

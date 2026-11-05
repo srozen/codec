@@ -207,9 +207,9 @@ private struct OutputHeader: View {
                 .lineLimit(1)
                 .truncationMode(.head)
             if let toolchain = entry.toolchain {
-                Label(toolchain.summary, systemImage: toolchain.missing.isEmpty ? "shippingbox" : "exclamationmark.triangle")
+                Label(toolchain.summary, systemImage: toolchain.needingAttention.isEmpty ? "shippingbox" : "exclamationmark.triangle")
                     .font(.system(size: 11))
-                    .foregroundStyle(toolchain.missing.isEmpty ? .secondary : theme.warningColor)
+                    .foregroundStyle(toolchain.needingAttention.isEmpty ? .secondary : theme.warningColor)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help("Ran with \(toolchain.summary)")

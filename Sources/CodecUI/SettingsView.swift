@@ -161,7 +161,14 @@ private struct ShellSettings: View {
     var history: HistoryStore?
     var venvDecisions: VenvDecisions?
     @State private var confirmingClear = false
-    @State private var answersForgotten = false
+    @StateObject private var venvs: VenvDecisionsModel
+
+    init(prefs: Preferences, history: HistoryStore?, venvDecisions: VenvDecisions?) {
+        self.prefs = prefs
+        self.history = history
+        self.venvDecisions = venvDecisions
+        _venvs = StateObject(wrappedValue: VenvDecisionsModel(decisions: venvDecisions))
+    }
 
     var body: some View {
         Form {
@@ -189,17 +196,14 @@ private struct ShellSettings: View {
             }
             Section {
                 Toggle("Activate a project’s Python environment (.venv)", isOn: $prefs.activateVenvs)
-                if let venvDecisions {
-                    Button("Forget My Answers") {
-                        try? venvDecisions.clear()
-                        answersForgotten = true
-                    }
-                    .disabled(answersForgotten || venvDecisions.isEmpty)
+                if venvDecisions != nil {
+                    VenvDecisionsList(model: venvs)
+                        .onAppear { venvs.reload() }
                 }
             } header: {
                 Text("Project environments")
             } footer: {
-                Text("When you go into a folder with a .venv, or below one, Codec asks once whether to activate it, then does on the way in and deactivates it on the way out. One you activate yourself, or that mise activates, is left alone. The status bar shows the environment and the tool versions mise picked; click them for where each comes from. Applies to new panes; zsh only.")
+                Text("When you go into a folder with a .venv, or below one, Codec asks whether to activate it: Always, This Time, or Never. Your answers are listed above, to change or forget; one about a project that can’t be found is flagged, in case it moved or its disk isn’t connected. Once allowed, Codec activates it on the way in and deactivates it on the way out. One you activate yourself, or that mise activates, is left alone. The status bar counts the environment (a conda one too) and the tool versions mise, pyenv, nvm, asdf and the like picked; click it for the list, with where each comes from. Applies to new panes; zsh only.")
                     .foregroundStyle(.secondary)
             }
             Section {

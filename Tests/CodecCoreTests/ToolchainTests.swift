@@ -122,6 +122,31 @@ struct ToolchainTests {
         try decisions.clear()
     }
 
+    @Test func listsChangesAndForgetsAnswersOneByOne() throws {
+        let temp = try TemporaryDirectory()
+        try temp.file("here/.venv/pyvenv.cfg", "version_info = 3.13.2\n")
+        try temp.directory("emptied")
+        let here = temp.url.path + "/here/.venv", emptied = temp.url.path + "/emptied/.venv", gone = temp.url.path + "/gone/.venv"
+        let decisions = VenvDecisions(file: temp.url.appendingPathComponent("venv-decisions"))
+        try decisions.set(.allow, for: here)
+        try decisions.set(.deny, for: emptied)
+        try decisions.set(.allow, for: gone)
+        try decisions.set(.deny, for: here)
+        #expect(decisions.entries == [.init(path: emptied, decision: .deny), .init(path: gone, decision: .allow),
+                                      .init(path: here, decision: .deny)])
+        #expect(decisions.entries.map { $0.status() } == [.environmentMissing, .projectMissing, .present])
+        #expect(decisions.entries[2].project == temp.url.path + "/here")
+
+        try decisions.remove(emptied)
+        #expect(decisions.entries.map(\.path) == [gone, here])
+        #expect(try decisions.removeMissing() == 1)
+        #expect(decisions.entries.map(\.path) == [here])
+        #expect(try decisions.removeMissing() == 0)
+        try decisions.remove(here)
+        #expect(decisions.entries.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: decisions.file.path))
+    }
+
     @Test func remembersWhatEachCommandRanWith() {
         var timeline = CommandTimeline()
         let toolchain = Toolchain(tools: [.init(name: "ruby", version: "4.0.2")])

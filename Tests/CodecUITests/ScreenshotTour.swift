@@ -52,6 +52,8 @@ struct ScreenshotTour {
         try await themes(env, project: project)
         try await usualDuration(env, project: project)
         try await environments(env, project: project)
+        try await environmentList(env, project: project)
+        try await environmentSettings(env)
     }
 
     /// Swaps `NSWindow.occlusionState` for one that's always visible, or back.
@@ -211,6 +213,64 @@ struct ScreenshotTour {
         try await run("ls", in: pane)
         try await settle()
         try await capture(controller.window!, as: "environments")
+    }
+
+    /// A project with many tools, its virtual environment active: the status bar counts them, and
+    /// the chip's popover lists each, with where it comes from.
+    private func environmentList(_ env: TestEnvironment, project: URL) async throws {
+        let platform = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Developer/platform")
+        try env.environment.shellIntegration?.venvDecisions.set(.allow, for: platform.path + "/.venv")
+        let size = NSSize(width: 1180, height: 620)
+        let (controller, pane) = try await window(env, project: project, size: size)
+        defer { close(controller) }
+        try await run("cd ~/Developer/platform", in: pane)
+        try await waitFor { pane.session.toolchain.tools.count == 7 && pane.session.toolchain.python != nil }
+        try await run("mix test", in: pane)
+        // The chip's own popover, shown as clicking it does.
+        let popover = NSPopover()
+        let details = NSHostingController(rootView: ToolchainDetails(
+            toolchain: pane.session.toolchain, theme: env.preferences.theme, directory: pane.session.directory, run: { _ in }))
+        details.sizingOptions = .preferredContentSize
+        popover.contentViewController = details
+        popover.behavior = .applicationDefined
+        let content = try #require(controller.window?.contentView)
+        let chip = NSRect(x: size.width * 0.47 - 40, y: content.isFlipped ? content.bounds.height - 25 : 5, width: 80, height: 20)
+        popover.show(relativeTo: chip, of: content, preferredEdge: content.isFlipped ? .minY : .maxY)
+        defer { popover.close() }
+        try await settle()
+        try await capture(controller.window!, as: "environment-list")
+    }
+
+    /// The answers about which environments to activate, in Settings: one project gone, one emptied.
+    private func environmentSettings(_ env: TestEnvironment) async throws {
+        let developer = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Developer")
+        let decisions = try #require(env.environment.shellIntegration?.venvDecisions)
+        try FileManager.default.createDirectory(at: developer.appendingPathComponent("notebooks"), withIntermediateDirectories: true)
+        try decisions.set(.allow, for: developer.appendingPathComponent("storefront/.venv").path)
+        try decisions.set(.deny, for: developer.appendingPathComponent("notebooks/.venv").path)
+        try decisions.set(.allow, for: "/Volumes/Archive/legacy-api/.venv")
+        let model = VenvDecisionsModel(decisions: decisions)
+        // The section as Settings › Shell shows it.
+        let form = Form {
+            Section {
+                Toggle("Activate a project’s Python environment (.venv)", isOn: .constant(true))
+                VenvDecisionsList(model: model)
+            } header: {
+                Text("Project environments")
+            }
+        }
+        .formStyle(.grouped)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 400), styleMask: [.titled, .closable],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.title = "Settings"
+        window.contentView = NSHostingView(rootView: form)
+        window.level = .floating
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        defer { window.close() }
+        try await settle()
+        try await capture(window, as: "environment-settings")
     }
 
     /// The same split window in each theme, in a grid.
@@ -400,11 +460,47 @@ struct ScreenshotTour {
         let source = store.appendingPathComponent("mise.toml").path
         let installs = home.appendingPathComponent(".local/share/mise/installs").path
         let tools = #"{"ruby":[{"version":"3.4.7","requested_version":"3.4.7","install_path":"\#(installs)/ruby/3.4.7","source":{"type":"mise.toml","path":"\#(source)"},"installed":true}],"node":[{"version":"22.21.1","requested_version":"22","install_path":"\#(installs)/node/22.21.1","source":{"type":"mise.toml","path":"\#(source)"},"installed":false}]}"#
+        let platform = try makePlatform(home)
         let mise = home.appendingPathComponent("bin/mise")
         try FileManager.default.createDirectory(at: mise.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try "#!/bin/sh\ncase \"$PWD\" in \(store.path)*) echo '\(tools)' ;; *) echo '{}' ;; esac\n"
-            .write(to: mise, atomically: true, encoding: .utf8)
+        try """
+            #!/bin/sh
+            case "$PWD" in
+              \(store.path)*) echo '\(tools)' ;;
+              \(platform.path)*) echo '\(platform.tools)' ;;
+              *) echo '{}' ;;
+            esac
+
+            """.write(to: mise, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: mise.path)
+    }
+
+    /// A project with a uv environment and many tools: five pinned in its `mise.toml` (Node not
+    /// installed), two from the global configuration. Returns what mise reports there.
+    private func makePlatform(_ home: URL) throws -> (path: String, tools: String) {
+        let platform = home.appendingPathComponent("Developer/platform")
+        let files = [
+            ".venv/pyvenv.cfg": "version_info = 3.13.5\nprompt = platform\n",
+            "mise.toml": "[tools]\nelixir = \"1.18\"\nerlang = \"27\"\nnode = \"22\"\npython = \"3.13\"\nruby = \"3.4\"\n",
+            "mix.exs": "", "package.json": "{}\n", "pyproject.toml": "", "Gemfile": "", "README.md": "# Platform\n", "apps/.keep": "",
+        ]
+        for (path, contents) in files {
+            let file = platform.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try contents.write(to: file, atomically: true, encoding: .utf8)
+        }
+        try shell("git init --quiet -b main", in: platform)
+        let local = platform.appendingPathComponent("mise.toml").path
+        let global = home.appendingPathComponent(".config/mise/config.toml").path
+        func tool(_ name: String, _ version: String, _ requested: String, _ source: String, installed: Bool = true) -> String {
+            #""\#(name)":[{"version":"\#(version)","requested_version":"\#(requested)","source":{"type":"mise.toml","path":"\#(source)"},"installed":\#(installed)}]"#
+        }
+        let tools = [
+            tool("elixir", "1.18.4-otp-27", "1.18", local), tool("erlang", "27.3.4", "27", local),
+            tool("node", "22.21.1", "22", local, installed: false), tool("python", "3.13.5", "3.13", local),
+            tool("ruby", "3.4.7", "3.4", local), tool("go", "1.25.1", "1.25", global), tool("rust", "1.90.0", "1.90", global),
+        ]
+        return (platform.path, "{" + tools.joined(separator: ",") + "}")
     }
 
     /// A home folder with a quiet `.zshrc` and a clone of this repository with a few changes and branches.

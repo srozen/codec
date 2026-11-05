@@ -823,10 +823,12 @@ struct VenvActivationTests {
         return (zsh, realPath(zsh.home) + "/app/.venv")
     }
 
-    private func reports(_ zsh: ZshHarness) -> [ToolchainReport] {
+    /// The toolchain reports, without the variables, which most tests don't look at.
+    private func reports(_ zsh: ZshHarness, variables: Bool = false) -> [ToolchainReport] {
         zsh.payloads(6973).compactMap(IntegrationEvent.init(payload:)).compactMap { event in
-            if case .toolchain(let report) = event { return report }
-            return nil
+            guard case .toolchain(var report) = event else { return nil }
+            if !variables { report.environment = [:] }
+            return report
         }
     }
 
@@ -862,6 +864,19 @@ struct VenvActivationTests {
         #expect(await firstOnPath(zsh) != venv + "/bin")
         // Back in, without asking.
         #expect(await run(zsh, "cd ~/app") == ToolchainReport(virtualEnv: venv, activatedByCodec: true))
+    }
+
+    @Test func activatesThisTimeOnlyUntilYouLeave() async throws {
+        let (zsh, venv) = try await shell()
+        #expect(await run(zsh, "cd app") == ToolchainReport(pending: venv))
+        zsh.sendBytes(CommandLineEditing.Action.activateVenvOnce.sequence)
+        #expect(await zsh.wait { reports(zsh).last == ToolchainReport(virtualEnv: venv, activatedByCodec: true) })
+        #expect(await firstOnPath(zsh) == venv + "/bin")
+        #expect(await run(zsh, "cd src") == ToolchainReport(virtualEnv: venv, activatedByCodec: true))
+        // Nothing was remembered: gone on the way out, asked about again on the way back.
+        #expect(await run(zsh, "cd /") == ToolchainReport())
+        #expect(await run(zsh, "cd ~/app") == ToolchainReport(pending: venv))
+        #expect(zsh.integration.venvDecisions.entries.isEmpty)
     }
 
     @Test func activatesInTheSameCommandLineAsTheCd() async throws {
@@ -907,6 +922,28 @@ struct VenvActivationTests {
         try zsh.integration.venvDecisions.set(.deny, for: venv)
         zsh.sendBytes(CommandLineEditing.Action.refreshPrompt.sequence)
         #expect(await zsh.wait { reports(zsh).last == ToolchainReport() })
+    }
+
+    @Test func reportsOtherVersionManagersAndTheirVariables() async throws {
+        let (zsh, _) = try await shell(rc: """
+            path=($HOME/bin $path)
+            nvm() { :; }
+            export NVM_BIN=$HOME/.nvm/versions/node/v20.11.0/bin
+
+            """)
+        try zsh.temp.file("home/bin/pyenv", "#!/bin/sh\n")
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: zsh.home.appendingPathComponent("bin/pyenv").path)
+        #expect(await run(zsh, "rehash; cd app") != nil)
+        let variables = try #require(reports(zsh, variables: true).last).environment
+        #expect(variables["PWD"] == realPath(zsh.home) + "/app")
+        #expect(variables["managers"] == "pyenv nvm")
+        #expect(variables["NVM_BIN"] == realPath(zsh.home) + "/.nvm/versions/node/v20.11.0/bin")
+        // `pyenv local` writes a version file: what it changed is reported.
+        let count = reports(zsh).count
+        #expect(await zsh.run("pyenv local 3.12"))
+        #expect(await zsh.wait { reports(zsh).count == count + 1 })
+        #expect(await run(zsh, "export PYENV_VERSION=3.13") != nil)
+        #expect(reports(zsh, variables: true).last?.environment["PYENV_VERSION"] == "3.13")
     }
 
     @Test func reportsMisesToolsOnlyWhenTheyMayHaveChanged() async throws {

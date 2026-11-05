@@ -30,8 +30,8 @@ final class PaneView: NSView {
     var onDismiss: (() -> Void)? {
         didSet { keyCatcher.onEscape = onDismiss }
     }
-    /// The answer to the virtual environment question: allow, deny, or nil for not now.
-    var onVenvDecision: ((Toolchain.PythonEnvironment, VenvDecisions.Decision?) -> Void)?
+    /// The answer to the virtual environment question.
+    var onVenvDecision: ((Toolchain.PythonEnvironment, VenvAnswer) -> Void)?
 
     init(session: Session, preferences: Preferences) {
         overlay = PassthroughHostingView(rootView: PaneOverlay(session: session, preferences: preferences))

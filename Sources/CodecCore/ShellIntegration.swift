@@ -4,7 +4,7 @@ import Foundation
 /// - OSC 133 prompt marks (A/B/C/D), used to jump between commands,
 /// - OSC 7 working directory,
 /// - OSC 6973 `exec;<command>` and `done;<status>;<seconds>` (see `IntegrationEvent`),
-/// - OSC 6973 `toolchain;…`: the Python virtual environment and mise's tool versions, when they change.
+/// - OSC 6973 `toolchain;…`: the Python environment, mise's tool versions and other version managers' variables, when they change.
 ///
 /// With `CODEC_VENV` set, it activates a project's `.venv` on the way in and deactivates it on the way
 /// out, once the user said yes; their answers are kept in `venvDecisions`.
@@ -164,7 +164,7 @@ public struct ShellIntegration: Sendable {
       # The whole command, every line, for Codec's history.
       _codec_osc "6973;command;$(_codec_base64 "$1")"
       # It may install tools or make a virtual environment: report what's in effect afterwards.
-      [[ ${${(z)1}[1]} == (mise|uv) ]] && _codec_toolchain_stale=1
+      [[ ${${(z)1}[1]} == (mise|uv|pyenv|rbenv|nodenv|asdf|nvm|fnm|chruby|conda|mamba|micromamba) ]] && _codec_toolchain_stale=1
     }
 
     _codec_base64() { builtin print -rn -- "$1" | command base64 | command tr -d '\n' }
@@ -264,21 +264,41 @@ public struct ShellIntegration: Sendable {
     }
     _codec_env_chpwd() { _codec_env_check }
 
+    # Activates the environment the shell is asking about, this time only: nothing is remembered, so
+    # it stays on until we leave the project, and the next visit asks again.
+    _codec_venv_activate_once() {
+      [[ -n $_codec_venv_pending ]] || return 0
+      _codec_venv_on $_codec_venv_pending
+      _codec_venv_pending=
+      zle _codec_refresh_prompt
+    }
+
     _codec_base64_nonempty() { [[ -z $1 ]] || _codec_base64 "$1" }
 
     # Tells Codec the virtual environment and the tools mise has picked, when any of it may have
     # changed: mise records its changes to the environment in __MISE_DIFF. Only while mise is active
-    # in this shell (its hook, or its shims on the PATH): otherwise its tools aren't what runs.
+    # in this shell (its hook, or its shims on the PATH): otherwise its tools aren't what runs. Without
+    # it, Codec reads the other version managers' files itself, from the managers this shell has and
+    # the variables they set, which are sent along with conda's.
     _codec_report_toolchain() {
-      local mise=0
+      local mise=0 managers= name
       (( $+commands[mise] )) && { (( $+functions[_mise_hook] )) || [[ $PATH == */mise/shims* ]] } && mise=1
-      local state="$PWD|$VIRTUAL_ENV|$_codec_venv|$_codec_venv_pending|$mise|$__MISE_DIFF|$__MISE_SESSION"
+      if (( ! mise )); then
+        for name in pyenv rbenv nodenv asdf fnm; do (( $+commands[$name] )) && managers+=" $name"; done
+        for name in nvm chruby; do (( $+functions[$name] )) && managers+=" $name"; done
+      fi
+      local vars="PWD=$PWD"$'\n'"managers=${managers# }"
+      for name in CONDA_PREFIX CONDA_DEFAULT_ENV PYENV_VERSION PYENV_ROOT RBENV_VERSION RBENV_ROOT NODENV_VERSION \
+                  NODENV_ROOT ASDF_DATA_DIR NVM_DIR NVM_BIN FNM_DIR FNM_MULTISHELL_PATH RUBY_ROOT; do
+        [[ -n ${(P)name} ]] && vars+=$'\n'"$name=${(P)name}"
+      done
+      local state="$vars|$VIRTUAL_ENV|$_codec_venv|$_codec_venv_pending|$mise|$__MISE_DIFF|$__MISE_SESSION"
       (( ! _codec_toolchain_stale )) && [[ $state == "$_codec_toolchain_reported" ]] && return 0
       _codec_toolchain_reported=$state
       _codec_toolchain_stale=0
       local tools=
       (( mise )) && tools=$(command mise ls --current --json 2>/dev/null)
-      _codec_osc "6973;toolchain;$(_codec_base64_nonempty "$VIRTUAL_ENV");$(( $#_codec_venv > 0 ));$(_codec_base64_nonempty "$_codec_venv_pending");$(_codec_base64_nonempty "$tools")"
+      _codec_osc "6973;toolchain;$(_codec_base64_nonempty "$VIRTUAL_ENV");$(( $#_codec_venv > 0 ));$(_codec_base64_nonempty "$_codec_venv_pending");$(_codec_base64_nonempty "$tools");$(_codec_base64 "$vars")"
     }
 
     # --- Editing the command line like a text field ------------------------------
@@ -395,7 +415,8 @@ public struct ShellIntegration: Sendable {
                     _codec_select_to_start _codec_select_to_end _codec_mark _codec_unmark _codec_step_left \
                     _codec_step_right _codec_select_all _codec_select_word _codec_cut _codec_delete_to_start \
                     _codec_move_to_start _codec_move_to_end _codec_save_cursor _codec_restore_cursor \
-                    _codec_set_anchor _codec_to_anchor _codec_copy _codec_refresh_prompt _codec_recalled; do
+                    _codec_set_anchor _codec_to_anchor _codec_copy _codec_refresh_prompt _codec_recalled \
+                    _codec_venv_activate_once; do
         zle -N $widget
       done
       local map
@@ -411,7 +432,7 @@ public struct ShellIntegration: Sendable {
           $'\e[57010~' _codec_delete_to_start $'\e[57011~' _codec_move_to_start $'\e[57012~' _codec_move_to_end \
           $'\e[57013~' _codec_save_cursor $'\e[57014~' _codec_restore_cursor \
           $'\e[57015~' _codec_set_anchor $'\e[57016~' _codec_to_anchor $'\e[57017~' _codec_copy \
-          $'\e[57018~' _codec_refresh_prompt $'\e[57019~' _codec_recalled
+          $'\e[57018~' _codec_refresh_prompt $'\e[57019~' _codec_recalled $'\e[57020~' _codec_venv_activate_once
         # Forward delete, if nothing else claims it.
         [[ $(bindkey -M $map $'\e[3~') == *undefined-key ]] && bindkey -M $map $'\e[3~' delete-char
       done

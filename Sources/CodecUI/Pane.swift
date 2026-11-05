@@ -56,6 +56,8 @@ final class Pane: LocalProcessTerminalViewDelegate {
     private var venvObserver: NSObjectProtocol?
     /// Virtual environments the user put off deciding about here: not asked about again in this pane.
     private var venvsPutOff: Set<String> = []
+    /// One to activate this time only, once the shell is back at its prompt.
+    private var venvToActivateOnce: String?
     /// Where the pointer is, in window coordinates; tests put it where they like.
     lazy var pointerLocation: () -> NSPoint? = { [weak self] in self?.terminal.window?.mouseLocationOutsideOfEventStream }
 
@@ -74,9 +76,12 @@ final class Pane: LocalProcessTerminalViewDelegate {
         venvObserver = NotificationCenter.default.addObserver(forName: Self.venvDecided, object: nil, queue: .main) { [weak self] note in
             let path = note.object as? String
             MainActor.assumeIsolated {
-                guard let self, let path, self.session.pendingVenv?.path == path else { return }
+                guard let self, let path else { return }
+                let project = (path as NSString).deletingLastPathComponent
+                let asking = self.session.pendingVenv?.path == path
+                guard asking || self.session.directory == project || self.session.directory.hasPrefix(project + "/") else { return }
                 // The shell looks again at the prompt: now, if it's waiting at one, or after the running command.
-                self.session.pendingVenv = nil
+                if asking { self.session.pendingVenv = nil }
                 self.refreshPrompt()
             }
         }
@@ -394,6 +399,8 @@ final class Pane: LocalProcessTerminalViewDelegate {
         let command = session.running?.command ?? ""
         let started = session.running?.started
         session.apply(event)
+        // Answered while a command ran: the prompt is back.
+        if case .prompt = event, venvToActivateOnce != nil { activateVenvOnceIfAtPrompt() }
         if case .commandStarted(let started) = event {
             var block: CommandBlocks.Block?
             if let screen = pendingCommandScreen {
@@ -445,11 +452,21 @@ final class Pane: LocalProcessTerminalViewDelegate {
     }
 
     /// The user's answer about activating a virtual environment: remembered for every pane when they
-    /// allowed or refused it, only in this one when they put it off.
-    func decide(_ venv: Toolchain.PythonEnvironment, _ decision: VenvDecisions.Decision?) {
-        guard let decision else {
+    /// allowed or refused it; only in this one when they put it off or took it this time only.
+    func decide(_ venv: Toolchain.PythonEnvironment, _ answer: VenvAnswer) {
+        let decision: VenvDecisions.Decision
+        switch answer {
+        case .always: decision = .allow
+        case .never: decision = .deny
+        case .notNow:
             venvsPutOff.insert(venv.path)
             if session.pendingVenv?.path == venv.path { session.pendingVenv = nil }
+            return
+        case .once:
+            // The shell activates the one it's asking about, which is this one while we're still in its project.
+            if session.pendingVenv?.path == venv.path { session.pendingVenv = nil }
+            venvToActivateOnce = venv.path
+            activateVenvOnceIfAtPrompt()
             return
         }
         do {
@@ -459,6 +476,14 @@ final class Pane: LocalProcessTerminalViewDelegate {
             return NSSound.beep()
         }
         NotificationCenter.default.post(name: Self.venvDecided, object: venv.path)
+    }
+
+    private func activateVenvOnceIfAtPrompt() {
+        guard let path = venvToActivateOnce, isAtCommandLine else { return }
+        venvToActivateOnce = nil
+        let project = (path as NSString).deletingLastPathComponent
+        guard session.directory == project || session.directory.hasPrefix(project + "/") else { return }
+        terminal.send(CommandLineEditing.Action.activateVenvOnce.sequence)
     }
 
     /// How long `command` usually takes here, from the history; nil when that's not known, or not shown.

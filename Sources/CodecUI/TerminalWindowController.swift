@@ -468,6 +468,15 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         return true
     }
 
+    /// Runs `command` in a new tab, or in the focused pane of a window that's just opened, as soon as
+    /// its shell starts; brings the window to the front.
+    func run(_ command: String, inNewTab: Bool = true) {
+        if inNewTab { newTab(nil) }
+        focusedPane?.terminal.send(txt: command + "\r")
+        window?.makeKeyAndOrderFront(nil)
+        focusTerminal()
+    }
+
     /// Run or Insert on a code block in a Markdown document.
     private func runFromDocument(_ code: String, run: Bool) {
         guard let pane = focusedPane, pane.replaceCommandLine(with: code, run: run) else { return NSSound.beep() }

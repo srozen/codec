@@ -72,7 +72,7 @@ Tabs and nested splits in one window. Click the branch in the status bar or in t
 
 <img src="docs/images/themes.png" alt="Codec, Arctic, Amber and Daylight themes">
 
-Four themes (Codec, Arctic, Amber and Daylight) drawn through everything from the prompt chips to the file icons, with blur, opacity and optional CRT scanlines. The status bar's CPU, memory and network meters rise in codec-style bars and seven-segment digits. When a long command finishes in a pane you're not watching, its tab lights up, you get a notification, and, if you like, the codec calls.
+Four themes (Codec, Arctic, Amber and Daylight) drawn through everything from the prompt chips to the file icons and `ls`, which colors files as the file tree does (and with eza, shows icons in any font), with blur, opacity and optional CRT scanlines. The status bar's CPU, memory and network meters rise in codec-style bars and seven-segment digits. When a long command finishes in a pane you're not watching, its tab lights up, you get a notification, and, if you like, the codec calls.
 
 → [Settings](docs/settings.md)
 
@@ -114,7 +114,7 @@ Most of what's above relies on Codec's zsh integration, which loads automaticall
 
 ## Built with
 
-[SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) for terminal emulation, and Swift 6 with strict concurrency, AppKit and SwiftUI for everything else. To find your way around the code, see [Development](docs/development.md).
+[SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) for terminal emulation, [Nerd Fonts](https://www.nerdfonts.com)' symbols for icons in any font, and Swift 6 with strict concurrency, AppKit and SwiftUI for everything else. To find your way around the code, see [Development](docs/development.md).
 
 ## License
 

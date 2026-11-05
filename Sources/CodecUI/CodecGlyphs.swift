@@ -7,21 +7,29 @@ import CodecCore
 /// (U+1FBF0–U+1FBF9) and its corners (⌈ ⌋). They come from a small TrueType font built here, in memory,
 /// which SwiftTerm falls back to when the terminal's font doesn't have them; a font that does keeps its own.
 ///
+/// SwiftTerm takes one fallback font, so Nerd Fonts' icons come through this one too: it cascades to
+/// `SymbolFont` for the characters it doesn't have.
+///
 /// CoreText fonts and descriptors are immutable and safe to share between threads; the cache is behind a lock.
 final class CodecGlyphs: TerminalGlyphFallbackProvider, @unchecked Sendable {
     static let shared = CodecGlyphs()
 
-    let generation: UInt64 = 1
+    let generation: UInt64 = 2
     private let descriptor: CTFontDescriptor?
     private let lock = NSLock()
     private var fonts: [CGFloat: CTFont] = [:]
 
     private init() {
-        descriptor = CTFontManagerCreateFontDescriptorFromData(GlyphFont.data as CFData)
+        let own = CTFontManagerCreateFontDescriptorFromData(GlyphFont.data as CFData)
+        if let own, let symbols = SymbolFont.descriptor {
+            descriptor = CTFontDescriptorCreateCopyWithAttributes(own, [kCTFontCascadeListAttribute: [symbols]] as CFDictionary)
+        } else {
+            descriptor = own
+        }
     }
 
     func placementPolicy(for scalar: Unicode.Scalar) -> TerminalGlyphPlacementPolicy? {
-        GlyphFont.policies[scalar]
+        GlyphFont.policies[scalar] ?? SymbolFont.policy(for: scalar)
     }
 
     func fallbackFont(forPointSize size: CGFloat) -> CTFont? {

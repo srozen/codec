@@ -85,3 +85,4 @@ Turn it off in Settings › Shell › Shell integration; it applies to new panes
 | Your Intel | `~/.codec/intel` |
 | A project's Intel | `.codec/intel` in its git repository |
 | The shell integration scripts and your prompt | `~/Library/Application Support/Codec/shell-integration` |
+| Which Python environments you let Codec activate | `venv-decisions` in that same folder, one line per answer |

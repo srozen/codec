@@ -206,6 +206,14 @@ private struct OutputHeader: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.head)
+            if let toolchain = entry.toolchain {
+                Label(toolchain.summary, systemImage: toolchain.needingAttention.isEmpty ? "shippingbox" : "exclamationmark.triangle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(toolchain.needingAttention.isEmpty ? .secondary : theme.warningColor)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help("Ran with \(toolchain.summary)")
+            }
             HStack(spacing: 8) {
                 Button("Go to Command", systemImage: "arrow.up.left.and.arrow.down.right", action: actions.goTo)
                     .disabled(!inScrollback)

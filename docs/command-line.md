@@ -78,6 +78,8 @@ Codec loads zsh's completion system if your `.zshrc` doesn't, and never override
 
 `ls` shows files in color: folders blue, links cyan, executables green, and every other file in the color its icon has in the [file tree](files-and-editor.md#file-tree), so Swift files are red and Markdown is blue in both. They're the theme's terminal colors, so a listing follows the theme. The same colors go to eza, GNU `ls` and the completion menu, through `CLICOLOR`, `LSCOLORS` and `LS_COLORS`; any of those your own startup files set wins.
 
+![ls through eza: an icon by each name, folders first, and a long listing with git's status](images/listing.png)
+
 With [eza](https://eza.rocks) installed, turn on Settings › Shell › Use eza for ls and `ls` runs `eza --icons=auto --group-directories-first`: an icon by each name, folders first. An `ls` alias or function of your own is left alone, unless all it does is turn on color (`ls -G`). zsh only.
 
 Without eza, Settings offers to install it: Install with Homebrew runs `brew install eza` in a new tab, where you can watch it, and turns the setting on for the panes you open after. Without Homebrew, it links to eza's install instructions.

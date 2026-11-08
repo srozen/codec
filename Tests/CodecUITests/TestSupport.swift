@@ -134,9 +134,15 @@ func makeTestWindow(size: NSSize = NSSize(width: 700, height: 400)) -> NSWindow 
     return window
 }
 
+/// How long `waitUntil` waits by default. CI's runners start zsh far more slowly than a Mac at a desk
+/// while the whole suite runs at once: since macOS 26.7 there, a shell has taken more than 15 seconds
+/// to show its first prompt. Waits end as soon as their condition holds, so the longer limit only
+/// costs time when a test fails.
+let defaultWait: Duration = ProcessInfo.processInfo.environment["CI"] == nil ? .seconds(15) : .seconds(60)
+
 /// Polls `condition` while letting the main queue run, until it holds or `timeout` passes.
 @MainActor
-func waitUntil(timeout: Duration = .seconds(15), _ condition: () -> Bool) async -> Bool {
+func waitUntil(timeout: Duration = defaultWait, _ condition: () -> Bool) async -> Bool {
     let deadline = ContinuousClock.now + timeout
     while ContinuousClock.now < deadline {
         if condition() { return true }

@@ -9,9 +9,9 @@
 
 Download `Codec-<version>.dmg` from the [latest release](https://github.com/srozen/codec/releases/latest), open it and drag Codec to Applications.
 
-Codec isn't notarized by Apple yet, so the first time you open it, macOS says it can't check it for malicious software. Open System Settings › Privacy & Security, scroll to Security, choose **Open Anyway** beside Codec and confirm. Updates Codec installs itself don't ask again; a version you download by hand does. Permissions you've given Codec, like Full Disk Access, carry over.
+Codec is signed with a Developer ID and notarized by Apple, so macOS opens it like any app from the web. Versions up to 0.1.6 weren't: if you have one of those, download the latest by hand once (or upgrade it with Homebrew), as it can't install a notarized version itself, and macOS asks once more for the permissions you'd given it.
 
-Or install it with Homebrew, from the cask in this repository (macOS asks the same way the first time):
+Or install it with Homebrew, from the cask in this repository:
 
 ```bash
 brew tap srozen/codec https://github.com/srozen/codec
@@ -22,7 +22,7 @@ brew install --cask srozen/codec/codec
 
 Once a day, Codec asks GitHub for its latest release. When there's a newer one, it posts a notification, and Codec › Check for Updates… becomes Update to Codec 1.2.0…: choose it, or click the notification, to see what's new. **Skip This Version** stops it from announcing that one.
 
-**Install** downloads the new version and gets it ready beside this one. Then **Install and Relaunch** puts it in place and reopens Codec with your windows, tabs and splits (programs running in them stop, and Codec asks first), or **Install on Quit** leaves it for the next time you quit. Codec only installs a version signed with the same certificate as the one you have, and it checks the download against the checksum GitHub lists for it.
+**Install** downloads the new version and gets it ready beside this one. Then **Install and Relaunch** puts it in place and reopens Codec with your windows, tabs and splits (programs running in them stop, and Codec asks first), or **Install on Quit** leaves it for the next time you quit. Codec only installs a version signed by the same developer as the one you have, and it checks the download against the checksum GitHub lists for it.
 
 Where Codec can't replace itself, the alert offers **Download** instead, which opens the new disk image: drag Codec to Applications, then reopen it. That's when it runs from the disk image or from Downloads, or from a folder you can't write to. If Homebrew installed Codec, **Upgrade** puts `brew upgrade --cask srozen/codec/codec` at the prompt for you to run instead.
 

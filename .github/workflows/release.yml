@@ -19,7 +19,8 @@ jobs:
   release:
     name: Build, sign, notarize and publish
     runs-on: macos-26
-    timeout-minutes: 75
+    # Room for Apple: notarizing waits up to 90 minutes for the app and again for the disk image.
+    timeout-minutes: 210
     env:
       HAS_CERTIFICATE: ${{ secrets.SIGNING_CERTIFICATE != '' }}
     steps:

@@ -41,7 +41,7 @@ fi
 notarize() {
   local file="$1" staple="$2" result status id
   echo "Notarizing $(basename "$file")…"
-  result="$(xcrun notarytool submit "$file" "${notary[@]}" --wait --timeout 30m --output-format json)"
+  result="$(xcrun notarytool submit "$file" "${notary[@]}" --wait --timeout 90m --output-format json)"
   status="$(plutil -extract status raw -o - - <<<"$result")"
   if [[ "$status" != "Accepted" ]]; then
     id="$(plutil -extract id raw -o - - <<<"$result" || true)"

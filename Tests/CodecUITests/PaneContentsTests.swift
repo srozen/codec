@@ -156,6 +156,9 @@ struct PaneContentsTests {
         #expect(await waitUntil { pane.isAtCommandLine })
         #expect(await run("echo first-run", in: pane))
         #expect(await run("seq 1 5", in: pane))
+        // Its output is kept once the prompt after it is drawn, which can come a moment after the
+        // pane is back at the command line.
+        #expect(await waitUntil { pane.timeline.entries.last?.output != nil })
         let contents = try #require(pane.savedContents())
         pane.shutDown()
         #expect(contents.timeline.entries.map(\.command) == ["echo first-run", "seq 1 5"])

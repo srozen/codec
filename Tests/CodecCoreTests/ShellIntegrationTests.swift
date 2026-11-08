@@ -187,8 +187,10 @@ private final class ZshHarness: @unchecked Sendable {
         log.events.withLock { $0.filter { $0.code == 133 && $0.payload == Array("B".utf8) }.map(\.cursor.col) }
     }
 
-    /// Polls until `condition` holds or the timeout passes.
-    func wait(timeout: Duration = .seconds(15), until condition: () -> Bool) async -> Bool {
+    /// Polls until `condition` holds or the timeout passes. Longer on CI, whose runners can take more
+    /// than 15 seconds to start zsh while the whole suite runs; it only costs time when a test fails.
+    func wait(timeout: Duration = ProcessInfo.processInfo.environment["CI"] == nil ? .seconds(15) : .seconds(60),
+              until condition: () -> Bool) async -> Bool {
         let deadline = ContinuousClock.now + timeout
         while ContinuousClock.now < deadline {
             if condition() { return true }

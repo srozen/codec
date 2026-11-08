@@ -80,7 +80,7 @@ Four themes (Codec, Arctic, Amber and Daylight) drawn through everything from th
 
 Codec needs **macOS 26** or later, on Apple silicon or Intel.
 
-**Download** the disk image from the [latest release](https://github.com/srozen/codec/releases/latest), open it and drag Codec to Applications. Codec isn't notarized by Apple yet, so the first time you open it, macOS stops it: choose **Open Anyway** in System Settings › Privacy & Security.
+**Download** the disk image from the [latest release](https://github.com/srozen/codec/releases/latest), open it and drag Codec to Applications.
 
 **Or with Homebrew:**
 

@@ -25,9 +25,4 @@ cask "codec" do
     "~/Library/Preferences/com.srozen.codec.plist",
     "~/Library/Saved Application State/com.srozen.codec.savedState",
   ]
-
-  caveats <<~EOS
-    Codec isn't notarized by Apple yet, so macOS stops it the first time you open it, and again
-    after each upgrade. Open System Settings > Privacy & Security and choose Open Anyway beside Codec.
-  EOS
 end

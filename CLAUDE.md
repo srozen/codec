@@ -36,7 +36,7 @@ make screenshots               # retakes docs/images; opens windows for ~1 min, 
 Three targets (details in `docs/development.md`):
 
 - **`CodecCore`**: all logic with no UI, fully unit-tested: the split layout tree (`SplitLayout`), shell integration, command blocks and timelines, history, Intel, preferences, git, syntax highlighting, Markdown, updates. It doesn't depend on SwiftTerm. Put anything testable without AppKit here.
-- **`CodecUI`**: AppKit and SwiftUI. `TerminalWindowController` owns tabs (`TerminalTab`, a `SplitLayout<Pane>` plus split sizes) and handles most menu actions. `Pane` owns one shell: the process, its `PaneView` (the `CodecTerminalView` plus overlays: find bar and highlights, command marks, dimmer, exit banner) and its observable `Session`.
+- **`CodecUI`**: AppKit and SwiftUI. `TerminalWindowController` owns tabs (`TerminalTab`, a `SplitLayout<Pane>` plus split sizes) and handles most menu actions. `Pane` owns one shell: the process, its `PaneView` (the `CodecTerminalView` plus overlays: find bar and highlights, command marks, dimmer, exit banner; and under it, the lines and shades between commands) and its observable `Session`.
 - **`Codec`**: `main.swift`, which calls `CodecApp.run()`.
 
 Services come in through `AppEnvironment` (preferences, sounds, notifier, system monitor, shell integration, history, coordinator), and a pane reaches its window only through the `PaneHost` protocol. Tests build both with fakes: `TestEnvironment` and `FakeHost` in `Tests/CodecUITests/TestSupport.swift`.

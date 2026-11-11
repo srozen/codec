@@ -4,9 +4,11 @@ import CodecCore
 
 /// The terminal plus the pane's overlays: find bar and highlights, the file ⌘-click would open, bell
 /// indicator, exit banner, the question whether to activate a Python environment and the
-/// inactive-pane dimmer.
+/// inactive-pane dimmer. And under it, what sets one command apart from the next.
 final class PaneView: NSView {
     let terminal = CodecTerminalView(frame: .zero)
+    /// The line above each command and the shade behind every other one.
+    let commandSeparators = CommandSeparatorView()
     let scanlines = ScanlineView()
     /// Marks a command the user went back to.
     let commandMark = CommandMarkView()
@@ -27,6 +29,8 @@ final class PaneView: NSView {
     }
     /// The terminal scrolled, by the user or as output came in.
     var onScroll: (() -> Void)?
+    /// The pane was laid out again: what's drawn over the terminal's rows may be elsewhere now.
+    var onLayout: (() -> Void)?
     var onDismiss: (() -> Void)? {
         didSet { keyCatcher.onEscape = onDismiss }
     }
@@ -57,7 +61,7 @@ final class PaneView: NSView {
             self?.onScroll?()
         }
 
-        for view in [terminal, finder.highlights, fileLink, scanlines, commandMark, finder.bar, dimmer, venvBanner, overlay,
+        for view in [commandSeparators, terminal, finder.highlights, fileLink, scanlines, commandMark, finder.bar, dimmer, venvBanner, overlay,
                      keyCatcher] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
@@ -77,12 +81,19 @@ final class PaneView: NSView {
             finder.bar.topAnchor.constraint(equalTo: topAnchor, constant: 8),
             finder.bar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             barRoom,
-        ] + [finder.highlights, fileLink, scanlines, commandMark, dimmer, overlay].flatMap { $0.constraintsFilling(self) })
+        ] + [commandSeparators, finder.highlights, fileLink, scanlines, commandMark, dimmer, overlay].flatMap { $0.constraintsFilling(self) })
     }
 
     override func layout() {
         super.layout()
         if finder.isOpen { finder.refreshHighlights() }
+        onLayout?()
+    }
+
+    /// Back in a window, as when its tab is selected again: what's drawn over the rows is due again.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { needsLayout = true }
     }
 
     @available(*, unavailable)
@@ -102,6 +113,7 @@ final class PaneView: NSView {
     func apply(theme: CodecTheme, scanlines enabled: Bool) {
         finder.apply(theme: theme)
         fileLink.theme = theme
+        commandSeparators.theme = theme
         scanlines.isHidden = !enabled
         scanlines.lineColor = theme.isDark ? .black : NSColor(white: 0, alpha: 0.5)
         scanlines.needsDisplay = true
@@ -304,6 +316,76 @@ final class FileLinkView: NSView {
         text.draw(with: NSRect(x: icon.maxX + 5, y: (tagFrame.midY - lineHeight / 2).rounded(),
                                width: tagFrame.maxX - 7 - (icon.maxX + 5), height: lineHeight),
                   options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+    }
+}
+
+/// Sets commands apart: a line above each one's prompt, a shade behind every other one, prompt and
+/// output, and a bar in the margin beside one that failed or is still running. It's under the
+/// terminal, whose own background is clear, so text over a shade keeps its contrast and anything the
+/// terminal fills in (a selection, a prompt chip) covers the line.
+final class CommandSeparatorView: NSView {
+    /// The bar beside a command there's something to say about. One that worked has none.
+    struct Mark: Equatable {
+        enum Kind: Equatable {
+            case running
+            case failed
+        }
+        var frame: NSRect
+        var kind: Kind
+    }
+
+    /// A shaded command's rows. The newest command isn't over, so its shade has no bottom edge: it
+    /// fades out over its last `fade` points.
+    struct Shade: Equatable {
+        var frame: NSRect
+        var fade: CGFloat = 0
+    }
+
+    var theme: CodecTheme = .codec {
+        didSet { needsDisplay = true }
+    }
+    /// All in this view's coordinates.
+    private(set) var shades: [Shade] = []
+    /// The lines, a point thick.
+    private(set) var rules: [NSRect] = []
+    private(set) var marks: [Mark] = []
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func update(shades: [Shade] = [], rules: [NSRect] = [], marks: [Mark] = []) {
+        guard shades != self.shades || rules != self.rules || marks != self.marks else { return }
+        let wasEmpty = self.shades.isEmpty && self.rules.isEmpty && self.marks.isEmpty
+        self.shades = shades
+        self.rules = rules
+        self.marks = marks
+        needsDisplay = true
+        // Back after a resize hid them, they come in rather than pop.
+        guard wasEmpty, window != nil, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        alphaValue = 0
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.14
+            animator().alphaValue = 1
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let shade = theme.commandShade
+        for band in shades {
+            let frame = backingAlignedRect(band.frame, options: .alignAllEdgesNearest)
+            let fade = min(band.fade, frame.height)
+            shade.setFill()
+            NSRect(x: frame.minX, y: frame.minY + fade, width: frame.width, height: frame.height - fade).fill(using: .sourceOver)
+            guard fade > 0 else { continue }
+            NSGradient(starting: shade, ending: shade.withAlphaComponent(0))?
+                .draw(in: NSRect(x: frame.minX, y: frame.minY, width: frame.width, height: fade), angle: -90)
+        }
+        theme.commandRule.setFill()
+        for rule in rules { backingAlignedRect(rule, options: .alignAllEdgesNearest).fill(using: .sourceOver) }
+        for mark in marks {
+            // Quieter than the mark over a command gone back to, which is drawn in the same place.
+            (mark.kind == .failed ? theme.alert : theme.accent).withAlphaComponent(0.8).setFill()
+            NSBezierPath(roundedRect: mark.frame, xRadius: 1.5, yRadius: 1.5).fill()
+        }
     }
 }
 

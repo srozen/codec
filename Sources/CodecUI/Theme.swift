@@ -21,6 +21,10 @@ struct CodecTheme: Identifiable, Equatable {
     var appearance: NSAppearance? { NSAppearance(named: isDark ? .darkAqua : .aqua) }
     /// Hairlines between panes and around the bars.
     var divider: NSColor { foreground.withAlphaComponent(isDark ? 0.1 : 0.14) }
+    /// The line above each command's prompt in the terminal.
+    var commandRule: NSColor { foreground.withAlphaComponent(isDark ? 0.14 : 0.18) }
+    /// What every other command in the terminal is shaded with.
+    var commandShade: NSColor { foreground.withAlphaComponent(isDark ? 0.05 : 0.055) }
     var terminalPalette: [SwiftTerm.Color] { ansi.map(\.terminalColor) }
 
     /// The pill behind a prompt chip of `color`: that color washed over the background, as `#rrggbb`.

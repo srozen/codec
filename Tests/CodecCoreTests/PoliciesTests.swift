@@ -75,6 +75,8 @@ struct PreferencesTests {
         #expect(preferences.shellIntegration)
         #expect(preferences.showSystemStats)
         #expect(!preferences.scanlines)
+        #expect(preferences.commandSeparators)
+        #expect(preferences.shadeAlternateCommands)
     }
 
     @Test func persistsChangesAcrossInstances() {

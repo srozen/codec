@@ -31,6 +31,12 @@ Copy on select is a setting (Settings › Shell › Selection). The scrollback k
 
 ⌘F searches the scrollback. Every match on screen is tinted and the current one is outlined; the bar counts them ("3 of 14"), and marks down the pane's right edge show where the rest are. Return or ⌘G goes to the next match, ⇧Return or ⇧⌘G to the previous one (↓ and ↑ do too), wrapping around; Esc closes the bar. **Aa** matches case, **ab** whole words, **.\*** a regular expression. With text selected, ⌘F (or ⌘E) searches for it. Matches keep up as the pane prints more.
 
+## Telling commands apart (zsh)
+
+A thin line runs above each command's prompt, and every other command sits on a slightly different shade, its prompt and its output together, so a long scrollback reads as one command after another. The prompt you're at counts as the next one. Both follow the theme, stay behind the text, and each has its switch in Settings › Appearance › Commands.
+
+They're hidden while a full-screen program has the screen, and come back a moment after a resize, once Codec has found where the lines went.
+
 ## A command's output (zsh)
 
 Copy or select what a command printed without dragging over it: right-click its output › Copy Output or Select Output, or press ⇧⌘C / ⇧⌘A for the last command. Codec finds a command's output from the command line itself, so it stays right however fast the output scrolled by, and after a resize rewraps the lines.

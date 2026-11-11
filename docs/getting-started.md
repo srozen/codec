@@ -71,7 +71,7 @@ Codec loads a small hook script into zsh through `ZDOTDIR`, then your own startu
 - the working directory (OSC 7),
 - each command's text, exit status and duration.
 
-That's what the Commands sidebar, the status bar, ⌘↑ / ⌘↓ between commands, Copy Output, history with folders and durations, notifications for long commands, the editable command line and Codec's prompt are built on.
+That's what the Commands sidebar, the status bar, ⌘↑ / ⌘↓ between commands, the lines and shades that set them apart, Copy Output, history with folders and durations, notifications for long commands, the editable command line and Codec's prompt are built on.
 
 Turn it off in Settings › Shell › Shell integration; it applies to new panes. Other shells (bash, fish, nushell…) run as plain terminals: set one in Settings › Shell.
 

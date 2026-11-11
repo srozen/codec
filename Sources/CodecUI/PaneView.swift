@@ -4,9 +4,11 @@ import CodecCore
 
 /// The terminal plus the pane's overlays: find bar and highlights, the file ⌘-click would open, bell
 /// indicator, exit banner, the question whether to activate a Python environment and the
-/// inactive-pane dimmer.
+/// inactive-pane dimmer. And under it, what sets one command apart from the next.
 final class PaneView: NSView {
     let terminal = CodecTerminalView(frame: .zero)
+    /// The line above each command and the shade behind every other one.
+    let commandSeparators = CommandSeparatorView()
     let scanlines = ScanlineView()
     /// Marks a command the user went back to.
     let commandMark = CommandMarkView()
@@ -27,6 +29,8 @@ final class PaneView: NSView {
     }
     /// The terminal scrolled, by the user or as output came in.
     var onScroll: (() -> Void)?
+    /// The pane was laid out again: what's drawn over the terminal's rows may be elsewhere now.
+    var onLayout: (() -> Void)?
     var onDismiss: (() -> Void)? {
         didSet { keyCatcher.onEscape = onDismiss }
     }
@@ -57,7 +61,7 @@ final class PaneView: NSView {
             self?.onScroll?()
         }
 
-        for view in [terminal, finder.highlights, fileLink, scanlines, commandMark, finder.bar, dimmer, venvBanner, overlay,
+        for view in [commandSeparators, terminal, finder.highlights, fileLink, scanlines, commandMark, finder.bar, dimmer, venvBanner, overlay,
                      keyCatcher] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
@@ -77,12 +81,19 @@ final class PaneView: NSView {
             finder.bar.topAnchor.constraint(equalTo: topAnchor, constant: 8),
             finder.bar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             barRoom,
-        ] + [finder.highlights, fileLink, scanlines, commandMark, dimmer, overlay].flatMap { $0.constraintsFilling(self) })
+        ] + [commandSeparators, finder.highlights, fileLink, scanlines, commandMark, dimmer, overlay].flatMap { $0.constraintsFilling(self) })
     }
 
     override func layout() {
         super.layout()
         if finder.isOpen { finder.refreshHighlights() }
+        onLayout?()
+    }
+
+    /// Back in a window, as when its tab is selected again: what's drawn over the rows is due again.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { needsLayout = true }
     }
 
     @available(*, unavailable)
@@ -102,6 +113,8 @@ final class PaneView: NSView {
     func apply(theme: CodecTheme, scanlines enabled: Bool) {
         finder.apply(theme: theme)
         fileLink.theme = theme
+        commandSeparators.ruleColor = theme.commandRule
+        commandSeparators.shadeColor = theme.commandShade
         scanlines.isHidden = !enabled
         scanlines.lineColor = theme.isDark ? .black : NSColor(white: 0, alpha: 0.5)
         scanlines.needsDisplay = true
@@ -304,6 +317,38 @@ final class FileLinkView: NSView {
         text.draw(with: NSRect(x: icon.maxX + 5, y: (tagFrame.midY - lineHeight / 2).rounded(),
                                width: tagFrame.maxX - 7 - (icon.maxX + 5), height: lineHeight),
                   options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+    }
+}
+
+/// Sets commands apart: a line above each one's prompt, and a shade behind every other one, prompt and
+/// output. It's under the terminal, whose own background is clear, so text over a shade keeps its
+/// contrast and anything the terminal fills in (a selection, a prompt chip) covers the line.
+final class CommandSeparatorView: NSView {
+    var ruleColor: NSColor = .separatorColor {
+        didSet { needsDisplay = true }
+    }
+    var shadeColor: NSColor = .clear {
+        didSet { needsDisplay = true }
+    }
+    /// The shaded commands' rows, in this view's coordinates.
+    private(set) var shades: [NSRect] = []
+    /// The lines, a point thick.
+    private(set) var rules: [NSRect] = []
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func update(shades: [NSRect], rules: [NSRect]) {
+        guard shades != self.shades || rules != self.rules else { return }
+        self.shades = shades
+        self.rules = rules
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        shadeColor.setFill()
+        for shade in shades { backingAlignedRect(shade, options: .alignAllEdgesNearest).fill(using: .sourceOver) }
+        ruleColor.setFill()
+        for rule in rules { backingAlignedRect(rule, options: .alignAllEdgesNearest).fill(using: .sourceOver) }
     }
 }
 

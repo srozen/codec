@@ -36,9 +36,24 @@ public struct CommandBlocks: Equatable, Sendable {
         }
     }
 
+    /// A command's rows, from its prompt to the end of its output, to set it apart on screen.
+    public struct Span: Equatable, Sendable {
+        public var rows: Range<Int>
+        /// Every other command, counted from the first one run: the ones that get a shade.
+        public var isAlternate: Bool
+
+        public init(rows: Range<Int>, isAlternate: Bool) {
+            self.rows = rows
+            self.isAlternate = isAlternate
+        }
+    }
+
     public private(set) var blocks: [Block] = []
     /// Older blocks are dropped; they've long scrolled out of the scrollback anyway.
     public let limit: Int
+    /// How many commands came before the first block, so that dropping the oldest ones doesn't turn
+    /// every other command into the one that isn't.
+    private var firstNumber = 0
 
     public init(limit: Int = 2_000) {
         self.limit = limit
@@ -49,7 +64,10 @@ public struct CommandBlocks: Equatable, Sendable {
         // Rows only grow; going back means the history was cleared.
         if let last = blocks.last, block.prompt <= last.prompt { blocks.removeAll() }
         blocks.append(block)
-        if blocks.count > limit { blocks.removeFirst(blocks.count - limit) }
+        if blocks.count > limit {
+            firstNumber += blocks.count - limit
+            blocks.removeFirst(blocks.count - limit)
+        }
     }
 
     /// The output of block `index`, up to the next block's prompt or, for the newest, to `end`
@@ -94,9 +112,43 @@ public struct CommandBlocks: Equatable, Sendable {
         return nil
     }
 
-    /// Replaces every block, after they were found again with `relocate`.
-    public mutating func replace(with blocks: [Block]) {
+    /// Replaces every block, after they were found again with `relocate`. `dropped` is how many of the
+    /// oldest weren't found.
+    public mutating func replace(with blocks: [Block], dropped: Int = 0) {
+        firstNumber += dropped + max(blocks.count - limit, 0)
         self.blocks = Array(blocks.suffix(limit))
+    }
+
+    /// The commands with rows among `shown`, oldest first. Each runs to the next one's prompt, and the
+    /// newest to `end`: the first row of the prompt the shell is waiting at, or past the last line while
+    /// a command runs. `waitingPrompt`, that prompt's rows, comes last, as the command it's about to be.
+    ///
+    /// Nothing is printed past `end`, so a block that reaches further isn't there anymore: the screen was
+    /// cleared under it. It's left out, with the ones after it.
+    public func spans(overlapping shown: Range<Int>, end: Int, waitingPrompt: Range<Int>? = nil) -> [Span] {
+        let live = blocks.prefix { $0.output <= end }
+        var spans: [Span] = []
+        for (index, block) in live.enumerated() {
+            let upper = index + 1 < live.count ? live[index + 1].prompt : end
+            guard block.prompt < upper else { continue }
+            spans.append(Span(rows: block.prompt..<upper, isAlternate: (firstNumber + index) % 2 == 1))
+        }
+        if let waitingPrompt, !waitingPrompt.isEmpty {
+            spans.append(Span(rows: waitingPrompt, isAlternate: (firstNumber + live.count) % 2 == 1))
+        }
+        return spans.filter { $0.rows.overlaps(shown) }
+    }
+
+    /// Drops the blocks whose command line isn't where it was found anymore: the screen was cleared under
+    /// them, by `clear` or ⌃L. `rows` is the screen, and only says so about the command lines on it or
+    /// below it; the ones above are in the scrollback, which stays as it was.
+    public mutating func forgetBlocksGone(from rows: [ScreenRow]) {
+        guard let top = rows.first?.row else { return }
+        blocks.removeAll { block in
+            guard let line = block.commandLine, block.output - 1 >= top else { return false }
+            return Self.locate(command: line, line: line, in: rows, cursorRow: block.output - 1, promptLines: 1)?.output
+                != block.output
+        }
     }
 
     /// Finds commands' blocks again after their rows moved, as they do when the terminal rewraps its lines

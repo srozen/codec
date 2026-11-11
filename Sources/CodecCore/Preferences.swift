@@ -21,6 +21,10 @@ public final class Preferences: ObservableObject {
     @Published public var blur: Bool { didSet { store(blur, .blur) } }
     @Published public var scanlines: Bool { didSet { store(scanlines, .scanlines) } }
     @Published public var dimInactivePanes: Bool { didSet { store(dimInactivePanes, .dimInactivePanes) } }
+    /// Draws a line above each command's prompt, between it and what the command before printed (zsh).
+    @Published public var commandSeparators: Bool { didSet { store(commandSeparators, .commandSeparators) } }
+    /// Shades every other command, prompt and output, like the rows of a table (zsh).
+    @Published public var shadeAlternateCommands: Bool { didSet { store(shadeAlternateCommands, .shadeAlternateCommands) } }
     @Published public var bell: BellBehavior { didSet { store(bell.rawValue, .bell) } }
     @Published public var notifyInBackground: Bool { didSet { store(notifyInBackground, .notifyInBackground) } }
     @Published public var codecSounds: Bool { didSet { store(codecSounds, .codecSounds) } }
@@ -69,7 +73,7 @@ public final class Preferences: ObservableObject {
              codecSounds, paneSounds, soundVolume, optionAsMeta, exitBehavior, shellIntegration, shellPath,
              showSystemStats, prompt, copyOnSelect, suggestCommands, historyKeys, friendlyCompletion, colorFileListings,
              ezaForLs, recordHistory, restoreWindows, restorePaneContents, showUsualDuration, activateVenvs, explainFailures,
-             checkForUpdates
+             checkForUpdates, commandSeparators, shadeAlternateCommands
     }
 
     private static let factoryDefaults: [Key: Any] = [
@@ -80,6 +84,8 @@ public final class Preferences: ObservableObject {
         .blur: true,
         .scanlines: false,
         .dimInactivePanes: true,
+        .commandSeparators: true,
+        .shadeAlternateCommands: true,
         .bell: BellBehavior.visual.rawValue,
         .notifyInBackground: true,
         .codecSounds: true,
@@ -115,6 +121,8 @@ public final class Preferences: ObservableObject {
         blur = defaults.bool(forKey: Key.blur.rawValue)
         scanlines = defaults.bool(forKey: Key.scanlines.rawValue)
         dimInactivePanes = defaults.bool(forKey: Key.dimInactivePanes.rawValue)
+        commandSeparators = defaults.bool(forKey: Key.commandSeparators.rawValue)
+        shadeAlternateCommands = defaults.bool(forKey: Key.shadeAlternateCommands.rawValue)
         bell = defaults.string(forKey: Key.bell.rawValue).flatMap(BellBehavior.init(rawValue:)) ?? .visual
         notifyInBackground = defaults.bool(forKey: Key.notifyInBackground.rawValue)
         codecSounds = defaults.bool(forKey: Key.codecSounds.rawValue)

@@ -131,9 +131,11 @@ final class Pane: LocalProcessTerminalViewDelegate {
             }
         }
         view.onScroll = { [weak self] in
-            guard let self, self.openableNames != nil else { return }
-            self.refreshFileLink(modifiers: self.fileLinkModifiers, rescan: true)
+            guard let self else { return }
+            self.refreshCommandSeparators()
+            if self.openableNames != nil { self.refreshFileLink(modifiers: self.fileLinkModifiers, rescan: true) }
         }
+        view.onLayout = { [weak self] in self?.refreshCommandSeparators() }
         terminal.onRelease = { [weak self] clicks, dragged, point in
             self?.terminalGestureEnded(clicks: clicks, dragged: dragged, at: point)
         }
@@ -338,6 +340,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
             session.unseenOutput = true
         }
         if printed { view.finder.contentChanged() }
+        if printed { refreshCommandSeparators() }
         if printed, openableNames != nil { refreshFileLink(modifiers: fileLinkModifiers, rescan: true) }
         ticks += 1
         if ticks % 4 == 0 { pollProcess() }
@@ -397,6 +400,8 @@ final class Pane: LocalProcessTerminalViewDelegate {
         case .commandStarted:
             runningCommandText = nil
             runningDirectory = session.directory
+            promptIsDrawn = false
+            waitingPromptRow = nil
         default:
             break
         }
@@ -424,6 +429,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
             session.running?.usual = usual
             timeline.begin(command: started, directory: session.directory, started: session.running?.started ?? Date(),
                            block: block, usualDuration: usual, toolchain: session.toolchain)
+            refreshCommandSeparators()
         }
         guard case .commandFinished(let exitCode, let duration) = event else { return }
         let finished = timeline.running
@@ -890,10 +896,17 @@ final class Pane: LocalProcessTerminalViewDelegate {
     /// Without one (something was typed ahead), it's kept once the next command starts, from where
     /// that command's prompt is found.
     private func promptWasDrawn(on screen: (rows: [ScreenRow], cursorRow: Int)?) {
-        guard outputToCapture != nil, let screen else { return }
-        relocateBlocksIfNeeded()
-        captureFinishedOutput(end: CommandBlocks.promptStart(cursorRow: screen.cursorRow, in: screen.rows,
-                                                            promptLines: session.promptLines))
+        promptIsDrawn = true
+        defer { refreshCommandSeparators() }
+        guard let screen else { return }
+        let start = CommandBlocks.promptStart(cursorRow: screen.cursorRow, in: screen.rows, promptLines: session.promptLines)
+        waitingPromptRow = start
+        if outputToCapture != nil {
+            relocateBlocksIfNeeded()
+            captureFinishedOutput(end: start)
+        }
+        // `clear` and ⌃L leave the commands that were on screen with nothing to show for themselves.
+        if !rowsMayHaveMoved { blocks.forgetBlocksGone(from: screen.rows) }
     }
 
     /// Keeps what the command that just finished printed, up to `end`: the first row of the prompt after it.
@@ -966,7 +979,103 @@ final class Pane: LocalProcessTerminalViewDelegate {
                                            in: Pane.screenRows(snapshot).rows, lastRow: end - 1,
                                            promptLines: session.promptLines)
         timeline.setBlocks(Dictionary(uniqueKeysWithValues: zip(placed.map(\.id), found)))
-        blocks.replace(with: found.compactMap { $0 })
+        blocks.replace(with: found.compactMap { $0 }, dropped: found.prefix { $0 == nil }.count)
+    }
+
+    // MARK: - Telling commands apart
+
+    /// The shell has drawn the prompt it's waiting at. Not so between a command finishing and its
+    /// prompt, when what's on screen still ends with the command's output.
+    private var promptIsDrawn = false
+    /// That prompt's first row, from where zsh marked its end. Nil when the mark came too late to say
+    /// (something was typed ahead) or the terminal was resized since; the row is worked out from the
+    /// cursor then.
+    private var waitingPromptRow: Int?
+    private var relocationToken = 0
+
+    /// Draws what sets the commands on screen apart, as the settings say: a line above each one's
+    /// prompt, and a shade behind every other one, from its line to the next. The prompt waiting for a
+    /// command counts as one. Only with shell integration, which is what tells commands apart.
+    func refreshCommandSeparators() {
+        let separators = view.commandSeparators
+        let lines = preferences.commandSeparators, shading = preferences.shadeAlternateCommands
+        guard lines || shading, session.integrated, !isShutDown, promptIsDrawn || !blocks.blocks.isEmpty,
+              terminal.terminalInputStateSnapshot()?.isAlternateBuffer == false else {
+            return separators.update(shades: [], rules: [])
+        }
+        // Finding the commands again takes the whole scrollback: once a resize is over, not at each step of it.
+        if rowsMayHaveMoved, !blocks.blocks.isEmpty {
+            separators.update(shades: [], rules: [])
+            return relocateBlocksSoon()
+        }
+        // One copy of the screen where `TerminalGrid` takes two: this runs at every frame of a scroll.
+        let caret = terminal.firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil)
+        guard let window = terminal.window, caret.height > 0,
+              let snapshot = terminal.terminalContentSnapshot(region: .viewport),
+              let top = snapshot.rows.first?.absoluteRow else { return separators.update(shades: [], rules: []) }
+        let shown = top..<(top + snapshot.rows.count)
+        let cursorRow = snapshot.cursorRow
+        func isBlank(_ row: Int) -> Bool { snapshot.rows[row - top].text.allSatisfy(\.isWhitespace) }
+        var waiting: Range<Int>?
+        if promptIsDrawn {
+            let start: Int
+            if let row = waitingPromptRow, row <= cursorRow {
+                start = row
+            } else {
+                start = CommandBlocks.promptStart(cursorRow: cursorRow, in: Pane.screenRows(snapshot).rows,
+                                                  promptLines: session.promptLines)
+            }
+            // And what the line editor shows under the cursor: the rest of a long command, a list of completions.
+            var last = max(cursorRow, start)
+            while shown.contains(last + 1), !isBlank(last + 1) { last += 1 }
+            waiting = start..<(last + 1)
+        }
+        // While a command runs, or before its prompt is drawn, the newest one's output ends at the cursor.
+        let spans = blocks.spans(overlapping: shown, end: waiting?.lowerBound ?? cursorRow + 1, waitingPrompt: waiting)
+
+        let bounds = separators.bounds
+        let text = separators.convert(terminal.bounds, from: terminal)
+        // Rows are laid out from the terminal's top edge, each as tall as the caret: see `TerminalGrid`.
+        let terminalFrame = terminal.convert(terminal.bounds, to: nil)
+        let rowHeight = window.convertFromScreen(caret).height
+        func frame(ofRow row: Int) -> NSRect {
+            separators.convert(NSRect(x: terminalFrame.minX, y: terminalFrame.maxY - CGFloat(row - top + 1) * rowHeight,
+                                      width: terminalFrame.width, height: rowHeight), from: nil)
+        }
+        // Where each command starts: the top of its prompt, or the middle of the blank line a prompt
+        // begins with, as Codec's does, so the line has as much room above it as below.
+        let tops = spans.map { span -> CGFloat in
+            guard shown.contains(span.rows.lowerBound) else { return bounds.maxY }
+            let first = frame(ofRow: span.rows.lowerBound)
+            return isBlank(span.rows.lowerBound) && span.rows.count > 1 ? first.midY : first.maxY
+        }
+        var shades: [NSRect] = [], rules: [NSRect] = []
+        for (index, span) in spans.enumerated() {
+            let top = tops[index]
+            // Nothing is above the very first row to set a command apart from.
+            if lines, shown.contains(span.rows.lowerBound), span.rows.lowerBound > 0 {
+                rules.append(NSRect(x: text.minX, y: top - 0.5, width: text.width, height: 1))
+            }
+            guard shading, span.isAlternate else { continue }
+            // Into the pane's padding when the command goes on past the screen's edge.
+            let bottom = index + 1 < spans.count ? tops[index + 1]
+                : span.rows.upperBound >= shown.upperBound ? bounds.minY : frame(ofRow: span.rows.upperBound - 1).minY
+            if top > bottom { shades.append(NSRect(x: bounds.minX, y: bottom, width: bounds.width, height: top - bottom)) }
+        }
+        separators.update(shades: shades, rules: rules)
+    }
+
+    /// Finds the commands again a moment after the last resize, then draws what sets them apart.
+    private func relocateBlocksSoon() {
+        relocationToken += 1
+        let token = relocationToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.relocationToken == token, !self.isShutDown else { return }
+                self.relocateBlocksIfNeeded()
+                if !self.rowsMayHaveMoved { self.refreshCommandSeparators() }
+            }
+        }
     }
 
     /// The output part of `rows(of:)`.
@@ -1308,6 +1417,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
         terminal.installColors(theme.terminalPalette)
         terminal.optionAsMetaKey = preferences.optionAsMeta
         view.apply(theme: theme, scanlines: preferences.scanlines)
+        refreshCommandSeparators()
     }
 
     func changeFontSize(by delta: CGFloat) {
@@ -1331,7 +1441,9 @@ final class Pane: LocalProcessTerminalViewDelegate {
 
     func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {
         rowsMayHaveMoved = true
+        waitingPromptRow = nil
         view.finder.contentChanged()
+        refreshCommandSeparators()
     }
 
     func setTerminalTitle(source: LocalProcessTerminalView, title: String) {}

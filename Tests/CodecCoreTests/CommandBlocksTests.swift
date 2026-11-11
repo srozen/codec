@@ -135,4 +135,59 @@ struct CommandBlocksTests {
         blocks.record(.init(prompt: 2, output: 3))
         #expect(blocks.blocks == [.init(prompt: 2, output: 3)])
     }
+
+    /// What sets commands apart on screen: each one's rows up to the next one's prompt, every other one
+    /// told from the rest.
+    @Test func spansRunFromEachPromptToTheNext() {
+        var blocks = CommandBlocks()
+        for prompt in [0, 4, 9] { blocks.record(.init(prompt: prompt, output: prompt + 1)) }
+        // At a prompt of two rows.
+        #expect(blocks.spans(overlapping: 0..<20, end: 12, waitingPrompt: 12..<14) == [
+            .init(rows: 0..<4, isAlternate: false), .init(rows: 4..<9, isAlternate: true),
+            .init(rows: 9..<12, isAlternate: false), .init(rows: 12..<14, isAlternate: true),
+        ])
+        // While the newest one runs, scrolled so that the first is out of view.
+        #expect(blocks.spans(overlapping: 5..<25, end: 30) == [
+            .init(rows: 4..<9, isAlternate: true), .init(rows: 9..<30, isAlternate: false),
+        ])
+        #expect(blocks.spans(overlapping: 40..<60, end: 30).isEmpty)
+    }
+
+    /// Nothing is printed below the cursor: a command recorded there was cleared off the screen.
+    @Test func spansLeaveOutCommandsPastTheEnd() {
+        var blocks = CommandBlocks()
+        for prompt in [0, 4, 9] { blocks.record(.init(prompt: prompt, output: prompt + 1)) }
+        #expect(blocks.spans(overlapping: 0..<20, end: 0, waitingPrompt: 0..<1) == [.init(rows: 0..<1, isAlternate: false)])
+        #expect(blocks.spans(overlapping: 0..<20, end: 6) == [
+            .init(rows: 0..<4, isAlternate: false), .init(rows: 4..<6, isAlternate: true),
+        ])
+    }
+
+    @Test func everyOtherCommandStaysTheSameOneAsOldOnesAreDropped() {
+        var blocks = CommandBlocks(limit: 2)
+        for prompt in [0, 5, 10] { blocks.record(.init(prompt: prompt, output: prompt + 1)) }
+        #expect(blocks.spans(overlapping: 0..<20, end: 15) == [
+            .init(rows: 5..<10, isAlternate: true), .init(rows: 10..<15, isAlternate: false),
+        ])
+        // Found again after a rewrap, the older of the two gone from the scrollback.
+        blocks.replace(with: [.init(prompt: 12, output: 13)], dropped: 1)
+        #expect(blocks.spans(overlapping: 0..<20, end: 15) == [.init(rows: 12..<15, isAlternate: false)])
+    }
+
+    @Test func forgetsCommandsTheScreenWasClearedUnder() {
+        var blocks = CommandBlocks()
+        blocks.record(.init(prompt: 3, output: 4, commandLine: "% make"))
+        blocks.record(.init(prompt: 20, output: 21, commandLine: "% ls"))
+        blocks.record(.init(prompt: 22, output: 23, commandLine: "% ls"))
+        var cleared = blocks
+        // ⌃L: the screen, from row 20, holds only the prompt. The first command is in the scrollback.
+        cleared.forgetBlocksGone(from: rows(["% ", "", ""], from: 20))
+        #expect(cleared.blocks.map(\.prompt) == [3])
+        // Run again after a clear, the same command is on another row.
+        cleared = blocks
+        cleared.forgetBlocksGone(from: rows(["% ls", "a  b", "% "], from: 20))
+        #expect(cleared.blocks.map(\.prompt) == [3, 20])
+        blocks.forgetBlocksGone(from: rows(["% ls", "a  b", "% ls   ", "a  b", "% "], from: 20))
+        #expect(blocks.blocks.map(\.prompt) == [3, 20, 22])
+    }
 }

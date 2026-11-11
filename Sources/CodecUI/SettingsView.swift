@@ -113,6 +113,13 @@ private struct AppearanceSettings: View {
                     .help("Keeps each pane's scrollback and the Commands sidebar when you quit, in ~/Library/Application Support/Codec, readable only by you.")
             }
 
+            Section("Commands") {
+                Toggle("Line between commands", isOn: $prefs.commandSeparators)
+                    .help("Draws a line above each command's prompt in the terminal. Needs shell integration (zsh).")
+                Toggle("Shade every other command", isOn: $prefs.shadeAlternateCommands)
+                    .help("Gives every other command, with its output, a slightly different background. Needs shell integration (zsh).")
+            }
+
             Section("Status bar") {
                 Toggle("Show CPU, memory and network meters", isOn: $prefs.showSystemStats)
             }

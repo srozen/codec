@@ -994,25 +994,26 @@ final class Pane: LocalProcessTerminalViewDelegate {
     private var relocationToken = 0
 
     /// Draws what sets the commands on screen apart, as the settings say: a line above each one's
-    /// prompt, and a shade behind every other one, from its line to the next. The prompt waiting for a
-    /// command counts as one. Only with shell integration, which is what tells commands apart.
+    /// prompt, with a bar in the margin beside one that failed or is running, and a shade behind every
+    /// other one, from its line to the next. The prompt waiting for a command counts as one. Only with
+    /// shell integration, which is what tells commands apart.
     func refreshCommandSeparators() {
         let separators = view.commandSeparators
         let lines = preferences.commandSeparators, shading = preferences.shadeAlternateCommands
         guard lines || shading, session.integrated, !isShutDown, promptIsDrawn || !blocks.blocks.isEmpty,
               terminal.terminalInputStateSnapshot()?.isAlternateBuffer == false else {
-            return separators.update(shades: [], rules: [])
+            return separators.update()
         }
         // Finding the commands again takes the whole scrollback: once a resize is over, not at each step of it.
         if rowsMayHaveMoved, !blocks.blocks.isEmpty {
-            separators.update(shades: [], rules: [])
+            separators.update()
             return relocateBlocksSoon()
         }
         // One copy of the screen where `TerminalGrid` takes two: this runs at every frame of a scroll.
         let caret = terminal.firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil)
         guard let window = terminal.window, caret.height > 0,
               let snapshot = terminal.terminalContentSnapshot(region: .viewport),
-              let top = snapshot.rows.first?.absoluteRow else { return separators.update(shades: [], rules: []) }
+              let top = snapshot.rows.first?.absoluteRow else { return separators.update() }
         let shown = top..<(top + snapshot.rows.count)
         let cursorRow = snapshot.cursorRow
         func isBlank(_ row: Int) -> Bool { snapshot.rows[row - top].text.allSatisfy(\.isWhitespace) }
@@ -1049,20 +1050,42 @@ final class Pane: LocalProcessTerminalViewDelegate {
             let first = frame(ofRow: span.rows.lowerBound)
             return isBlank(span.rows.lowerBound) && span.rows.count > 1 ? first.midY : first.maxY
         }
-        var shades: [NSRect] = [], rules: [NSRect] = []
+        var shades: [CommandSeparatorView.Shade] = [], rules: [NSRect] = [], marks: [CommandSeparatorView.Mark] = []
         for (index, span) in spans.enumerated() {
             let top = tops[index]
+            // Where it ends: at the next one's line, past the screen's edge (so into the pane's padding),
+            // or, for the newest, under its last row.
+            let endsOnScreen = index + 1 == spans.count && span.rows.upperBound < shown.upperBound
+            let bottom = index + 1 < spans.count ? tops[index + 1]
+                : endsOnScreen ? frame(ofRow: span.rows.upperBound - 1).minY : bounds.minY
+            guard top > bottom else { continue }
             // Nothing is above the very first row to set a command apart from.
             if lines, shown.contains(span.rows.lowerBound), span.rows.lowerBound > 0 {
                 rules.append(NSRect(x: text.minX, y: top - 0.5, width: text.width, height: 1))
             }
+            if lines, let kind = markKind(of: span) {
+                // In the margin, where the mark over a command gone back to is, and short of the lines
+                // at either end unless the command goes on past the screen's edge.
+                let gap: CGFloat = top - bottom > 12 ? 3 : 0
+                let upper = top < bounds.maxY ? top - gap : top, lower = bottom > bounds.minY ? bottom + gap : bottom
+                marks.append(.init(frame: NSRect(x: max(text.minX - 9, 2), y: lower, width: 3, height: upper - lower), kind: kind))
+            }
             guard shading, span.isAlternate else { continue }
-            // Into the pane's padding when the command goes on past the screen's edge.
-            let bottom = index + 1 < spans.count ? tops[index + 1]
-                : span.rows.upperBound >= shown.upperBound ? bounds.minY : frame(ofRow: span.rows.upperBound - 1).minY
-            if top > bottom { shades.append(NSRect(x: bounds.minX, y: bottom, width: bounds.width, height: top - bottom)) }
+            // The newest one isn't over: instead of an edge, its shade fades out over a row below its last.
+            let fade = endsOnScreen && span.isNewest ? rowHeight : 0
+            shades.append(.init(frame: NSRect(x: bounds.minX, y: bottom - fade, width: bounds.width, height: top - bottom + fade),
+                                fade: fade))
         }
-        separators.update(shades: shades, rules: rules)
+        separators.update(shades: shades, rules: rules, marks: marks)
+    }
+
+    /// What the bar beside a command says, when there's something to say: it's running, or it failed.
+    /// Nothing for one that worked, nor for the prompt waiting for one.
+    private func markKind(of span: CommandBlocks.Span) -> CommandSeparatorView.Mark.Kind? {
+        guard let index = span.block, blocks.blocks.indices.contains(index) else { return nil }
+        let block = blocks.blocks[index]
+        guard let entry = timeline.entries.last(where: { $0.block == block }) else { return nil }
+        return entry.isRunning ? .running : entry.failed ? .failed : nil
     }
 
     /// Finds the commands again a moment after the last resize, then draws what sets them apart.

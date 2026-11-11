@@ -41,10 +41,16 @@ public struct CommandBlocks: Equatable, Sendable {
         public var rows: Range<Int>
         /// Every other command, counted from the first one run: the ones that get a shade.
         public var isAlternate: Bool
+        /// Where its block is in `blocks`. Nil for the prompt waiting for a command.
+        public var block: Int?
+        /// The last one: it ends only where it has got to so far.
+        public var isNewest: Bool
 
-        public init(rows: Range<Int>, isAlternate: Bool) {
+        public init(rows: Range<Int>, isAlternate: Bool, block: Int? = nil, isNewest: Bool = false) {
             self.rows = rows
             self.isAlternate = isAlternate
+            self.block = block
+            self.isNewest = isNewest
         }
     }
 
@@ -131,11 +137,12 @@ public struct CommandBlocks: Equatable, Sendable {
         for (index, block) in live.enumerated() {
             let upper = index + 1 < live.count ? live[index + 1].prompt : end
             guard block.prompt < upper else { continue }
-            spans.append(Span(rows: block.prompt..<upper, isAlternate: (firstNumber + index) % 2 == 1))
+            spans.append(Span(rows: block.prompt..<upper, isAlternate: (firstNumber + index) % 2 == 1, block: index))
         }
         if let waitingPrompt, !waitingPrompt.isEmpty {
             spans.append(Span(rows: waitingPrompt, isAlternate: (firstNumber + live.count) % 2 == 1))
         }
+        if !spans.isEmpty { spans[spans.count - 1].isNewest = true }
         return spans.filter { $0.rows.overlaps(shown) }
     }
 

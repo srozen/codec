@@ -113,8 +113,7 @@ final class PaneView: NSView {
     func apply(theme: CodecTheme, scanlines enabled: Bool) {
         finder.apply(theme: theme)
         fileLink.theme = theme
-        commandSeparators.ruleColor = theme.commandRule
-        commandSeparators.shadeColor = theme.commandShade
+        commandSeparators.theme = theme
         scanlines.isHidden = !enabled
         scanlines.lineColor = theme.isDark ? .black : NSColor(white: 0, alpha: 0.5)
         scanlines.needsDisplay = true
@@ -320,35 +319,73 @@ final class FileLinkView: NSView {
     }
 }
 
-/// Sets commands apart: a line above each one's prompt, and a shade behind every other one, prompt and
-/// output. It's under the terminal, whose own background is clear, so text over a shade keeps its
-/// contrast and anything the terminal fills in (a selection, a prompt chip) covers the line.
+/// Sets commands apart: a line above each one's prompt, a shade behind every other one, prompt and
+/// output, and a bar in the margin beside one that failed or is still running. It's under the
+/// terminal, whose own background is clear, so text over a shade keeps its contrast and anything the
+/// terminal fills in (a selection, a prompt chip) covers the line.
 final class CommandSeparatorView: NSView {
-    var ruleColor: NSColor = .separatorColor {
+    /// The bar beside a command there's something to say about. One that worked has none.
+    struct Mark: Equatable {
+        enum Kind: Equatable {
+            case running
+            case failed
+        }
+        var frame: NSRect
+        var kind: Kind
+    }
+
+    /// A shaded command's rows. The newest command isn't over, so its shade has no bottom edge: it
+    /// fades out over its last `fade` points.
+    struct Shade: Equatable {
+        var frame: NSRect
+        var fade: CGFloat = 0
+    }
+
+    var theme: CodecTheme = .codec {
         didSet { needsDisplay = true }
     }
-    var shadeColor: NSColor = .clear {
-        didSet { needsDisplay = true }
-    }
-    /// The shaded commands' rows, in this view's coordinates.
-    private(set) var shades: [NSRect] = []
+    /// All in this view's coordinates.
+    private(set) var shades: [Shade] = []
     /// The lines, a point thick.
     private(set) var rules: [NSRect] = []
+    private(set) var marks: [Mark] = []
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    func update(shades: [NSRect], rules: [NSRect]) {
-        guard shades != self.shades || rules != self.rules else { return }
+    func update(shades: [Shade] = [], rules: [NSRect] = [], marks: [Mark] = []) {
+        guard shades != self.shades || rules != self.rules || marks != self.marks else { return }
+        let wasEmpty = self.shades.isEmpty && self.rules.isEmpty && self.marks.isEmpty
         self.shades = shades
         self.rules = rules
+        self.marks = marks
         needsDisplay = true
+        // Back after a resize hid them, they come in rather than pop.
+        guard wasEmpty, window != nil, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        alphaValue = 0
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.14
+            animator().alphaValue = 1
+        }
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        shadeColor.setFill()
-        for shade in shades { backingAlignedRect(shade, options: .alignAllEdgesNearest).fill(using: .sourceOver) }
-        ruleColor.setFill()
+        let shade = theme.commandShade
+        for band in shades {
+            let frame = backingAlignedRect(band.frame, options: .alignAllEdgesNearest)
+            let fade = min(band.fade, frame.height)
+            shade.setFill()
+            NSRect(x: frame.minX, y: frame.minY + fade, width: frame.width, height: frame.height - fade).fill(using: .sourceOver)
+            guard fade > 0 else { continue }
+            NSGradient(starting: shade, ending: shade.withAlphaComponent(0))?
+                .draw(in: NSRect(x: frame.minX, y: frame.minY, width: frame.width, height: fade), angle: -90)
+        }
+        theme.commandRule.setFill()
         for rule in rules { backingAlignedRect(rule, options: .alignAllEdgesNearest).fill(using: .sourceOver) }
+        for mark in marks {
+            // Quieter than the mark over a command gone back to, which is drawn in the same place.
+            (mark.kind == .failed ? theme.alert : theme.accent).withAlphaComponent(0.8).setFill()
+            NSBezierPath(roundedRect: mark.frame, xRadius: 1.5, yRadius: 1.5).fill()
+        }
     }
 }
 

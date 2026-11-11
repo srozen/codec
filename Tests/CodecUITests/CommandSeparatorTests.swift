@@ -58,13 +58,15 @@ struct CommandSeparatorTests {
         #expect(separators.rules.allSatisfy { $0.height == 1 && $0.width == pane.terminal.frame.width })
         // The second command, from its line to the next, as wide as the pane.
         let shade = try #require(separators.shades.first)
-        #expect(shade.maxY == second.maxY && shade.minY == waiting.maxY)
-        #expect(shade.width == pane.view.bounds.width)
+        #expect(shade.frame.maxY == second.maxY && shade.frame.minY == waiting.maxY && shade.fade == 0)
+        #expect(shade.frame.width == pane.view.bounds.width)
+        // Both worked: nothing in the margin.
+        #expect(separators.marks.isEmpty)
 
         // Each has its setting.
         env.preferences.commandSeparators = false
         pane.applyPreferences()
-        #expect(separators.rules.isEmpty && separators.shades.count == 1)
+        #expect(separators.rules.isEmpty && separators.marks.isEmpty && separators.shades.count == 1)
         env.preferences.shadeAlternateCommands = false
         pane.applyPreferences()
         #expect(separators.rules.isEmpty && separators.shades.isEmpty)
@@ -97,9 +99,36 @@ struct CommandSeparatorTests {
         #expect(await waitUntil { separators.rules.count == 1 })
         let blank = try frame(ofRow: 3, in: pane)
         #expect(separators.rules.first?.midY == blank.midY)
-        // The waiting prompt is the second command: shaded from its line down to its last row.
-        #expect(separators.shades.first?.maxY == blank.midY)
-        #expect(separators.shades.first?.minY == (try frame(ofRow: 4, in: pane)).minY)
+        // The waiting prompt is the second command: shaded from its line, and fading out under its
+        // last row, since it's not over.
+        let last = try frame(ofRow: 4, in: pane)
+        #expect(separators.shades == [.init(frame: NSRect(x: 0, y: last.minY - last.height, width: pane.view.bounds.width,
+                                                          height: blank.midY - last.minY + last.height), fade: last.height)])
+    }
+
+    /// A bar in the margin beside a command that failed, and beside the one running; nothing beside one
+    /// that worked.
+    @Test func marksCommandsThatFailedOrAreRunning() async throws {
+        let env = try TestEnvironment(shell: "/bin/zsh", integration: true)
+        defer { env.tearDown() }
+        let (pane, window) = try makeZshPane(env)
+        defer {
+            pane.shutDown()
+            window.close()
+        }
+        let separators = pane.view.commandSeparators
+        #expect(await waitUntil { pane.isAtCommandLine })
+        #expect(await run("false", in: pane))
+        #expect(await waitUntil { separators.marks.map(\.kind) == [.failed] })
+        // Beside its one row, between the pane's edge and the text.
+        let failed = try #require(separators.marks.first?.frame), row = try frame(ofRow: 0, in: pane)
+        #expect(failed.minX > 0 && failed.maxX < pane.terminal.frame.minX)
+        #expect(failed.minY >= row.minY && failed.maxY <= row.maxY && failed.height == row.height - 6)
+        pane.terminal.send(txt: "sleep 1\r")
+        #expect(await waitUntil { separators.marks.map(\.kind) == [.failed, .running] })
+        // It's the second command, and the newest: shaded, with no bottom edge yet.
+        #expect(separators.shades.count == 1 && (separators.shades.first?.fade ?? 0) > 0)
+        #expect(await waitUntil { separators.marks.map(\.kind) == [.failed] && separators.shades.map(\.fade) == [0] })
     }
 
     /// `clear` leaves the commands that were on screen nowhere: nothing is drawn where they were.
@@ -128,7 +157,7 @@ struct CommandSeparatorTests {
         // Counting starts over: the first command after the clear isn't shaded, the prompt after it is.
         #expect(await run("echo three", in: pane))
         #expect(await waitUntil { separators.rules.count == 2 && separators.shades.count == 1 })
-        #expect(separators.shades.first?.maxY == (try frame(ofRow: 7, in: pane)).maxY)
+        #expect(separators.shades.first?.frame.maxY == (try frame(ofRow: 7, in: pane)).maxY)
     }
 
     /// A full-screen program's screen isn't the commands': nothing is drawn over it, and all of it is

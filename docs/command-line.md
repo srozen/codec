@@ -33,7 +33,11 @@ Copy on select is a setting (Settings › Shell › Selection). The scrollback k
 
 ## Telling commands apart (zsh)
 
-A thin line runs above each command's prompt, and every other command sits on a slightly different shade, its prompt and its output together, so a long scrollback reads as one command after another. The prompt you're at counts as the next one. Both follow the theme, stay behind the text, and each has its switch in Settings › Appearance › Commands.
+A thin line runs above each command's prompt, and every other command sits on a slightly different shade, its prompt and its output together, so a long scrollback reads as one command after another. The prompt you're at counts as the next one; the newest command isn't over, so its shade fades out below it rather than ending in an edge.
+
+A command that failed has a bar beside it in the margin, in the theme's alert color, from its prompt to the end of its output: scrolling back, the failures are the ones that stand out. The command that's running has one in the accent color. Commands that worked have nothing.
+
+All of it follows the theme and stays behind the text. The lines, with the bars, and the shades each have their switch in Settings › Appearance › Commands.
 
 They're hidden while a full-screen program has the screen, and come back a moment after a resize, once Codec has found where the lines went.
 

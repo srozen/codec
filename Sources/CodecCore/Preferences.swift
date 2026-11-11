@@ -21,7 +21,8 @@ public final class Preferences: ObservableObject {
     @Published public var blur: Bool { didSet { store(blur, .blur) } }
     @Published public var scanlines: Bool { didSet { store(scanlines, .scanlines) } }
     @Published public var dimInactivePanes: Bool { didSet { store(dimInactivePanes, .dimInactivePanes) } }
-    /// Draws a line above each command's prompt, between it and what the command before printed (zsh).
+    /// Draws a line above each command's prompt, between it and what the command before printed, and
+    /// a bar in the margin beside a command that failed or is running (zsh).
     @Published public var commandSeparators: Bool { didSet { store(commandSeparators, .commandSeparators) } }
     /// Shades every other command, prompt and output, like the rows of a table (zsh).
     @Published public var shadeAlternateCommands: Bool { didSet { store(shadeAlternateCommands, .shadeAlternateCommands) } }

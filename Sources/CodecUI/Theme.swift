@@ -22,7 +22,7 @@ struct CodecTheme: Identifiable, Equatable {
     /// Hairlines between panes and around the bars.
     var divider: NSColor { foreground.withAlphaComponent(isDark ? 0.1 : 0.14) }
     /// The line above each command's prompt in the terminal.
-    var commandRule: NSColor { foreground.withAlphaComponent(isDark ? 0.16 : 0.2) }
+    var commandRule: NSColor { foreground.withAlphaComponent(isDark ? 0.14 : 0.18) }
     /// What every other command in the terminal is shaded with.
     var commandShade: NSColor { foreground.withAlphaComponent(isDark ? 0.05 : 0.055) }
     var terminalPalette: [SwiftTerm.Color] { ansi.map(\.terminalColor) }

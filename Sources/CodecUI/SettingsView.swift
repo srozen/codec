@@ -115,7 +115,7 @@ private struct AppearanceSettings: View {
 
             Section("Commands") {
                 Toggle("Line between commands", isOn: $prefs.commandSeparators)
-                    .help("Draws a line above each command's prompt in the terminal. Needs shell integration (zsh).")
+                    .help("Draws a line above each command's prompt in the terminal, and a bar in the margin beside a command that failed or is running. Needs shell integration (zsh).")
                 Toggle("Shade every other command", isOn: $prefs.shadeAlternateCommands)
                     .help("Gives every other command, with its output, a slightly different background. Needs shell integration (zsh).")
             }

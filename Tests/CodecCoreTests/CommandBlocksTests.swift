@@ -143,12 +143,12 @@ struct CommandBlocksTests {
         for prompt in [0, 4, 9] { blocks.record(.init(prompt: prompt, output: prompt + 1)) }
         // At a prompt of two rows.
         #expect(blocks.spans(overlapping: 0..<20, end: 12, waitingPrompt: 12..<14) == [
-            .init(rows: 0..<4, isAlternate: false), .init(rows: 4..<9, isAlternate: true),
-            .init(rows: 9..<12, isAlternate: false), .init(rows: 12..<14, isAlternate: true),
+            .init(rows: 0..<4, isAlternate: false, block: 0), .init(rows: 4..<9, isAlternate: true, block: 1),
+            .init(rows: 9..<12, isAlternate: false, block: 2), .init(rows: 12..<14, isAlternate: true, isNewest: true),
         ])
         // While the newest one runs, scrolled so that the first is out of view.
         #expect(blocks.spans(overlapping: 5..<25, end: 30) == [
-            .init(rows: 4..<9, isAlternate: true), .init(rows: 9..<30, isAlternate: false),
+            .init(rows: 4..<9, isAlternate: true, block: 1), .init(rows: 9..<30, isAlternate: false, block: 2, isNewest: true),
         ])
         #expect(blocks.spans(overlapping: 40..<60, end: 30).isEmpty)
     }
@@ -157,9 +157,10 @@ struct CommandBlocksTests {
     @Test func spansLeaveOutCommandsPastTheEnd() {
         var blocks = CommandBlocks()
         for prompt in [0, 4, 9] { blocks.record(.init(prompt: prompt, output: prompt + 1)) }
-        #expect(blocks.spans(overlapping: 0..<20, end: 0, waitingPrompt: 0..<1) == [.init(rows: 0..<1, isAlternate: false)])
+        #expect(blocks.spans(overlapping: 0..<20, end: 0, waitingPrompt: 0..<1)
+                == [.init(rows: 0..<1, isAlternate: false, isNewest: true)])
         #expect(blocks.spans(overlapping: 0..<20, end: 6) == [
-            .init(rows: 0..<4, isAlternate: false), .init(rows: 4..<6, isAlternate: true),
+            .init(rows: 0..<4, isAlternate: false, block: 0), .init(rows: 4..<6, isAlternate: true, block: 1, isNewest: true),
         ])
     }
 
@@ -167,11 +168,11 @@ struct CommandBlocksTests {
         var blocks = CommandBlocks(limit: 2)
         for prompt in [0, 5, 10] { blocks.record(.init(prompt: prompt, output: prompt + 1)) }
         #expect(blocks.spans(overlapping: 0..<20, end: 15) == [
-            .init(rows: 5..<10, isAlternate: true), .init(rows: 10..<15, isAlternate: false),
+            .init(rows: 5..<10, isAlternate: true, block: 0), .init(rows: 10..<15, isAlternate: false, block: 1, isNewest: true),
         ])
         // Found again after a rewrap, the older of the two gone from the scrollback.
         blocks.replace(with: [.init(prompt: 12, output: 13)], dropped: 1)
-        #expect(blocks.spans(overlapping: 0..<20, end: 15) == [.init(rows: 12..<15, isAlternate: false)])
+        #expect(blocks.spans(overlapping: 0..<20, end: 15) == [.init(rows: 12..<15, isAlternate: false, block: 0, isNewest: true)])
     }
 
     @Test func forgetsCommandsTheScreenWasClearedUnder() {

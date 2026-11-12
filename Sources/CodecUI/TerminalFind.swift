@@ -74,6 +74,17 @@ final class TerminalFinder {
         if !wasOpen || query != nil { search(revealing: true) }
     }
 
+    /// Shows the bar searching for `query` as `options` say, the current match the first one from `row`
+    /// on: where a search of every pane went to.
+    func open(query: String, options: FindOptions, from row: Int?) {
+        bar.query = query
+        bar.options = options
+        bar.isHidden = false
+        highlights.isHidden = false
+        bar.focus()
+        search(revealing: true, from: row)
+    }
+
     func close() {
         guard isOpen else { return }
         let hadKeyboard = bar.hasKeyboard
@@ -95,7 +106,7 @@ final class TerminalFinder {
     /// to the next match after it, as in a browser while you type, and is scrolled to if it's out of view.
     /// Otherwise (output came in, or the terminal rewrapped its rows and renumbered them) it's the same
     /// match if it's still where it was, else the one at its place in the list.
-    private func search(revealing: Bool) {
+    private func search(revealing: Bool, from row: Int? = nil) {
         let previous = current.map { (index: $0, start: matches[$0].runs[0]) }
         let query = bar.query
         if !query.isEmpty { Self.findPasteboard = query }
@@ -112,7 +123,9 @@ final class TerminalFinder {
         if let first = snapshot.rows.first, let last = snapshot.rows.last {
             searchedRows = first.absoluteRow..<(last.absoluteRow + 1)
         }
-        if let previous, !matches.isEmpty {
+        if let row, !matches.isEmpty {
+            current = matches.firstIndex { $0.row >= row } ?? nearestToScreen()
+        } else if let previous, !matches.isEmpty {
             let start = previous.start
             current = revealing
                 ? matches.firstIndex { ($0.runs[0].row, $0.runs[0].columns.lowerBound) >= (start.row, start.columns.lowerBound) }
@@ -319,9 +332,7 @@ final class FindBar: NSView, NSSearchFieldDelegate {
     private let glass = NSGlassEffectView()
     private let field = NSSearchField()
     private let count = NSTextField(labelWithString: "")
-    private let caseButton = FindBar.toggle("Aa", help: "Match Case")
-    private let wordButton = FindBar.toggle("ab", help: "Whole Words")
-    private let regexButton = FindBar.toggle(".*", help: "Regular Expression")
+    let toggles = FindOptionToggles()
     private let previousButton = FindBar.button("chevron.up", help: "Previous Match (⇧⌘G)")
     private let nextButton = FindBar.button("chevron.down", help: "Next Match (⌘G)")
     private let closeButton = FindBar.button("xmark", help: "Close (Esc)")
@@ -335,8 +346,8 @@ final class FindBar: NSView, NSSearchFieldDelegate {
     }
 
     var options: FindOptions {
-        FindOptions(caseSensitive: caseButton.state == .on, regex: regexButton.state == .on,
-                    wholeWord: wordButton.state == .on)
+        get { toggles.options }
+        set { toggles.options = newValue }
     }
 
     /// Whether the keyboard is in the bar's field.
@@ -357,10 +368,7 @@ final class FindBar: NSView, NSSearchFieldDelegate {
         count.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         count.alignment = .right
         count.lineBreakMode = .byClipping
-        for button in [caseButton, wordButton, regexButton] {
-            button.target = self
-            button.action = #selector(optionChanged)
-        }
+        toggles.onChange = { [weak self] in self?.onQueryChanged?() }
         previousButton.target = self
         previousButton.action = #selector(previous)
         nextButton.target = self
@@ -368,8 +376,7 @@ final class FindBar: NSView, NSSearchFieldDelegate {
         closeButton.target = self
         closeButton.action = #selector(close)
 
-        let stack = NSStackView(views: [field, count, caseButton, wordButton, regexButton,
-                                        separator(), previousButton, nextButton, closeButton])
+        let stack = NSStackView(views: [field, count] + toggles.buttons + [separator(), previousButton, nextButton, closeButton])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 4
@@ -383,10 +390,7 @@ final class FindBar: NSView, NSSearchFieldDelegate {
         NSLayoutConstraint.activate(glass.constraintsFilling(self) + [
             field.widthAnchor.constraint(equalToConstant: 180),
             count.widthAnchor.constraint(equalToConstant: 62),
-        ] + [caseButton, wordButton, regexButton].flatMap { [
-            $0.widthAnchor.constraint(equalToConstant: 24), $0.heightAnchor.constraint(equalToConstant: 20),
-        ] })
-        styleToggles()
+        ] + toggles.sizeConstraints)
     }
 
     @available(*, unavailable)
@@ -399,22 +403,7 @@ final class FindBar: NSView, NSSearchFieldDelegate {
         alertColor = theme.alert
         accentColor = theme.accent
         count.textColor = count.textColor == alertColor ? alertColor : countColor
-        styleToggles()
-    }
-
-    /// An option that's on shows in the accent, on a tint of it; one that's off is dim.
-    private func styleToggles() {
-        for button in [caseButton, wordButton, regexButton] {
-            let on = button.state == .on
-            button.attributedTitle = NSAttributedString(string: button.title, attributes: [
-                .font: NSFont.monospacedSystemFont(ofSize: 11, weight: on ? .bold : .medium),
-                .foregroundColor: on ? accentColor : countColor,
-                .underlineStyle: button === wordButton ? NSUnderlineStyle.single.rawValue : 0,
-            ])
-            button.layer?.backgroundColor = on ? accentColor.withAlphaComponent(0.2).cgColor : nil
-            button.layer?.borderColor = on ? accentColor.withAlphaComponent(0.6).cgColor : nil
-            button.layer?.borderWidth = on ? 1 : 0
-        }
+        toggles.apply(accent: accentColor, dim: countColor)
     }
 
     func focus() {
@@ -472,10 +461,6 @@ final class FindBar: NSView, NSSearchFieldDelegate {
         return true
     }
 
-    @objc private func optionChanged() {
-        styleToggles()
-        onQueryChanged?()
-    }
     @objc private func next() { onNext?() }
     @objc private func previous() { onPrevious?() }
     @objc private func close() { onClose?() }
@@ -487,17 +472,6 @@ final class FindBar: NSView, NSSearchFieldDelegate {
         return line
     }
 
-    private static func toggle(_ title: String, help: String) -> NSButton {
-        let button = NSButton(title: title, target: nil, action: nil)
-        button.setButtonType(.toggle)
-        button.isBordered = false
-        button.wantsLayer = true
-        button.layer?.cornerRadius = 5
-        button.toolTip = help
-        button.setAccessibilityLabel(help)
-        return button
-    }
-
     private static func button(_ symbol: String, help: String) -> NSButton {
         let button = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: help)!,
                               target: nil, action: nil)
@@ -507,6 +481,83 @@ final class FindBar: NSView, NSSearchFieldDelegate {
         button.imageScaling = .scaleProportionallyDown
         button.symbolConfiguration = .init(pointSize: 11, weight: .semibold)
         button.toolTip = help
+        return button
+    }
+}
+
+/// Find's match options as toggles, Aa, ab and .*, in the find bar and the Commands sidebar's filter.
+@MainActor
+final class FindOptionToggles: NSObject {
+    let caseButton = FindOptionToggles.toggle("Aa", help: "Match Case")
+    let wordButton = FindOptionToggles.toggle("ab", help: "Whole Words")
+    let regexButton = FindOptionToggles.toggle(".*", help: "Regular Expression")
+    /// An option was turned on or off by the user.
+    var onChange: (() -> Void)?
+    private var accent: NSColor = .controlAccentColor
+    private var dim: NSColor = .secondaryLabelColor
+
+    var buttons: [NSButton] { [caseButton, wordButton, regexButton] }
+
+    override init() {
+        super.init()
+        for button in buttons {
+            button.target = self
+            button.action = #selector(changed)
+        }
+        style()
+    }
+
+    var options: FindOptions {
+        get {
+            FindOptions(caseSensitive: caseButton.state == .on, regex: regexButton.state == .on,
+                        wholeWord: wordButton.state == .on)
+        }
+        set {
+            caseButton.state = newValue.caseSensitive ? .on : .off
+            wordButton.state = newValue.wholeWord ? .on : .off
+            regexButton.state = newValue.regex ? .on : .off
+            style()
+        }
+    }
+
+    var sizeConstraints: [NSLayoutConstraint] {
+        buttons.flatMap { [$0.widthAnchor.constraint(equalToConstant: 24), $0.heightAnchor.constraint(equalToConstant: 20)] }
+    }
+
+    func apply(accent: NSColor, dim: NSColor) {
+        self.accent = accent
+        self.dim = dim
+        style()
+    }
+
+    @objc private func changed() {
+        style()
+        onChange?()
+    }
+
+    /// An option that's on shows in the accent, on a tint of it; one that's off is dim.
+    private func style() {
+        for button in buttons {
+            let on = button.state == .on
+            button.attributedTitle = NSAttributedString(string: button.title, attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: 11, weight: on ? .bold : .medium),
+                .foregroundColor: on ? accent : dim,
+                .underlineStyle: button === wordButton ? NSUnderlineStyle.single.rawValue : 0,
+            ])
+            button.layer?.backgroundColor = on ? accent.withAlphaComponent(0.2).cgColor : nil
+            button.layer?.borderColor = on ? accent.withAlphaComponent(0.6).cgColor : nil
+            button.layer?.borderWidth = on ? 1 : 0
+        }
+    }
+
+    private static func toggle(_ title: String, help: String) -> NSButton {
+        let button = NSButton(title: title, target: nil, action: nil)
+        button.setButtonType(.toggle)
+        button.isBordered = false
+        button.wantsLayer = true
+        button.layer?.cornerRadius = 5
+        button.toolTip = help
+        button.setAccessibilityLabel(help)
         return button
     }
 }

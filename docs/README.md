@@ -7,7 +7,7 @@ How to use Codec, a feature at a time. New here? Start with [Getting started](ge
 | [Getting started](getting-started.md) | Requirements, installing, updates, building from source, shell integration, where Codec keeps things |
 | [Tabs and panes](tabs-and-panes.md) | Tabs, splits, focus, closing safely, attention and exits |
 | [The command line](command-line.md) | Editing the line like a text field, selecting text, history as you type, the history menu and search, Tab completion, the lines between commands, command output |
-| [Commands sidebar](commands-sidebar.md) | Every command the pane ran, with its output, to go back to |
+| [Commands sidebar](commands-sidebar.md) | Every command the pane ran, with its output, to go back to; or every pane's, to search them all at once |
 | [Intel](intel.md) | Saved scripts with variables and notes, personal or shared with the project, in folders; the file format |
 | [Files and editor](files-and-editor.md) | The file tree, the editor, Markdown preview |
 | [Prompt and status bar](prompt-and-status-bar.md) | The prompt builder, the status bar, the branch switcher, Python environments and tool versions, system meters |

@@ -21,6 +21,8 @@ protocol PaneHost: AnyObject {
     func explainFailure(of entry: TimelineEntry, in pane: Pane)
     /// ⌘-click on the name of a file in the terminal: show it in the editor, or a folder in Finder.
     func openFile(_ url: URL, from pane: Pane)
+    /// Find in All Panes, from the terminal's context menu: the Commands sidebar, searching every pane.
+    func findInAllPanes(from pane: Pane)
 }
 
 /// One shell in one pane: owns the process, the terminal view and the pane's `Session`.
@@ -923,6 +925,9 @@ final class Pane: LocalProcessTerminalViewDelegate {
     /// as they were: nil once they've scrolled out of it, the buffer was cleared, or a full-screen program
     /// has the screen.
     func rows(of entry: TimelineEntry) -> Range<Int>? {
+        // A pane in a tab that isn't selected has no window to measure its rows in: that says nothing
+        // about whether the command is still there.
+        guard terminal.window != nil else { return nil }
         relocateBlocksIfNeeded()
         guard let entry = timeline.value.entry(id: entry.id) else { return nil }
         if let rows = rowsAsRecorded(of: entry) { return rows }
@@ -1108,19 +1113,20 @@ final class Pane: LocalProcessTerminalViewDelegate {
         return block.output..<rows.upperBound
     }
 
-    /// Scrolls the terminal back to a command and marks it. With a query, goes to the first line of its
-    /// output that holds it. False when the command isn't in the scrollback anymore.
+    /// Scrolls the terminal back to a command and marks it. With an expression, goes to the first line of
+    /// its output that it matches. Returns the row gone to: the match's, or the command line's; nil when
+    /// the command isn't in the scrollback anymore.
     @discardableResult
-    func reveal(_ entry: TimelineEntry, matching query: String = "") -> Bool {
+    func reveal(_ entry: TimelineEntry, matching expression: NSRegularExpression? = nil) -> Int? {
         // Looked up again: the rows may have moved since the caller got its copy.
         guard let rows = rows(of: entry), var grid = TerminalGrid(terminal: terminal),
-              let entry = timeline.value.entry(id: entry.id), let block = entry.block else { return false }
+              let entry = timeline.value.entry(id: entry.id), let block = entry.block else { return nil }
         terminal.selectNone()
         var target = block.output - 1
-        if !query.isEmpty, block.output < rows.upperBound,
+        if let expression, block.output < rows.upperBound,
            let snapshot = terminal.terminalContentSnapshot(region: .history(maximumScrollbackRows: CodecTerminalView.scrollback)) {
             let output = snapshot.rows.filter { (block.output..<rows.upperBound).contains($0.absoluteRow) }
-            if let match = output.first(where: { $0.text.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil }) {
+            if let match = output.first(where: { !TextSearch.matches(of: expression, in: Array($0.text)).isEmpty }) {
                 target = match.absoluteRow
             }
         }
@@ -1128,17 +1134,17 @@ final class Pane: LocalProcessTerminalViewDelegate {
         // The command from its prompt, if it fits; otherwise the target a third of the way down.
         let top = target - block.prompt < visible - 1 ? block.prompt - 1 : target - visible / 3
         terminal.scrollTo(row: max(top, 0) - grid.bufferRowOffset)
-        guard let scrolled = TerminalGrid(terminal: terminal) else { return true }
+        guard let scrolled = TerminalGrid(terminal: terminal) else { return target }
         grid = scrolled
         let shown = grid.viewportTop..<(grid.viewportTop + grid.rows.count)
         let marked = rows.clamped(to: shown)
-        guard !marked.isEmpty, shown.contains(target) else { return true }
+        guard !marked.isEmpty, shown.contains(target) else { return target }
         let first = grid.frame(row: marked.lowerBound - grid.viewportTop, columns: 0..<1)
         let last = grid.frame(row: marked.upperBound - 1 - grid.viewportTop, columns: 0..<1)
         let line = grid.frame(row: target - grid.viewportTop, columns: 0..<grid.columns)
         view.mark(block: view.convert(first.union(last), from: nil), line: view.convert(line, from: nil),
                   color: entry.failed ? preferences.theme.alert : preferences.theme.accent)
-        return true
+        return target
     }
 
     /// A command's output: all of it while it's still in the scrollback, otherwise what was kept.
@@ -1392,6 +1398,11 @@ final class Pane: LocalProcessTerminalViewDelegate {
             let item = NSMenuItem()
             item.tag = Int(NSFindPanelAction.showFindPanel.rawValue)
             self?.terminal.performFindPanelAction(item)
+        })
+        menu.addItem(ClosureMenuItem("Find in All Panes…", key: "f", modifiers: [.command, .shift],
+                                     image: "rectangle.and.text.magnifyingglass") { [weak self] in
+            guard let self else { return }
+            self.host?.findInAllPanes(from: self)
         })
         menu.addItem(ClosureMenuItem("Clear Buffer", key: "k", image: "eraser") { [weak self] in
             self?.clearBuffer()

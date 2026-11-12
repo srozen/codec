@@ -39,6 +39,7 @@ final class FakeCoordinator: AppCoordinating {
     func newWindow() { newWindows += 1 }
     func showSettings() { settingsShown += 1 }
     func attentionDidChange() { attentionChanges += 1 }
+    var terminalWindows: [TerminalWindowController] = []
 }
 
 @MainActor
@@ -59,6 +60,8 @@ final class FakeHost: PaneHost {
     func explainFailure(of entry: TimelineEntry, in pane: Pane) { explained.append(entry) }
     private(set) var openedFiles: [URL] = []
     func openFile(_ url: URL, from pane: Pane) { openedFiles.append(url) }
+    private(set) var findsInAllPanes = 0
+    func findInAllPanes(from pane: Pane) { findsInAllPanes += 1 }
 }
 
 /// Never reports anything, so tests don't depend on the machine's load.

@@ -22,6 +22,8 @@ protocol AppCoordinating: AnyObject {
     func showSettings()
     /// A pane's needs-attention state changed; refresh the Dock badge.
     func attentionDidChange()
+    /// Every window, oldest first, for searching every pane's commands.
+    var terminalWindows: [TerminalWindowController] { get }
 }
 
 /// The panes that are open, across every window: a command that finds a port taken can be told

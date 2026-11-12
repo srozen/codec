@@ -50,6 +50,59 @@ struct CommandTimelineTests {
         #expect(timeline.entries(matching: "branch", failedOnly: true).isEmpty)
     }
 
+    /// The sidebar's filter matches as Find does: Aa, ab and .* apply, and a pattern that isn't valid
+    /// matches nothing.
+    @Test func filtersWithFindsOptions() {
+        var timeline = CommandTimeline()
+        timeline.begin(command: "npm test", directory: "/", started: start, block: nil)
+        timeline.finish(exitCode: 1, duration: 2, output: CapturedOutput(lines: ["Error: connect ECONNREFUSED 127.0.0.1:5432"]))
+        timeline.begin(command: "curl localhost:4000", directory: "/", started: start, block: nil)
+        timeline.finish(exitCode: 7, duration: 0, output: CapturedOutput(lines: ["curl: (7) Connection refused"]))
+        timeline.begin(command: "echo refusedly", directory: "/", started: start, block: nil)
+        timeline.finish(exitCode: 0, duration: 0, output: CapturedOutput(lines: ["refusedly"]))
+
+        func commands(_ query: String, _ options: FindOptions = FindOptions(), failedOnly: Bool = false) -> [String] {
+            timeline.entries(matching: TimelineFilter(query: query, options: options, failedOnly: failedOnly)).map(\.command)
+        }
+        #expect(commands("refused") == ["npm test", "curl localhost:4000", "echo refusedly"])
+        #expect(commands("refused", failedOnly: true) == ["npm test", "curl localhost:4000"])
+        #expect(commands("Refused", FindOptions(caseSensitive: true)).isEmpty)
+        #expect(commands("refused", FindOptions(wholeWord: true)) == ["curl localhost:4000"])
+        #expect(commands("econn|:4000", FindOptions(regex: true)) == ["npm test", "curl localhost:4000"])
+        #expect(commands("econn|:4000").isEmpty)
+        #expect(commands("  ").count == 3)
+
+        let invalid = TimelineFilter(query: "(", options: FindOptions(regex: true))
+        #expect(invalid.isInvalid)
+        #expect(timeline.entries(matching: invalid).isEmpty)
+        #expect(!TimelineFilter(query: "(").isInvalid)
+        #expect(!TimelineFilter(query: "", options: FindOptions(regex: true)).isInvalid)
+    }
+
+    @Test func findsTheMatchWithTheLinesAroundIt() throws {
+        let output = CapturedOutput(lines: [
+            "> api@1.0.0 test", "", "    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16) ECONNREFUSED here",
+            "  done", "",
+        ])
+        let expression = try #require(TextSearch.expression(for: "econnrefused", options: FindOptions()))
+        let match = try #require(output.firstMatch(of: expression))
+        #expect(match.index == 2)
+        #expect(match.line == "at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16) ECONNREFUSED here")
+        #expect(Array(match.line)[match.range].map(String.init).joined() == "ECONNREFUSED")
+        #expect(match.before == "> api@1.0.0 test")
+        #expect(match.after == "done")
+        // A long line starts a little before the match, so a narrow list still shows it.
+        #expect(match.excerpt(leading: 6) == "…5:16) ECONNREFUSED here")
+        #expect(match.excerpt(leading: 100) == match.line)
+
+        func firstMatch(_ query: String) -> OutputMatch? {
+            TextSearch.expression(for: query, options: FindOptions()).flatMap(output.firstMatch)
+        }
+        let first = try #require(firstMatch("api"))
+        #expect(first.index == 0 && first.before == nil && first.range == 2..<5)
+        #expect(firstMatch("nowhere") == nil)
+    }
+
     @Test func forgetsWhereCommandsWereOnScreen() {
         var timeline = CommandTimeline()
         let first = timeline.begin(command: "a", directory: "/", started: start, block: .init(prompt: 0, output: 1))

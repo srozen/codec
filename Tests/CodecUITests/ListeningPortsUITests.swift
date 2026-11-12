@@ -257,9 +257,9 @@ struct ListeningPortsUITests {
         let cell = TimelineCell()
         let entry = TimelineEntry(id: 1, command: "npm run dev", directory: "/tmp/web", started: Date(), block: nil)
         let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        cell.show(entry, query: "", inScrollback: true, theme: .codec, codeFont: font)
+        cell.show(entry, matching: nil, inScrollback: true, theme: .codec, codeFont: font)
         #expect(cell.shown.detail == "Running…")
-        cell.show(entry, query: "", inScrollback: true, theme: .codec, codeFont: font,
+        cell.show(entry, matching: nil, inScrollback: true, theme: .codec, codeFont: font,
                   listening: [ListeningPort(port: 3000, program: "node"), ListeningPort(port: 9229, program: "node")])
         #expect(cell.shown.detail == "Listening on :3000 and :9229")
         #expect(!cell.offersGoToPane)

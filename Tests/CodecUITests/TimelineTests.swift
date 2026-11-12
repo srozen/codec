@@ -89,7 +89,7 @@ struct TimelineTests {
         let before = try #require(TerminalGrid(terminal: pane.terminal))
         #expect(before.viewportTop > block.prompt)
 
-        #expect(pane.reveal(first))
+        #expect(pane.reveal(first) != nil)
         let after = try #require(TerminalGrid(terminal: pane.terminal))
         #expect((after.viewportTop..<(after.viewportTop + after.rows.count)).contains(block.prompt))
         #expect(pane.view.commandMark.isShowing)
@@ -97,8 +97,9 @@ struct TimelineTests {
 
         // With a query, it goes to the line of the output that holds it.
         let seq = pane.timeline.entries[1]
-        #expect(pane.reveal(seq, matching: "77"))
+        let row = try #require(pane.reveal(seq, matching: TextSearch.expression(for: "77", options: FindOptions())))
         let atMatch = try #require(TerminalGrid(terminal: pane.terminal))
+        #expect(atMatch.rows.first { $0.absoluteRow == row }?.text.trimmingCharacters(in: .whitespaces) == "77")
         #expect(atMatch.rows.contains { $0.text.trimmingCharacters(in: .whitespaces) == "77" })
     }
 
@@ -123,7 +124,7 @@ struct TimelineTests {
         #expect(pane.text(of: rows.dropFirst(rows.count - 1)) == "second")
         #expect(pane.output(of: pane.timeline.entries[0])?.hasPrefix("a-fairly-long") == true)
         #expect(pane.lastOutputRange.flatMap(pane.text(of:)) == "second")
-        #expect(pane.reveal(pane.timeline.entries[0]))
+        #expect(pane.reveal(pane.timeline.entries[0]) != nil)
 
         // Running the same command again after another resize doesn't take the earlier one's place.
         window.setContentSize(NSSize(width: 500, height: 300))
@@ -257,7 +258,7 @@ struct TimelineTests {
         #expect(await run("echo after", in: pane))
         let cleared = try #require(pane.timeline.entries.first)
         #expect(pane.rows(of: cleared) == nil)
-        #expect(!pane.reveal(cleared))
+        #expect(pane.reveal(cleared) == nil)
         #expect(pane.output(of: cleared) == "kept\nfor later")
         #expect(pane.rows(of: pane.timeline.entries[1]) != nil)
     }
@@ -341,6 +342,103 @@ struct TimelineTests {
         #expect(!controller.model.timelineVisible)
         #expect(controller.timelineSidebar.frame.width == 0)
         #expect(controller.paletteCommands().contains { $0.id == "commands" && $0.title == "Show Commands Sidebar" })
+    }
+
+    /// ⇧⌘F: every pane's commands, in every tab, under the pane they ran in, filtered as Find matches;
+    /// going to one selects its tab and pane and opens Find there.
+    @Test func searchesEveryPanesOutput() async throws {
+        let env = try TestEnvironment(shell: "/bin/zsh", integration: true)
+        defer { env.tearDown() }
+        try useCleanZsh(env)
+        defer { unsetenv("ZDOTDIR") }
+        let controller = TerminalWindowController(directory: env.directory.path, environment: env.environment)
+        controller.window?.setContentSize(NSSize(width: 1100, height: 600))
+        controller.window?.layoutIfNeeded()
+        var others: [TerminalWindowController] = []
+        defer {
+            for window in [controller] + others {
+                window.model.tabs.flatMap(\.panes).forEach { $0.shutDown() }
+                window.window?.close()
+            }
+        }
+        // The commands don't hold what's searched for; their output does.
+        let left = try #require(controller.model.selected?.focused)
+        #expect(await waitUntil { left.isAtCommandLine })
+        #expect(await run("echo 'Error: connect ECONN''REFUSED 127.0.0.1:5432'", in: left))
+        controller.splitRight(nil)
+        let right = try #require(controller.model.selected?.focused)
+        #expect(await waitUntil { right.isAtCommandLine })
+        #expect(await run("echo all good", in: right))
+        let firstTab = try #require(controller.model.selected)
+        controller.newTab(nil)
+        let other = try #require(controller.model.selected?.focused)
+        #expect(await waitUntil { other.isAtCommandLine })
+        #expect(await run("echo 'bind: econn''refused too'", in: other))
+        let secondTab = try #require(controller.model.selected)
+
+        controller.findInAllPanes(nil)
+        let sidebar = controller.timelineSidebar!
+        #expect(controller.model.timelineVisible)
+        #expect(sidebar.scope == .all)
+        #expect(sidebar.scopeControl.selectedSegment == 1)
+        #expect((controller.window?.firstResponder as? NSText)?.delegate === sidebar.searchField)
+
+        sidebar.searchField.stringValue = "ECONNREFUSED"
+        sidebar.reload()
+        let directory = left.session.directory
+        #expect(sidebar.rows == [
+            .pane("\(firstTab.title) › left", directory: directory),
+            .entry(left.timeline.entries[0]),
+            .pane(secondTab.title, directory: directory),
+            .entry(other.timeline.entries[0]),
+        ])
+        let cell = try #require(sidebar.table.view(atColumn: 0, row: 1, makeIfNecessary: true) as? TimelineCell)
+        #expect(cell.shown.detail == "Error: connect ECONNREFUSED 127.0.0.1:5432")
+
+        // Find's options apply.
+        sidebar.toggles.options = FindOptions(caseSensitive: true)
+        sidebar.reload()
+        #expect(sidebar.rows.compactMap(\.entry).map(\.command) == [left.timeline.entries[0].command])
+        sidebar.toggles.options = FindOptions(regex: true)
+        sidebar.searchField.stringValue = "good|too$"
+        sidebar.reload()
+        #expect(sidebar.rows.compactMap(\.entry).map(\.command) == ["echo all good", "echo 'bind: econn''refused too'"])
+        #expect(sidebar.rows.first == .pane("\(firstTab.title) › right", directory: directory))
+        sidebar.searchField.stringValue = "("
+        sidebar.reload()
+        #expect(sidebar.rows.isEmpty)
+        sidebar.toggles.options = FindOptions()
+        sidebar.searchField.stringValue = "econnrefused"
+        sidebar.reload()
+
+        // Going to a command in the other tab selects it, and opens Find there on the line that matched.
+        let hit = try #require(sidebar.row(of: left.timeline.entries[0], in: left))
+        sidebar.table.selectRowIndexes([hit], byExtendingSelection: false)
+        sidebar.goToSelected(focusTerminal: true)
+        #expect(controller.model.selected === firstTab)
+        #expect(firstTab.focused === left)
+        let finder = left.view.finder
+        #expect(finder.isOpen)
+        #expect(finder.bar.query == "econnrefused")
+        let current = try #require(finder.current)
+        let block = try #require(left.timeline.entries[0].block)
+        #expect(finder.matches[current].row == block.output)
+        #expect(sidebar.scope == .all)
+        #expect(sidebar.rows.compactMap(\.entry).count == 2)
+        #expect(sidebar.pane === left)
+
+        // Back to this pane's commands.
+        sidebar.setScope(.pane)
+        #expect(sidebar.rows.compactMap(\.entry).map(\.command) == [left.timeline.entries[0].command])
+
+        // With several windows, each pane says which window it's in.
+        let second = TerminalWindowController(directory: env.directory.path, environment: env.environment)
+        others.append(second)
+        env.coordinator.terminalWindows = [controller, second]
+        let titles = controller.panePlaces().map(\.title)
+        #expect(titles.count == 4)
+        #expect(titles.prefix(3).allSatisfy { $0.hasPrefix("Window 1 › ") })
+        #expect(titles.last?.hasPrefix("Window 2 › ") == true)
     }
 
     /// Regression: after a resize, zsh printed a prompt of several lines again below the old one's

@@ -39,6 +39,7 @@ final class FakeCoordinator: AppCoordinating {
     func newWindow() { newWindows += 1 }
     func showSettings() { settingsShown += 1 }
     func attentionDidChange() { attentionChanges += 1 }
+    var terminalWindows: [TerminalWindowController] = []
 }
 
 @MainActor
@@ -65,6 +66,8 @@ final class FakeHost: PaneHost {
     private(set) var revealed: [Pane] = []
     func reveal(_ pane: Pane) { revealed.append(pane) }
     var windowTitle: String?
+    private(set) var findsInAllPanes = 0
+    func findInAllPanes(from pane: Pane) { findsInAllPanes += 1 }
 }
 
 /// A TCP port nothing is listening on, as far as can be told: the system picked it a moment ago.

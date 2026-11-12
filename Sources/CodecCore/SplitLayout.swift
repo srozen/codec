@@ -80,6 +80,42 @@ public indirect enum SplitLayout<Leaf: AnyObject> {
         }
     }
 
+    /// What to call each leaf, in reading order, by where it is: "left", "top right". Nil for a lone
+    /// leaf, which needs no name. When places can't be told apart in a few words (splits of more than
+    /// three, or nested three deep), the leaves are numbered instead: "pane 1", "pane 2".
+    public var placeNames: [String?] {
+        guard case .split = self else { return [nil] }
+        let numbered = leaves.indices.map { Optional("pane \($0 + 1)") }
+        guard let places = places(), Set(places).count == places.count else { return numbered }
+        return places
+    }
+
+    /// Each leaf's place as words for across and down, or nil when one leaf would need two of either.
+    private func places() -> [String]? {
+        func walk(_ node: SplitLayout, across: String?, down: String?) -> [String]? {
+            guard case .split(let axis, let children) = node else {
+                return [[down, across].compactMap { $0 }.joined(separator: " ")]
+            }
+            let words: [String]
+            switch (axis, children.count) {
+            case (.horizontal, 2): words = ["left", "right"]
+            case (.horizontal, 3): words = ["left", "middle", "right"]
+            case (.vertical, 2): words = ["top", "bottom"]
+            case (.vertical, 3): words = ["top", "middle", "bottom"]
+            default: return nil
+            }
+            if axis == .horizontal ? across != nil : down != nil { return nil }
+            var names: [String] = []
+            for (child, word) in zip(children, words) {
+                guard let inner = walk(child, across: axis == .horizontal ? word : across,
+                                       down: axis == .vertical ? word : down) else { return nil }
+                names += inner
+            }
+            return names
+        }
+        return walk(self, across: nil, down: nil)
+    }
+
     private func isLeaf(_ target: Leaf) -> Bool {
         if case .leaf(let leaf) = self { return leaf === target }
         return false

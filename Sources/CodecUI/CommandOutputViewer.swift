@@ -18,7 +18,8 @@ final class CommandOutputViewer: NSViewController {
     let entry: TimelineEntry
     let output: String?
     private let inScrollback: Bool
-    private let query: String
+    /// What the list was filtered by, highlighted in the output.
+    private let expression: NSRegularExpression?
     private let theme: CodecTheme
     private let codeFont: NSFont
     let actions: Actions
@@ -26,12 +27,12 @@ final class CommandOutputViewer: NSViewController {
     let explanation: FailureExplanationModel
     let textView = OutputTextView()
 
-    init(entry: TimelineEntry, output: String?, inScrollback: Bool, query: String, theme: CodecTheme, codeFont: NSFont,
+    init(entry: TimelineEntry, output: String?, inScrollback: Bool, expression: NSRegularExpression?, theme: CodecTheme, codeFont: NSFont,
          actions: Actions, canInsert: Bool, explanation: FailureExplanationModel) {
         self.entry = entry
         self.output = output
         self.inScrollback = inScrollback
-        self.query = query
+        self.expression = expression
         self.theme = theme
         self.codeFont = codeFont
         self.actions = actions
@@ -87,14 +88,10 @@ final class CommandOutputViewer: NSViewController {
         let text = NSMutableAttributedString(
             string: output ?? placeholder,
             attributes: [.font: font, .foregroundColor: output == nil ? NSColor.secondaryLabelColor : theme.foreground])
-        if let output, !query.isEmpty {
-            let string = output as NSString
-            var range = NSRange(location: 0, length: string.length)
-            while true {
-                let found = string.range(of: query, options: [.caseInsensitive, .diacriticInsensitive], range: range)
-                guard found.location != NSNotFound else { break }
-                text.addAttribute(.backgroundColor, value: theme.accent.withAlphaComponent(0.35), range: found)
-                range = NSRange(location: found.upperBound, length: string.length - found.upperBound)
+        if let output, let expression {
+            for found in expression.matches(in: output, range: NSRange(location: 0, length: (output as NSString).length))
+            where found.range.length > 0 {
+                text.addAttribute(.backgroundColor, value: theme.accent.withAlphaComponent(0.35), range: found.range)
             }
         }
         textView.textStorage?.setAttributedString(text)
@@ -138,9 +135,9 @@ final class CommandOutputViewer: NSViewController {
     }
 
     private func scrollToFirstMatch() {
-        guard let output, !query.isEmpty else { return }
-        let found = (output as NSString).range(of: query, options: [.caseInsensitive, .diacriticInsensitive])
-        guard found.location != NSNotFound else { return }
+        guard let output, let expression else { return }
+        let found = expression.rangeOfFirstMatch(in: output, range: NSRange(location: 0, length: (output as NSString).length))
+        guard found.location != NSNotFound, found.length > 0 else { return }
         textView.scrollRangeToVisible(found)
         textView.showFindIndicator(for: found)
     }

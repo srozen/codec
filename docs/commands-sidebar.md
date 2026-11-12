@@ -4,7 +4,7 @@
 
 You tried a few things, went on for a while, and now you want to see what happened earlier. The Commands sidebar is that pane's story: every command it ran, with how it went and what it printed.
 
-Open it with ⇧⌘L, or the sidebar button at the right end of the tab bar. It follows the focused pane, like the file tree.
+Open it with ⇧⌘L, or the sidebar button at the right end of the tab bar. It follows the focused pane, like the file tree; switch it to **All Panes** to see every pane's commands at once (see [Searching every pane](#searching-every-pane)).
 
 ## What it shows
 
@@ -58,7 +58,26 @@ Turn it off in Settings › Shell › Offer to explain failed commands.
 
 ## Filtering
 
-The filter field searches commands and what they printed. A row shows the line that matched, and going to it scrolls to that line. ⚠ shows failed commands only; the bin clears the list (the commands are still tracked, just hidden).
+The filter field searches commands and what they printed. A row shows the line that matched (hover it for the lines around it), and going to it scrolls to that line. **Aa**, **ab** and **.\*** beside the field match case, whole words and regular expressions, as in Find (⌘F). ⚠ shows failed commands only; the bin clears the list (the commands are still tracked, just hidden).
+
+## Searching every pane
+
+"Where did I see that error?", with three tabs and six panes: press ⇧⌘F (Edit › Find › Find in All Panes…, or right-click the terminal), or pick **All Panes** at the top of the sidebar. It then lists the commands of every pane in every window, under the pane they ran in: which window (when there are several), which tab, where the pane is in it ("left", "top right") and its folder. Panes that came back when Codec reopened are in it too, with the commands they ran before.
+
+```
+Window 1 › api › left · ~/code/api
+  ✗ npm test                                 14:02
+    Error: connect ECONNREFUSED 127.0.0.1:5432
+Window 2 › infra · ~/infra
+  ✓ docker compose logs db                   13:55
+    … could not bind to 0.0.0.0:5432: address in use
+```
+
+The filter, Aa / ab / .\* and ⚠ work as for one pane. What's searched is each command's line and the output Codec kept when it finished, so a pane that a full-screen program (vim, less, htop) has taken over is searched all the same.
+
+Click a command, or select it and press Return: Codec brings its window to the front, selects its tab and pane, scrolls to the line that matched and marks it, and opens Find there with the same query, so ⌘G goes on to the next match. A command that has left the scrollback opens in the output viewer instead. Arrow keys only move through the list here, since going to a command may switch tabs or windows. Insert Command and Run Again put the command on the focused pane's command line.
+
+Pick **This Pane** to go back to the focused pane's commands.
 
 ## Right-click
 

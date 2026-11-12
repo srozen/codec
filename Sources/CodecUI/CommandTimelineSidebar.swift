@@ -65,8 +65,8 @@ final class PaneTimeline: ObservableObject {
     }
 
     /// Entries the sidebar lists.
-    func listed(matching query: String, failedOnly: Bool) -> [TimelineEntry] {
-        value.entries(matching: query, failedOnly: failedOnly).filter { $0.id >= listStart }
+    func listed(matching filter: TimelineFilter) -> [TimelineEntry] {
+        value.entries(matching: filter).filter { $0.id >= listStart }
     }
 
     func clearList() {
@@ -83,22 +83,51 @@ final class PaneTimeline: ObservableObject {
 
 /// The Commands sidebar, on the right of the window: every command run in the focused pane, with how
 /// it ended and what it printed last. Click one to go back to it in the terminal; Space shows its output,
-/// even after it has left the scrollback.
+/// even after it has left the scrollback. Switched to All Panes, it lists the commands of every pane in
+/// every window, so the filter searches all of their output at once.
 final class CommandTimelineSidebar: NSView {
     static let defaultWidth: CGFloat = 280
     static let widthRange: ClosedRange<CGFloat> = 200...560
 
+    /// Whose commands it lists.
+    enum Scope: Int {
+        /// The focused pane's.
+        case pane
+        /// Every pane's, in every window, under the pane they ran in.
+        case all
+    }
+
+    /// A pane, and where it is, for All Panes.
+    struct PanePlace {
+        let pane: Pane
+        /// "Window 2 › api › left": the window when there are several, the tab, and where the pane is
+        /// in it when the tab is split.
+        let title: String
+    }
+
     let table = TimelineTableView()
     let searchField = NSSearchField()
+    let scopeControl = NSSegmentedControl(labels: ["This Pane", "All Panes"], trackingMode: .selectOne,
+                                          target: nil, action: nil)
+    /// Find's options, Aa, ab and .*, for the filter.
+    let toggles = FindOptionToggles()
     /// The user dragged the leading edge to this width.
     var onResize: ((CGFloat) -> Void)?
     /// Save to Intel, on a command from this pane.
     var onSaveToIntel: ((TimelineEntry, Pane?) -> Void)?
     /// What explains failed commands, if Settings allow it.
     var explainer: () -> (any FailureExplaining)? = { nil }
+    /// Every pane in every window, in order, for All Panes.
+    var places: () -> [PanePlace] = { [] }
+    /// Goes to a command listed in All Panes: to its window, tab and pane, to the line that matched,
+    /// with Find open there. False when it can't be gone to, as it's no longer in the scrollback.
+    var onGoToCommand: ((TimelineEntry, Pane, TimelineFilter) -> Bool)?
 
     private(set) weak var pane: Pane?
+    private(set) var scope = Scope.pane
     private(set) var rows: [Row] = []
+    /// The pane each row is from.
+    private var rowPanes: [Pane] = []
     private let header: NSHostingView<TimelineHeader>
     private let headerModel = TimelineHeaderModel()
     private let scrollView = NSScrollView()
@@ -108,9 +137,13 @@ final class CommandTimelineSidebar: NSView {
     private var theme: CodecTheme
     private var codeFont: NSFont
     private var subscription: AnyCancellable?
+    /// The panes `subscription` hears from.
+    private var observed: [ObjectIdentifier] = []
+    private var panesChanged: AnyCancellable?
+    private var reloadPending = false
     private var clock: Timer?
-    /// Where the scrollback starts, as of the last reload: commands above it are only in the kept output.
-    private var scrollbackStart: Int?
+    /// Where each pane's scrollback starts, as of the last reload: commands above it are only in the kept output.
+    private var scrollbackStarts: [ObjectIdentifier: Int] = [:]
     private var outputPopover: NSPopover?
     /// Whether AppKit is handling a key press; tests stand in for it.
     var handlingKeyPress: () -> Bool = { NSApp.currentEvent?.type == .keyDown }
@@ -120,6 +153,8 @@ final class CommandTimelineSidebar: NSView {
     enum Row: Equatable {
         /// Where the commands below ran, and with what Python environment and tool versions.
         case directory(String, Toolchain?)
+        /// In All Panes, the pane the commands below ran in: where it is, and its folder now.
+        case pane(String, directory: String)
         case entry(TimelineEntry)
 
         var entry: TimelineEntry? {
@@ -134,7 +169,7 @@ final class CommandTimelineSidebar: NSView {
         header = NSHostingView(rootView: TimelineHeader(model: headerModel, theme: theme))
         super.init(frame: .zero)
         headerModel.onChange = { [weak self] in self?.reload() }
-        headerModel.onClear = { [weak self] in self?.pane?.timeline.clearList() }
+        headerModel.onClear = { [weak self] in self?.clearList() }
         build()
     }
 
@@ -154,6 +189,20 @@ final class CommandTimelineSidebar: NSView {
         searchField.target = self
         searchField.action = #selector(searchChanged)
         searchField.setAccessibilityLabel("Filter commands")
+        toggles.onChange = { [weak self] in self?.searchChanged() }
+        let options = NSStackView(views: toggles.buttons)
+        options.orientation = .horizontal
+        options.spacing = 2
+
+        scopeControl.controlSize = .small
+        scopeControl.font = .systemFont(ofSize: 11)
+        scopeControl.segmentDistribution = .fillEqually
+        scopeControl.selectedSegment = Scope.pane.rawValue
+        scopeControl.target = self
+        scopeControl.action = #selector(scopeChanged)
+        scopeControl.setToolTip("Commands run in the focused pane", forSegment: Scope.pane.rawValue)
+        scopeControl.setToolTip("Commands run in every pane, in every window (⇧⌘F)", forSegment: Scope.all.rawValue)
+        scopeControl.setAccessibilityLabel("Show commands from")
 
         let column = NSTableColumn(identifier: .init("command"))
         column.resizingMask = .autoresizingMask
@@ -198,7 +247,7 @@ final class CommandTimelineSidebar: NSView {
             self.onResize?(self.frame.width - delta)
         }
 
-        for view in [header, searchField, scrollView, emptyLabel, divider, resizeHandle] as [NSView] {
+        for view in [header, scopeControl, searchField, options, scrollView, emptyLabel, divider, resizeHandle] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
@@ -215,9 +264,14 @@ final class CommandTimelineSidebar: NSView {
             header.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
             header.trailingAnchor.constraint(equalTo: trailingAnchor),
             header.heightAnchor.constraint(equalToConstant: 34),
-            searchField.topAnchor.constraint(equalTo: header.bottomAnchor),
+            scopeControl.topAnchor.constraint(equalTo: header.bottomAnchor),
+            scopeControl.leadingAnchor.constraint(equalTo: divider.trailingAnchor, constant: 10),
+            scopeControl.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            searchField.topAnchor.constraint(equalTo: scopeControl.bottomAnchor, constant: 8),
             searchField.leadingAnchor.constraint(equalTo: divider.trailingAnchor, constant: 10),
-            searchField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            searchField.trailingAnchor.constraint(equalTo: options.leadingAnchor, constant: -4),
+            options.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            options.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
             scrollView.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 6),
             scrollView.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -225,7 +279,7 @@ final class CommandTimelineSidebar: NSView {
             emptyLabel.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 28),
             emptyLabel.leadingAnchor.constraint(equalTo: divider.trailingAnchor, constant: 20),
             emptyLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
-        ])
+        ] + toggles.sizeConstraints)
         apply(theme: theme, codeFont: codeFont)
     }
 
@@ -235,54 +289,144 @@ final class CommandTimelineSidebar: NSView {
         header.rootView = TimelineHeader(model: headerModel, theme: theme)
         layer?.backgroundColor = theme.foreground.withAlphaComponent(theme.isDark ? 0.025 : 0.035).cgColor
         divider.layer?.backgroundColor = theme.divider.cgColor
+        toggles.apply(accent: theme.accent, dim: .secondaryLabelColor)
         refreshVisibleRows()
     }
 
     // MARK: Following a pane
 
-    /// Shows a pane's commands. Nil while the sidebar is hidden, so it doesn't track anything.
+    /// Shows a pane's commands. Nil while the sidebar is hidden, so it doesn't track anything. In All
+    /// Panes, the list stays as it is: the pane is only where Insert Command and Run Again go.
     func follow(_ pane: Pane?) {
         guard pane !== self.pane || (pane != nil) != (subscription != nil) else { return }
+        let listing = subscription != nil
         self.pane = pane
+        if scope == .all, pane != nil, listing { return }
         outputPopover?.close()
-        headerModel.paneTitle = pane?.session.title ?? ""
-        subscription = pane?.timeline.objectWillChange
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in MainActor.assumeIsolated { self?.reload() } }
+        subscribe()
         reload(scrollToEnd: true)
     }
 
-    private var query: String { searchField.stringValue.trimmingCharacters(in: .whitespaces) }
+    /// Lists the focused pane's commands, or every pane's.
+    func setScope(_ scope: Scope) {
+        scopeControl.selectedSegment = scope.rawValue
+        guard scope != self.scope else { return }
+        self.scope = scope
+        outputPopover?.close()
+        // Panes come and go in other windows too.
+        panesChanged = scope == .all ? NotificationCenter.default.publisher(for: Self.panesDidChange)
+            .sink { [weak self] _ in MainActor.assumeIsolated { self?.reloadSoon() } } : nil
+        subscribe()
+        reload(scrollToEnd: true)
+    }
 
-    var selectedEntry: TimelineEntry? {
-        rows.indices.contains(table.selectedRow) ? rows[table.selectedRow].entry : nil
+    /// ⇧⌘F: every pane's commands, with the keyboard in the filter.
+    func findInAllPanes() {
+        setScope(.all)
+        window?.makeFirstResponder(searchField)
+        searchField.currentEditor()?.selectAll(nil)
+    }
+
+    /// Posted when panes were opened or closed, in any window.
+    static let panesDidChange = Notification.Name("CodecPanesDidChange")
+
+    @objc private func scopeChanged() {
+        setScope(Scope(rawValue: scopeControl.selectedSegment) ?? .pane)
+    }
+
+    /// Listens to the panes listed for new commands and output.
+    private func subscribe(to panes: [Pane]? = nil) {
+        let panes = pane == nil ? [] : panes ?? (scope == .pane ? [pane].compactMap { $0 } : listedPlaces().map(\.pane))
+        observed = panes.map(ObjectIdentifier.init)
+        subscription = pane == nil ? nil : Publishers.MergeMany(panes.map { $0.timeline.objectWillChange })
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in MainActor.assumeIsolated { self?.reload() } }
+    }
+
+    private func listedPlaces() -> [PanePlace] {
+        places().filter { !$0.pane.isShutDown }
+    }
+
+    private func reloadSoon() {
+        guard !reloadPending else { return }
+        reloadPending = true
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                self?.reloadPending = false
+                self?.reload()
+            }
+        }
+    }
+
+    /// What the list is filtered by: the field, Find's options and ⚠.
+    var filter: TimelineFilter {
+        TimelineFilter(query: searchField.stringValue, options: toggles.options, failedOnly: headerModel.failedOnly)
+    }
+
+    private var query: String { filter.text }
+
+    var selectedEntry: TimelineEntry? { entry(at: table.selectedRow) }
+
+    /// The pane the selected command ran in.
+    var selectedPane: Pane? { pane(at: table.selectedRow) }
+
+    /// The row a pane's command is on.
+    func row(of entry: TimelineEntry, in pane: Pane) -> Int? {
+        rows.indices.first { rows[$0].entry?.id == entry.id && rowPanes[$0] === pane }
     }
 
     func reload(scrollToEnd: Bool = false) {
-        let selected = selectedEntry?.id
+        let selected = selectedEntry.flatMap { entry in selectedPane.map { (entry, $0) } }
         let atEnd = scrollToEnd || isScrolledToEnd
-        let entries = pane?.timeline.listed(matching: query, failedOnly: headerModel.failedOnly) ?? []
-        var rows: [Row] = []
-        var context: (directory: String, toolchain: Toolchain?)?
-        for entry in entries {
-            if context?.directory != entry.directory || context?.toolchain != entry.toolchain {
-                context = (entry.directory, entry.toolchain)
-                rows.append(.directory(entry.directory, entry.toolchain))
+        let filter = self.filter
+        var rows: [Row] = [], panes: [Pane] = []
+        var listed: [Pane] = []
+        switch scope {
+        case .pane:
+            if let pane {
+                listed = [pane]
+                var context: (directory: String, toolchain: Toolchain?)?
+                for entry in pane.timeline.listed(matching: filter) {
+                    if context?.directory != entry.directory || context?.toolchain != entry.toolchain {
+                        context = (entry.directory, entry.toolchain)
+                        rows.append(.directory(entry.directory, entry.toolchain))
+                        panes.append(pane)
+                    }
+                    rows.append(.entry(entry))
+                    panes.append(pane)
+                }
             }
-            rows.append(.entry(entry))
+        case .all:
+            let places = pane == nil ? [] : listedPlaces()
+            listed = places.map(\.pane)
+            if listed.map(ObjectIdentifier.init) != observed { subscribe(to: listed) }
+            for place in places {
+                let entries = place.pane.timeline.listed(matching: filter)
+                guard !entries.isEmpty else { continue }
+                rows.append(.pane(place.title, directory: place.pane.session.directory))
+                panes.append(place.pane)
+                for entry in entries {
+                    rows.append(.entry(entry))
+                    panes.append(place.pane)
+                }
+            }
         }
         self.rows = rows
-        scrollbackStart = pane.flatMap { TerminalGrid(terminal: $0.terminal)?.bufferRowOffset }
-        headerModel.paneTitle = pane?.session.title ?? ""
-        headerModel.count = pane?.timeline.listed(matching: "", failedOnly: false).count ?? 0
+        rowPanes = panes
+        scrollbackStarts = [:]
+        for pane in listed {
+            scrollbackStarts[ObjectIdentifier(pane)] = TerminalGrid(terminal: pane.terminal)?.bufferRowOffset
+        }
+        headerModel.paneTitle = scope == .pane ? pane?.session.title ?? "" : ""
+        headerModel.count = listed.reduce(0) { $0 + $1.timeline.listed(matching: TimelineFilter()).count }
         table.reloadData()
-        if let selected, let row = rows.firstIndex(where: { $0.entry?.id == selected }) {
+        if let selected, let row = row(of: selected.0, in: selected.1) {
             restoringSelection = true
             table.selectRowIndexes([row], byExtendingSelection: false)
             restoringSelection = false
         }
         if atEnd, !rows.isEmpty { table.scrollRowToVisible(rows.count - 1) }
-        updateEmptyState()
+        updateEmptyState(listed: listed)
         updateClock()
     }
 
@@ -291,23 +435,30 @@ final class CommandTimelineSidebar: NSView {
         return scrollView.contentView.bounds.maxY >= document.frame.height - 8
     }
 
-    private func updateEmptyState() {
+    private func updateEmptyState(listed: [Pane]) {
         emptyLabel.isHidden = !rows.isEmpty
         guard rows.isEmpty else { return }
+        let all = scope == .all
         if pane == nil {
             emptyLabel.stringValue = ""
-        } else if pane?.session.integrated == false {
+        } else if !listed.contains(where: \.session.integrated) {
             emptyLabel.stringValue = "Commands show up here with Codec’s zsh integration (Settings › Shell)."
         } else if headerModel.count == 0 {
-            emptyLabel.stringValue = "Commands you run in this pane show up here, with what they printed."
+            emptyLabel.stringValue = all ? "Commands you run in any pane show up here, with what they printed."
+                : "Commands you run in this pane show up here, with what they printed."
+        } else if filter.isInvalid {
+            emptyLabel.stringValue = "“\(query)” isn’t a valid regular expression."
+        } else if query.isEmpty {
+            emptyLabel.stringValue = "No failed commands."
         } else {
-            emptyLabel.stringValue = query.isEmpty ? "No failed commands." : "No commands or output match “\(query)”."
+            emptyLabel.stringValue = all ? "No commands or output in any pane match “\(query)”."
+                : "No commands or output match “\(query)”."
         }
     }
 
-    /// Ticks the running command's elapsed time.
+    /// Ticks the running commands' elapsed time.
     private func updateClock() {
-        let running = rows.last?.entry?.isRunning == true
+        let running = rows.contains { $0.entry?.isRunning == true }
         if running, clock == nil {
             let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.refreshVisibleRows() }
@@ -325,26 +476,31 @@ final class CommandTimelineSidebar: NSView {
         guard visible.length > 0 else { return }
         for row in visible.location..<(visible.location + visible.length) where rows.indices.contains(row) {
             guard let view = table.view(atColumn: 0, row: row, makeIfNecessary: false) else { continue }
-            configure(view, for: rows[row])
+            configure(view, at: row)
         }
     }
 
-    private func configure(_ view: NSView, for row: Row) {
-        switch row {
+    private func configure(_ view: NSView, at row: Int) {
+        switch rows[row] {
         case .directory(let directory, let toolchain):
             (view as? TimelineDirectoryCell)?.show((directory as NSString).abbreviatingWithTildeInPath, toolchain: toolchain,
                                                    theme: theme)
+        case .pane(let title, let directory):
+            (view as? TimelinePaneCell)?.show(title, directory: (directory as NSString).abbreviatingWithTildeInPath)
         case .entry(let entry):
             guard let cell = view as? TimelineCell else { return }
-            cell.show(entry, query: query, inScrollback: isInScrollback(entry), theme: theme, codeFont: codeFont)
-            cell.onSave = { [weak self] in self?.saveToIntel(entry) }
+            let pane = rowPanes[row]
+            cell.show(entry, matching: filter.expression, inScrollback: isInScrollback(entry, in: pane), theme: theme,
+                      codeFont: codeFont)
+            cell.onSave = { [weak self, weak pane] in self?.saveToIntel(entry, from: pane) }
         }
     }
 
     /// Whether the command can still be scrolled to, as far as can be told without reading the screen.
-    func isInScrollback(_ entry: TimelineEntry) -> Bool {
+    func isInScrollback(_ entry: TimelineEntry, in pane: Pane? = nil) -> Bool {
         guard let block = entry.block, !entry.fullScreen else { return false }
-        return scrollbackStart.map { block.prompt >= $0 } ?? true
+        let start = (pane ?? self.pane).flatMap { scrollbackStarts[ObjectIdentifier($0)] }
+        return start.map { block.prompt >= $0 } ?? true
     }
 
     // MARK: Going to commands
@@ -353,44 +509,58 @@ final class CommandTimelineSidebar: NSView {
         rows.indices.contains(row) ? rows[row].entry : nil
     }
 
+    private func pane(at row: Int) -> Pane? {
+        rowPanes.indices.contains(row) ? rowPanes[row] : nil
+    }
+
     /// A click goes to the command in the terminal, or shows its output when it's no longer there.
     @objc private func clicked() {
-        guard let entry = entry(at: table.clickedRow), NSApp.currentEvent?.clickCount ?? 1 == 1 else { return }
-        if !go(to: entry) { showOutput(of: entry, row: table.clickedRow) }
+        let row = table.clickedRow
+        guard let entry = entry(at: row), let pane = pane(at: row), NSApp.currentEvent?.clickCount ?? 1 == 1 else { return }
+        if !go(to: entry, in: pane) { showOutput(of: entry, in: pane, row: row) }
     }
 
     @objc private func doubleClicked() {
-        guard let entry = entry(at: table.clickedRow) else { return }
-        showOutput(of: entry, row: table.clickedRow)
+        let row = table.clickedRow
+        guard let entry = entry(at: row) else { return }
+        showOutput(of: entry, in: pane(at: row), row: row)
     }
 
+    /// Goes to a command in the terminal: in this pane, or, in All Panes, in its own, wherever that is,
+    /// with Find open there.
     @discardableResult
-    func go(to entry: TimelineEntry) -> Bool {
-        guard let pane else { return false }
-        let revealed = pane.reveal(entry, matching: query)
+    func go(to entry: TimelineEntry, in pane: Pane? = nil) -> Bool {
+        guard let pane = pane ?? self.pane else { return false }
+        if scope == .all {
+            guard !pane.isShutDown else { return false }
+            return onGoToCommand?(entry, pane, filter) ?? false
+        }
+        let revealed = pane.reveal(entry, matching: filter.expression) != nil
         if !revealed { refreshVisibleRows() }
         return revealed
     }
 
-    /// Return: goes to the selected command and gives the terminal the keyboard.
+    /// Return: goes to the selected command and gives the terminal the keyboard (in All Panes, Find
+    /// has it, open where the command is).
     func goToSelected(focusTerminal focus: Bool) {
         guard let entry = selectedEntry else { return }
-        if go(to: entry) {
-            if focus { focusTerminal() }
+        let pane = selectedPane
+        if go(to: entry, in: pane) {
+            if focus, scope == .pane { focusTerminal() }
         } else {
-            showOutput(of: entry, row: table.selectedRow)
+            showOutput(of: entry, in: pane, row: table.selectedRow)
         }
     }
 
     private func toggleOutputOfSelected() {
         if outputPopover?.isShown == true { return outputPopover?.performClose(nil) ?? () }
         guard let entry = selectedEntry else { return }
-        showOutput(of: entry, row: table.selectedRow)
+        showOutput(of: entry, in: selectedPane, row: table.selectedRow)
     }
 
-    func saveToIntel(_ entry: TimelineEntry) {
+    func saveToIntel(_ entry: TimelineEntry, from pane: Pane? = nil) {
         outputPopover?.close()
-        onSaveToIntel?(entry, pane)
+        onSaveToIntel?(entry, pane ?? self.pane)
     }
 
     func focusTerminal() {
@@ -412,23 +582,25 @@ final class CommandTimelineSidebar: NSView {
     var isShowingOutput: Bool { outputPopover?.isShown == true }
     var outputViewer: CommandOutputViewer? { outputPopover?.contentViewController as? CommandOutputViewer }
 
-    /// Opens the command's output; with `explain`, starts explaining why it failed.
-    func showOutput(of entry: TimelineEntry, row: Int, explain: Bool = false) {
-        guard let pane, window != nil else { return }
+    /// Opens the output of a command run in `pane` (by default the one followed); with `explain`, starts
+    /// explaining why it failed. Insert and Run Again put the command in the focused pane.
+    func showOutput(of entry: TimelineEntry, in pane: Pane? = nil, row: Int, explain: Bool = false) {
+        guard let pane = pane ?? self.pane, let focused = self.pane, window != nil else { return }
         outputPopover?.close()
         let popover = NSPopover()
         popover.behavior = .transient
         popover.animates = false
-        let inScrollback = pane.rows(of: entry) != nil
+        let inScrollback = scope == .all ? isInScrollback(entry, in: pane) && !pane.isShutDown : pane.rows(of: entry) != nil
         let output = pane.output(of: entry)
         let explanation = FailureExplanationModel(entry: entry, output: output, explainer: explainer())
         let viewer = CommandOutputViewer(
-            entry: entry, output: output, inScrollback: inScrollback, query: query,
+            entry: entry, output: output, inScrollback: inScrollback, expression: filter.expression,
             theme: theme, codeFont: codeFont,
             actions: .init(
-                goTo: { [weak self, weak popover] in
+                goTo: { [weak self, weak popover, weak pane] in
                     popover?.performClose(nil)
-                    if self?.go(to: entry) == true { self?.focusTerminal() }
+                    guard let self, let pane else { return }
+                    if self.go(to: entry, in: pane), self.scope == .pane { self.focusTerminal() }
                 },
                 insert: { [weak self, weak popover] in
                     popover?.performClose(nil)
@@ -439,12 +611,12 @@ final class CommandTimelineSidebar: NSView {
                     self?.insert(entry.command, run: true)
                 },
                 close: { [weak popover] in popover?.performClose(nil) },
-                saveToIntel: { [weak self] in self?.saveToIntel(entry) },
+                saveToIntel: { [weak self, weak pane] in self?.saveToIntel(entry, from: pane) },
                 insertCommand: { [weak self, weak popover] command in
                     popover?.performClose(nil)
                     self?.insert(command, run: false)
                 }),
-            canInsert: pane.isAtCommandLine, explanation: explanation)
+            canInsert: focused.isAtCommandLine, explanation: explanation)
         popover.contentViewController = viewer
         outputPopover = popover
         let anchor = row >= 0 && row < table.numberOfRows ? table.rect(ofRow: row) : table.visibleRect
@@ -454,10 +626,10 @@ final class CommandTimelineSidebar: NSView {
     }
 
     /// Explain Failure, for a failed command when there's something to explain it with.
-    private func explainItems(for entry: TimelineEntry, row: Int) -> [NSMenuItem] {
+    private func explainItems(for entry: TimelineEntry, in pane: Pane?, row: Int) -> [NSMenuItem] {
         guard let explainer = explainer(), FailureReport(entry: entry, output: nil) != nil else { return [] }
-        return [ClosureMenuItem("Explain Failure", image: "sparkles", enabled: explainer.availability == .available) { [weak self] in
-            self?.showOutput(of: entry, row: row, explain: true)
+        return [ClosureMenuItem("Explain Failure", image: "sparkles", enabled: explainer.availability == .available) { [weak self, weak pane] in
+            self?.showOutput(of: entry, in: pane, row: row, explain: true)
         }]
     }
 
@@ -471,6 +643,14 @@ final class CommandTimelineSidebar: NSView {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
+    /// The bin: hides the commands listed so far (they're still tracked).
+    private func clearList() {
+        switch scope {
+        case .pane: pane?.timeline.clearList()
+        case .all: listedPlaces().forEach { $0.pane.timeline.clearList() }
+        }
+    }
+
     @objc private func searchChanged() {
         reload(scrollToEnd: true)
     }
@@ -481,8 +661,8 @@ final class CommandTimelineSidebar: NSView {
     }
 
     /// The row a context menu acts on.
-    private var menuEntry: TimelineEntry? {
-        entry(at: table.clickedRow >= 0 ? table.clickedRow : table.selectedRow)
+    private var menuRow: Int {
+        table.clickedRow >= 0 ? table.clickedRow : table.selectedRow
     }
 }
 
@@ -498,10 +678,12 @@ extension CommandTimelineSidebar: NSTableViewDataSource, NSTableViewDelegate {
         switch rows[row] {
         case .directory:
             view = tableView.makeView(withIdentifier: TimelineDirectoryCell.identifier, owner: nil) ?? TimelineDirectoryCell()
+        case .pane:
+            view = tableView.makeView(withIdentifier: TimelinePaneCell.identifier, owner: nil) ?? TimelinePaneCell()
         case .entry:
             view = tableView.makeView(withIdentifier: TimelineCell.identifier, owner: nil) ?? TimelineCell()
         }
-        configure(view, for: rows[row])
+        configure(view, at: row)
         return view
     }
 
@@ -512,7 +694,11 @@ extension CommandTimelineSidebar: NSTableViewDataSource, NSTableViewDelegate {
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        rows[row].entry == nil ? 22 : 40
+        switch rows[row] {
+        case .directory: 22
+        case .pane: 26
+        case .entry: 40
+        }
     }
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
@@ -520,9 +706,10 @@ extension CommandTimelineSidebar: NSTableViewDataSource, NSTableViewDelegate {
     }
 
     /// Moving through the list with the arrow keys goes to each command in turn. Only then: a key typed in
-    /// the terminal is still AppKit's current event when a new command reloads the list.
+    /// the terminal is still AppKit's current event when a new command reloads the list. Not in All
+    /// Panes, where going to a command can switch tabs and windows.
     func tableViewSelectionDidChange(_ notification: Notification) {
-        guard !restoringSelection, window?.firstResponder === table, handlingKeyPress(),
+        guard scope == .pane, !restoringSelection, window?.firstResponder === table, handlingKeyPress(),
               let entry = selectedEntry else { return }
         go(to: entry)
     }
@@ -535,7 +722,7 @@ extension CommandTimelineSidebar: NSSearchFieldDelegate {
         switch selector {
         case #selector(NSResponder.moveDown(_:)), #selector(NSResponder.moveUp(_:)):
             focusList()
-            if let entry = selectedEntry { go(to: entry) }
+            if scope == .pane, let entry = selectedEntry { go(to: entry) }
             return true
         case #selector(NSResponder.insertNewline(_:)):
             if table.selectedRow < 0, let last = rows.lastIndex(where: { $0.entry != nil }) {
@@ -557,35 +744,39 @@ extension CommandTimelineSidebar: NSSearchFieldDelegate {
 extension CommandTimelineSidebar: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        guard let entry = menuEntry else { return }
-        for item in contextMenuItems(for: entry, row: table.clickedRow >= 0 ? table.clickedRow : table.selectedRow) {
+        guard let entry = entry(at: menuRow) else { return }
+        for item in contextMenuItems(for: entry, row: menuRow) {
             menu.addItem(item)
         }
     }
 
     func contextMenuItems(for entry: TimelineEntry, row: Int) -> [NSMenuItem] {
+        let pane = pane(at: row) ?? self.pane
         let output = pane?.liveOutputRange(of: entry)
-        let canInsert = pane?.isAtCommandLine ?? false
+        let canInsert = self.pane?.isAtCommandLine ?? false
         let hasOutput = output != nil || entry.output != nil
+        // In All Panes, the pane may be in a tab that isn't selected, where its rows can't be measured.
+        let canGo = scope == .all ? isInScrollback(entry, in: pane) && pane?.isShutDown == false : pane?.rows(of: entry) != nil
         return [
-            ClosureMenuItem("Go to Command", image: "arrow.up.left.and.arrow.down.right", enabled: pane?.rows(of: entry) != nil) { [weak self] in
-                if self?.go(to: entry) == true { self?.focusTerminal() }
+            ClosureMenuItem("Go to Command", image: "arrow.up.left.and.arrow.down.right", enabled: canGo) { [weak self, weak pane] in
+                guard let self, let pane else { return }
+                if self.go(to: entry, in: pane), self.scope == .pane { self.focusTerminal() }
             },
-            ClosureMenuItem("Show Output", image: "text.alignleft", enabled: hasOutput) { [weak self] in
-                self?.showOutput(of: entry, row: row)
+            ClosureMenuItem("Show Output", image: "text.alignleft", enabled: hasOutput) { [weak self, weak pane] in
+                self?.showOutput(of: entry, in: pane, row: row)
             },
-        ] + explainItems(for: entry, row: row) + [
+        ] + explainItems(for: entry, in: pane, row: row) + [
             .separator(),
-            ClosureMenuItem("Save to Intel…", image: "bookmark") { [weak self] in self?.saveToIntel(entry) },
+            ClosureMenuItem("Save to Intel…", image: "bookmark") { [weak self, weak pane] in self?.saveToIntel(entry, from: pane) },
             .separator(),
             ClosureMenuItem("Copy Command", image: "doc.on.doc") { [weak self] in self?.copy(entry.command) },
-            ClosureMenuItem("Copy Output", image: "doc.on.doc.fill", enabled: hasOutput) { [weak self] in
-                if let text = self?.pane?.output(of: entry) { self?.copy(text) }
+            ClosureMenuItem("Copy Output", image: "doc.on.doc.fill", enabled: hasOutput) { [weak self, weak pane] in
+                if let text = pane?.output(of: entry) { self?.copy(text) }
             },
-            ClosureMenuItem("Select Output", image: "text.line.first.and.arrowtriangle.forward", enabled: output != nil) { [weak self] in
-                guard let self, let pane = self.pane, let output = pane.liveOutputRange(of: entry) else { return }
+            ClosureMenuItem("Select Output", image: "text.line.first.and.arrowtriangle.forward", enabled: output != nil) { [weak self, weak pane] in
+                guard let self, let pane, let output = pane.liveOutputRange(of: entry) else { return }
                 pane.selectOutput(output)
-                self.focusTerminal()
+                self.window?.makeFirstResponder(pane.view.preferredResponder)
             },
             .separator(),
             ClosureMenuItem("Insert Command", image: "text.insert", enabled: canInsert) { [weak self] in
@@ -797,6 +988,62 @@ final class TimelineDirectoryCell: NSTableCellView {
     }
 }
 
+/// In All Panes, the pane the commands below ran in: where it is ("Window 2 › api › left") and its folder.
+final class TimelinePaneCell: NSTableCellView {
+    static let identifier = NSUserInterfaceItemIdentifier("TimelinePaneCell")
+
+    private let icon = NSImageView()
+    private let label = NSTextField(labelWithString: "")
+    private let folder = NSTextField(labelWithString: "")
+
+    init() {
+        super.init(frame: .zero)
+        identifier = Self.identifier
+        icon.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: nil)
+        icon.symbolConfiguration = .init(pointSize: 10, weight: .medium)
+        icon.contentTintColor = .secondaryLabelColor
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
+        label.textColor = .labelColor
+        label.lineBreakMode = .byTruncatingMiddle
+        folder.font = .systemFont(ofSize: 11)
+        folder.textColor = .secondaryLabelColor
+        folder.lineBreakMode = .byTruncatingHead
+        for view in [icon, label, folder] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+        // The folder gives way before where the pane is.
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        folder.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
+        label.setContentHuggingPriority(.required, for: .horizontal)
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            icon.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 3),
+            label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 5),
+            label.centerYAnchor.constraint(equalTo: icon.centerYAnchor),
+            folder.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 6),
+            folder.firstBaselineAnchor.constraint(equalTo: label.firstBaselineAnchor),
+            folder.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    func show(_ title: String, directory: String) {
+        label.stringValue = title
+        folder.stringValue = directory
+        toolTip = "\(title)\n\(directory)"
+        setAccessibilityLabel("\(title), \(directory)")
+    }
+
+    /// What the heading shows, for tests.
+    var shown: (title: String, directory: String) { (label.stringValue, folder.stringValue) }
+}
+
 /// A thin line filled to a fraction, on a faint track of the same color.
 final class ProgressLine: NSView {
     private var fraction = 0.0
@@ -937,7 +1184,8 @@ final class TimelineCell: NSTableCellView {
         fatalError("init(coder:) is not supported")
     }
 
-    func show(_ entry: TimelineEntry, query: String, inScrollback: Bool, theme: CodecTheme, codeFont: NSFont) {
+    func show(_ entry: TimelineEntry, matching expression: NSRegularExpression?, inScrollback: Bool, theme: CodecTheme,
+              codeFont: NSFont) {
         command.attributedStringValue = ShellHighlighting.attributed(entry.command, theme: theme, font: codeFont, size: 12)
         let calendar = Calendar.current
         time.stringValue = calendar.isDateInToday(entry.started)
@@ -977,8 +1225,11 @@ final class TimelineCell: NSTableCellView {
 
         var detailText: String
         var detailColor = NSColor.secondaryLabelColor
-        if let match = entry.output?.firstLine(matching: query) {
-            detailText = match.line
+        let match = expression.flatMap { entry.output?.firstMatch(of: $0) }
+        // The line that matched, from a little before the match; the lines around it on hover.
+        detail.toolTip = match.map { [$0.before, $0.line, $0.after].compactMap { $0 }.joined(separator: "\n") }
+        if let match {
+            detailText = match.excerpt()
             detailColor = .labelColor
         } else if entry.isRunning, let usualText, !entry.fullScreen {
             detailText = usualText.text
@@ -994,7 +1245,7 @@ final class TimelineCell: NSTableCellView {
             detailText = "No output"
             detailColor = .tertiaryLabelColor
         }
-        if case .failed(let code) = entry.status, code >= 0, entry.output?.firstLine(matching: query) == nil {
+        if case .failed(let code) = entry.status, code >= 0, match == nil {
             detailText = "Exit \(code) · " + detailText
         }
         detail.stringValue = detailText

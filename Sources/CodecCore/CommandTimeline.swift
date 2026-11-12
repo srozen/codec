@@ -45,15 +45,95 @@ public struct CapturedOutput: Codable, Equatable, Sendable {
 
     /// The first line holding `query`, ignoring case, and how far into the output it is.
     public func firstLine(matching query: String) -> (line: String, index: Int)? {
-        guard !query.isEmpty else { return nil }
-        var index = 0
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            if line.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil {
-                return (line.trimmingCharacters(in: .whitespaces), index)
+        guard let expression = TextSearch.expression(for: query, options: FindOptions()) else { return nil }
+        return firstMatch(of: expression).map { ($0.line, $0.index) }
+    }
+
+    /// The first line `expression` matches in, with the lines around it.
+    public func firstMatch(of expression: NSRegularExpression) -> OutputMatch? {
+        let string = text as NSString
+        let found = expression.rangeOfFirstMatch(in: text, range: NSRange(location: 0, length: string.length))
+        guard found.location != NSNotFound, found.length > 0 else { return nil }
+        let lineRange = string.lineRange(for: NSRange(location: found.location, length: 0))
+        let index = string.substring(to: lineRange.location).utf16.reduce(0) { $0 + ($1 == 0x0A ? 1 : 0) }
+        let line = string.substring(with: lineRange).trimmingCharacters(in: .newlines) as NSString
+        let start = min(found.location - lineRange.location, line.length)
+        let end = min(NSMaxRange(found) - lineRange.location, line.length)
+        // Counted in characters, in the line without the spaces around it.
+        let indent = (line as String).prefix { $0.isWhitespace }.count
+        let trimmed = (line as String).trimmingCharacters(in: .whitespaces)
+        let lower = min(max(line.substring(to: start).count - indent, 0), trimmed.count)
+        let upper = min(lower + line.substring(with: NSRange(location: start, length: end - start)).count, trimmed.count)
+        /// The nearest line with something on it, going up or down from the one at `location`.
+        func neighbor(_ location: Int, up: Bool) -> String? {
+            var location = location
+            while location >= 0, location < string.length {
+                let range = string.lineRange(for: NSRange(location: location, length: 0))
+                let text = string.substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !text.isEmpty { return text }
+                location = up ? range.location - 1 : NSMaxRange(range)
             }
-            index += 1
+            return nil
         }
-        return nil
+        return OutputMatch(line: trimmed, index: index,
+                           range: lower..<upper,
+                           before: neighbor(lineRange.location - 1, up: true),
+                           after: neighbor(NSMaxRange(lineRange), up: false))
+    }
+}
+
+/// A line of a command's output that holds what was searched for.
+public struct OutputMatch: Equatable, Sendable {
+    /// The line, without the spaces around it.
+    public var line: String
+    /// How far into the output it is, from 0.
+    public var index: Int
+    /// Where the match is in `line`, in characters.
+    public var range: Range<Int>
+    /// The nearest lines above and below it with something on them.
+    public var before: String?
+    public var after: String?
+
+    public init(line: String, index: Int, range: Range<Int>, before: String? = nil, after: String? = nil) {
+        self.line = line
+        self.index = index
+        self.range = range
+        self.before = before
+        self.after = after
+    }
+
+    /// The line from a little before the match, so a narrow list still shows the match: a long
+    /// line's start gives way to "…".
+    public func excerpt(leading: Int = 16) -> String {
+        guard range.lowerBound > leading + 1 else { return line }
+        return "…" + line.dropFirst(range.lowerBound - leading)
+    }
+}
+
+/// What the Commands sidebar filters by: text, matched as Find's options say, and whether to keep
+/// failed commands only.
+public struct TimelineFilter: Equatable, Sendable {
+    public var query: String
+    public var options: FindOptions
+    public var failedOnly: Bool
+
+    public init(query: String = "", options: FindOptions = FindOptions(), failedOnly: Bool = false) {
+        self.query = query
+        self.options = options
+        self.failedOnly = failedOnly
+    }
+
+    /// The query without the spaces around it.
+    public var text: String { query.trimmingCharacters(in: .whitespaces) }
+
+    /// What finds the query; nil when there's none, or it isn't a valid pattern.
+    public var expression: NSRegularExpression? { TextSearch.expression(for: text, options: options) }
+
+    /// There's a query, but it isn't a valid regular expression.
+    public var isInvalid: Bool { !text.isEmpty && expression == nil }
+
+    func matchesCommand(_ command: String, expression: NSRegularExpression) -> Bool {
+        expression.rangeOfFirstMatch(in: command, range: NSRange(location: 0, length: (command as NSString).length)).length > 0
     }
 }
 
@@ -206,12 +286,18 @@ public struct CommandTimeline: Codable, Equatable, Sendable {
 
     /// Entries whose command or output holds `query` (ignoring case), optionally only failed ones.
     public func entries(matching query: String, failedOnly: Bool = false) -> [TimelineEntry] {
-        let query = query.trimmingCharacters(in: .whitespaces)
+        entries(matching: TimelineFilter(query: query, failedOnly: failedOnly))
+    }
+
+    /// Entries the filter lets through: whose command or output matches, as Find's options say. None
+    /// when the query isn't a valid pattern.
+    public func entries(matching filter: TimelineFilter) -> [TimelineEntry] {
+        let expression = filter.expression
+        if expression == nil, !filter.text.isEmpty { return [] }
         return entries.filter { entry in
-            if failedOnly, !entry.failed { return false }
-            guard !query.isEmpty else { return true }
-            return entry.command.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
-                || entry.output?.firstLine(matching: query) != nil
+            if filter.failedOnly, !entry.failed { return false }
+            guard let expression else { return true }
+            return filter.matchesCommand(entry.command, expression: expression) || entry.output?.firstMatch(of: expression) != nil
         }
     }
 

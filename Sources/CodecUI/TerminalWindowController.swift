@@ -161,6 +161,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         timelineSidebar = CommandTimelineSidebar(theme: preferences.theme, codeFont: preferences.font())
         timelineSidebar.onResize = { [weak self] width in self?.resizeTimeline(to: width) }
         timelineSidebar.onSaveToIntel = { [weak self] entry, pane in self?.saveToIntel(entry, from: pane) }
+        timelineSidebar.places = { [weak self] in self?.panePlaces() ?? [] }
+        timelineSidebar.onGoToCommand = { [weak self] entry, pane, filter in
+            self?.goToCommand(entry, in: pane, filter: filter) ?? false
+        }
         timelineSidebar.explainer = { [weak self] in
             guard let self, self.preferences.explainFailures else { return nil }
             return self.environment.explainer
@@ -263,6 +267,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
             NSLayoutConstraint.activate(root.constraintsFilling(paneContainer))
             installedTab = tab
             installedLayout = tab.layout
+            NotificationCenter.default.post(name: CommandTimelineSidebar.panesDidChange, object: self)
         }
         updatePaneFocus()
     }
@@ -517,6 +522,59 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
             window?.layoutIfNeeded()
             timelineSidebar.focusList()
         }
+    }
+
+    func findInAllPanes(from pane: Pane) {
+        findInAllPanes(nil)
+    }
+
+    /// ⇧⌘F: the Commands sidebar, listing every pane's commands, with the keyboard in its filter.
+    @objc func findInAllPanes(_ sender: Any?) {
+        if !model.timelineVisible { setTimelineVisible(true) }
+        window?.layoutIfNeeded()
+        timelineSidebar.findInAllPanes()
+    }
+
+    /// Every window's panes, in order, with where each one is: the window when there are several, the
+    /// tab, and the pane's place in it when it's split.
+    func panePlaces() -> [CommandTimelineSidebar.PanePlace] {
+        let windows = allWindows
+        return windows.enumerated().flatMap { index, controller in
+            controller.model.tabs.flatMap { tab in
+                zip(tab.layout.leaves, tab.layout.placeNames).map { pane, place in
+                    let window = windows.count > 1 ? "Window \(index + 1)" : nil
+                    return CommandTimelineSidebar.PanePlace(
+                        pane: pane, title: [window, tab.title, place].compactMap { $0 }.joined(separator: " › "))
+                }
+            }
+        }
+    }
+
+    /// Every open window, this one included.
+    private var allWindows: [TerminalWindowController] {
+        let windows = environment.coordinator?.terminalWindows ?? []
+        return windows.contains { $0 === self } ? windows : [self] + windows
+    }
+
+    /// Goes to a command found in All Panes: brings its window to the front, selects its tab and pane,
+    /// scrolls to the line that matched and opens Find there with the same query, so ⌘G goes on to the
+    /// next match. False when the command can't be gone to, as it's no longer in the scrollback.
+    func goToCommand(_ entry: TimelineEntry, in pane: Pane, filter: TimelineFilter) -> Bool {
+        guard entry.block != nil, !entry.fullScreen, !pane.isShutDown,
+              let controller = allWindows.first(where: { $0.model.tabs.contains { $0.layout.contains(pane) } })
+        else { return false }
+        return controller.show(entry, in: pane, filter: filter)
+    }
+
+    private func show(_ entry: TimelineEntry, in pane: Pane, filter: TimelineFilter) -> Bool {
+        guard let tab = model.tabs.first(where: { $0.layout.contains(pane) }) else { return false }
+        if tab !== model.selected { select(tab) }
+        tab.focus(pane)
+        window?.makeKeyAndOrderFront(nil)
+        window?.layoutIfNeeded()
+        guard let row = pane.reveal(entry, matching: filter.expression) else { return false }
+        if !filter.text.isEmpty { pane.view.finder.open(query: filter.text, options: filter.options, from: row) }
+        return true
     }
 
     /// Keeps the tree on the focused pane's directory.
@@ -827,6 +885,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
             installSelectedTab()
         }
         environment.coordinator?.attentionDidChange()
+        NotificationCenter.default.post(name: CommandTimelineSidebar.panesDidChange, object: self)
     }
 
     private func removeTab(_ tab: TerminalTab) {
@@ -965,12 +1024,12 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         tab.focus(pane)
         if !model.timelineVisible { setTimelineVisible(true) }
         window?.layoutIfNeeded()
-        let row = timelineSidebar.rows.firstIndex { $0.entry?.id == entry.id }
+        let row = timelineSidebar.row(of: entry, in: pane)
         if let row {
             timelineSidebar.table.selectRowIndexes([row], byExtendingSelection: false)
             timelineSidebar.table.scrollRowToVisible(row)
         }
-        timelineSidebar.showOutput(of: entry, row: row ?? -1, explain: true)
+        timelineSidebar.showOutput(of: entry, in: pane, row: row ?? -1, explain: true)
     }
 
     /// ⌘Y: the history search, for the focused pane.
@@ -1403,6 +1462,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
                 item.tag = Int(NSFindPanelAction.showFindPanel.rawValue)
                 self?.focusedPane?.terminal.performFindPanelAction(item)
             },
+            .init(id: "find-all-panes", title: "Find in All Panes…", shortcut: "⇧⌘F", systemImage: "rectangle.and.text.magnifyingglass") { [weak self] in
+                self?.findInAllPanes(nil)
+            },
             .init(id: "bigger", title: "Increase Font Size", shortcut: "⌘+", systemImage: "textformat.size.larger") { [weak self] in self?.biggerFont(nil) },
             .init(id: "smaller", title: "Decrease Font Size", shortcut: "⌘−", systemImage: "textformat.size.smaller") { [weak self] in self?.smallerFont(nil) },
             .init(id: "reset-font", title: "Reset Font Size", shortcut: "⌘0", systemImage: "textformat.size") { [weak self] in self?.resetFontSize(nil) },
@@ -1513,5 +1575,6 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         cancellables.removeAll()
         tabObservers.removeAll()
         onClose?(self)
+        NotificationCenter.default.post(name: CommandTimelineSidebar.panesDidChange, object: self)
     }
 }

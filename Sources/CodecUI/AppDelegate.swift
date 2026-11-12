@@ -97,6 +97,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     // MARK: - Windows
 
+    var terminalWindows: [TerminalWindowController] { windows }
+
     private var currentWindow: TerminalWindowController? {
         windows.first { $0.window === NSApp.keyWindow } ?? windows.first { $0.window === NSApp.mainWindow }
     }

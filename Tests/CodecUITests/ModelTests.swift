@@ -176,6 +176,16 @@ struct MainMenuTests {
         }
     }
 
+    @Test func findsInAllPanesWithShiftCommandF() throws {
+        _ = NSApplication.shared
+        let menu = MainMenu.build()
+        let find = try #require(item(menu, path: ["Edit", "Find", "Find in All Panes…"]))
+        #expect(find.keyEquivalent == "f" && find.keyEquivalentModifierMask == [.command, .shift])
+        #expect(find.action == #selector(TerminalWindowController.findInAllPanes(_:)))
+        func all(_ menu: NSMenu) -> [NSMenuItem] { menu.items.flatMap { [$0] + ($0.submenu.map(all) ?? []) } }
+        #expect(all(menu).filter { $0.keyEquivalent == "f" && $0.keyEquivalentModifierMask == [.command, .shift] }.count == 1)
+    }
+
     @Test func splitsTowardAnArrowWithControlCommand() throws {
         _ = NSApplication.shared
         let menu = MainMenu.build()

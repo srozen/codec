@@ -109,6 +109,8 @@ enum MainMenu {
         findMenu.addItem(item("Find Next", findAction, "g", tag: Int(NSFindPanelAction.next.rawValue)))
         findMenu.addItem(item("Find Previous", findAction, "g", [.command, .shift], tag: Int(NSFindPanelAction.previous.rawValue)))
         findMenu.addItem(item("Use Selection for Find", findAction, "e", tag: Int(NSFindPanelAction.setFindString.rawValue)))
+        findMenu.addItem(.separator())
+        findMenu.addItem(item("Find in All Panes…", #selector(W.findInAllPanes(_:)), "f", [.command, .shift]))
         find.submenu = findMenu
         menu.addItem(find)
         menu.addItem(.separator())

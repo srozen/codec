@@ -1439,6 +1439,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
         terminal.selectedTextBackgroundColor = theme.selection
         terminal.installColors(theme.terminalPalette)
         terminal.optionAsMetaKey = preferences.optionAsMeta
+        terminal.scrollSensitivity = CGFloat(preferences.scrollSpeed)
         view.apply(theme: theme, scanlines: preferences.scanlines)
         refreshCommandSeparators()
     }

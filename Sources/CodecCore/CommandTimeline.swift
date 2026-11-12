@@ -84,6 +84,8 @@ public struct TimelineEntry: Identifiable, Codable, Equatable, Sendable {
     public var usualDuration: TimeInterval?
     /// The Python environment and tool versions it ran with, when there were any.
     public var toolchain: Toolchain?
+    /// It failed because a port was taken by a program in one of Codec's panes: which, and whose.
+    public var portConflict: PortConflict?
 
     public init(id: Int, command: String, screenCommand: String? = nil, directory: String, started: Date,
                 block: CommandBlocks.Block?) {
@@ -178,6 +180,12 @@ public struct CommandTimeline: Codable, Equatable, Sendable {
         guard let index = entries.lastIndex(where: { $0.id == id }) else { return }
         entries[index].output = output
         trimOutput()
+    }
+
+    /// A failed command found a port taken, and it's known by whom.
+    public mutating func setPortConflict(_ conflict: PortConflict, of id: Int) {
+        guard let index = entries.lastIndex(where: { $0.id == id }) else { return }
+        entries[index].portConflict = conflict
     }
 
     /// The shell went away mid-command: whatever was running won't report back.

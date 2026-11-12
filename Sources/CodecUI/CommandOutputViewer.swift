@@ -13,6 +13,8 @@ final class CommandOutputViewer: NSViewController {
         var saveToIntel: () -> Void = {}
         /// Puts a command on the command line.
         var insertCommand: (String) -> Void = { _ in }
+        /// Goes to the pane whose program holds the port the command wanted.
+        var goToPane: () -> Void = {}
     }
 
     let entry: TimelineEntry
@@ -21,13 +23,16 @@ final class CommandOutputViewer: NSViewController {
     private let query: String
     private let theme: CodecTheme
     private let codeFont: NSFont
+    /// The port it found taken, and by whom, when that's why it failed.
+    let portConflict: Pane.PortConflictStatus?
     let actions: Actions
     private let canInsert: Bool
     let explanation: FailureExplanationModel
     let textView = OutputTextView()
 
     init(entry: TimelineEntry, output: String?, inScrollback: Bool, query: String, theme: CodecTheme, codeFont: NSFont,
-         actions: Actions, canInsert: Bool, explanation: FailureExplanationModel) {
+         portConflict: Pane.PortConflictStatus? = nil, actions: Actions, canInsert: Bool, explanation: FailureExplanationModel) {
+        self.portConflict = portConflict
         self.entry = entry
         self.output = output
         self.inScrollback = inScrollback
@@ -48,7 +53,7 @@ final class CommandOutputViewer: NSViewController {
     override func loadView() {
         let header = NSHostingView(rootView: OutputHeader(
             entry: entry, theme: theme, codeFont: codeFont, inScrollback: inScrollback, canInsert: canInsert,
-            hasOutput: output != nil, note: note, actions: actions, explanation: explanation,
+            hasOutput: output != nil, note: note, portConflict: portConflict, actions: actions, explanation: explanation,
             copy: { [weak self] in
                 guard let output = self?.output else { return }
                 NSPasteboard.general.clearContents()
@@ -185,6 +190,7 @@ private struct OutputHeader: View {
     let canInsert: Bool
     let hasOutput: Bool
     let note: String?
+    let portConflict: Pane.PortConflictStatus?
     let actions: CommandOutputViewer.Actions
     @ObservedObject var explanation: FailureExplanationModel
     var copy: () -> Void
@@ -213,6 +219,20 @@ private struct OutputHeader: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help("Ran with \(toolchain.summary)")
+            }
+            if let portConflict {
+                HStack(spacing: 8) {
+                    Label(portConflict.text, systemImage: "network")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(theme.alertColor)
+                        .lineLimit(2)
+                    if portConflict.holder != nil {
+                        Button("Go to Pane", systemImage: "arrow.right.square", action: actions.goToPane)
+                            .controlSize(.small)
+                            .buttonStyle(.glass)
+                            .help("Show the pane whose program has the port")
+                    }
+                }
             }
             HStack(spacing: 8) {
                 Button("Go to Command", systemImage: "arrow.up.left.and.arrow.down.right", action: actions.goTo)

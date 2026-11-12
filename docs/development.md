@@ -19,7 +19,7 @@ Three targets, compiled in Swift 6 language mode (strict concurrency):
 
 | Target | What's in it |
 |---|---|
-| `CodecCore` | Logic with no UI, all of it unit-tested: the split layout tree and pane geometry, shell integration scripts and environment, integration event parsing, bell and exit policies, preferences, git branch lookup and switching, the changed lines of a file (a line diff), smart selection, command block tracking, each pane's command timeline and kept output, Intel files and their variables, syntax highlighting, Markdown rendering, file types and their colors (for the file tree and `ls`), command history ranking and storage, process inspection, system sampling, versions and release lookup for the update check, and downloading, checking and putting a new version in place. |
+| `CodecCore` | Logic with no UI, all of it unit-tested: the split layout tree and pane geometry, shell integration scripts and environment, integration event parsing, bell and exit policies, preferences, git branch lookup and switching, the changed lines of a file (a line diff), smart selection, command block tracking, each pane's command timeline and kept output, Intel files and their variables, syntax highlighting, Markdown rendering, file types and their colors (for the file tree and `ls`), command history ranking and storage, process inspection (what's running under a shell, and the ports it listens on), system sampling, versions and release lookup for the update check, and downloading, checking and putting a new version in place. |
 | `CodecUI` | AppKit and SwiftUI: app delegate and menus, window controller, tabs, panes, chrome, sidebars, editor, palette, settings, sounds, notifications, the update check and installing. |
 | `Codec` | The executable; calls `CodecApp.run()`. |
 
@@ -46,6 +46,6 @@ Terminal emulation is provided by [SwiftTerm](https://github.com/migueldeicaza/S
 
 ## Screenshots
 
-The images in `docs/images` come from `make screenshots`, which runs `Tests/CodecUITests/ScreenshotTour.swift`: real Codec windows, a real zsh, and a fresh clone of this repository with a few demo changes, branches, history and Intel items, all in a throwaway home folder under `.build`, so none of your own history, Intel or files show up.
+The images in `docs/images` come from `make screenshots`, which runs `Tests/CodecUITests/ScreenshotTour.swift`: real Codec windows, a real zsh, and a fresh clone of this repository with a few demo changes, branches, history and Intel items, all in a throwaway home folder under `.build`, so none of your own history, Intel or files show up. `CODEC_SHOT=ports make screenshots` retakes one shot alone, and `CODEC_SHOT=hero,ports` several (the names are in the tour's list), which keeps a change to one feature from touching every image.
 
 Windows open on screen while it runs (about a minute); leave the Mac alone, and unlocked, until it's done. When a feature's look changes, retake them and commit the new images with it.

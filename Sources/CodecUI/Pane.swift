@@ -21,6 +21,12 @@ protocol PaneHost: AnyObject {
     func explainFailure(of entry: TimelineEntry, in pane: Pane)
     /// ⌘-click on the name of a file in the terminal: show it in the editor, or a folder in Finder.
     func openFile(_ url: URL, from pane: Pane)
+    /// Where `pane` is among the window's tabs, in words: "Tab 2 › left pane".
+    func place(of pane: Pane) -> String?
+    /// Brings `pane` to the front: its window, its tab, and the focus.
+    func reveal(_ pane: Pane)
+    /// What the window is called, for telling windows apart in a list.
+    var windowTitle: String? { get }
 }
 
 /// One shell in one pane: owns the process, the terminal view and the pane's `Session`.
@@ -190,6 +196,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
         applyPreferences()
         session.directory = directory ?? NSHomeDirectory()
         if let contents { restore(contents) }
+        environment.panes.add(self)
         start()
     }
 
@@ -309,6 +316,8 @@ final class Pane: LocalProcessTerminalViewDelegate {
         venvObserver = nil
         if terminal.process.running { terminal.terminate() }
         environment.notifier.clear(id: session.id.uuidString)
+        session.listeningPorts = []
+        environment.panes.remove(self)
     }
 
     /// What closing this pane would terminate: the program in the foreground and any background jobs.
@@ -321,6 +330,19 @@ final class Pane: LocalProcessTerminalViewDelegate {
 
     /// Closing this pane would end something besides the shell.
     var hasRunningJob: Bool { !runningPrograms.isEmpty }
+
+    /// What closing some panes would terminate, for asking first.
+    struct Running {
+        /// Each program once, as the shells have them.
+        var programs: [String] = []
+        /// The ports they, or what they started, are listening on.
+        var ports: [ListeningPort] = []
+
+        /// How many programs `list` names.
+        var count: Int { RunningPrograms.programs(programs, listening: ports).count }
+        /// "“npm” and “node” (listening on :3000)".
+        var list: String { RunningPrograms.list(programs, listening: ports) }
+    }
 
     // MARK: - Polling
 
@@ -342,8 +364,12 @@ final class Pane: LocalProcessTerminalViewDelegate {
         if printed { view.finder.contentChanged() }
         if printed { refreshCommandSeparators() }
         if printed, openableNames != nil { refreshFileLink(modifiers: fileLinkModifiers, rescan: true) }
+        if printed { printedSincePortScan = true }
         ticks += 1
-        if ticks % 4 == 0 { pollProcess() }
+        if ticks % 4 == 0 {
+            pollProcess()
+            pollPorts()
+        }
         if session.running != nil, timeline.running?.fullScreen == false,
            terminal.terminalInputStateSnapshot()?.isAlternateBuffer == true {
             timeline.markRunningFullScreen()
@@ -369,6 +395,114 @@ final class Pane: LocalProcessTerminalViewDelegate {
     private func refreshGitBranch() {
         let branch = GitInfo.branch(at: URL(fileURLWithPath: session.directory))
         if branch != session.gitBranch { session.gitBranch = branch }
+    }
+
+    // MARK: - Listening ports
+
+    /// How often to look at what the pane's programs listen on, in seconds.
+    static let portScanInterval = 3
+    /// How long after a port shows up its program's output is read for the address it serves at:
+    /// programs say so as they start, and what they print later (requests, mostly) isn't that.
+    static let portAddressWindow: TimeInterval = 20
+
+    private var secondsSincePortScan = 0
+    private var printedSincePortScan = false
+    /// When each port was first seen.
+    private var portsFirstSeen: [Int: Date] = [:]
+    /// Opens an address in the browser; tests look at what would open instead.
+    lazy var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
+
+    /// Every pane there is, this one included.
+    var panes: PaneDirectory { environment.panes }
+
+    /// Every second: looks at the ports every few seconds, and within a second of something being
+    /// printed, which is when a server says it's ready. Costs one call to the kernel while the shell
+    /// has started nothing.
+    private func pollPorts() {
+        secondsSincePortScan += 1
+        guard secondsSincePortScan >= Self.portScanInterval || printedSincePortScan else { return }
+        refreshListeningPorts()
+    }
+
+    /// Asks the kernel which TCP ports the programs under the shell listen on, and reads what was
+    /// printed lately for the address of those that are new.
+    func refreshListeningPorts(at date: Date = Date()) {
+        secondsSincePortScan = 0
+        printedSincePortScan = false
+        guard !isShutDown, session.exitStatus == nil, terminal.process.running else { return setListeningPorts([]) }
+        let scanned = ListeningPorts.scan(shell: terminal.process.shellPid,
+                                          foregroundGroup: ProcessInspector.foregroundProcess(ptyFD: terminal.process.childfd))
+        var ports = ListeningPorts.merging(scanned, keepingAddressesOf: session.listeningPorts)
+        portsFirstSeen = portsFirstSeen.filter { seen in ports.contains { $0.port == seen.key } }
+        for port in ports where portsFirstSeen[port.port] == nil { portsFirstSeen[port.port] = date }
+        let unannounced = ports.indices.filter { index in
+            ports[index].address == nil
+                && date.timeIntervalSince(portsFirstSeen[ports[index].port] ?? date) < Self.portAddressWindow
+        }
+        if !unannounced.isEmpty, let printed = recentOutput() {
+            for index in unannounced { ports[index].address = ListeningPorts.address(for: ports[index].port, in: printed) }
+        }
+        setListeningPorts(ports)
+    }
+
+    private func setListeningPorts(_ ports: [ListeningPort]) {
+        if ports.isEmpty { portsFirstSeen = [:] }
+        guard ports != session.listeningPorts else { return }
+        session.listeningPorts = ports
+        environment.panes.portsDidChange()
+    }
+
+    /// The last lines printed, up to the cursor: the running command's, when it printed fewer than `rows`.
+    private func recentOutput(rows: Int = 300) -> String? {
+        guard terminal.terminalInputStateSnapshot()?.isAlternateBuffer == false,
+              let live = terminal.terminalContentSnapshot(region: .history(maximumScrollbackRows: 0)) else { return nil }
+        let end = live.cursorRow + 1
+        let start = max(timeline.running?.block?.output ?? 0, end - rows, 0)
+        return lines(of: start..<end).lines.joined(separator: "\n")
+    }
+
+    /// Opens what a port serves in the browser.
+    func open(_ port: ListeningPort) {
+        openURL(port.url)
+    }
+
+    /// Calls the process listening on `port` by a name of the user's ("Storefront"), wherever its
+    /// ports show, for as long as it runs. A blank name, or none, goes back to its program's.
+    func name(_ port: ListeningPort, as name: String?) {
+        setListeningPorts(ListeningPorts.naming(port, name, in: session.listeningPorts))
+    }
+
+    /// What to tell about the port a failed command found taken, and the pane to go to for it.
+    struct PortConflictStatus {
+        /// "Port 3000 is in use by “node” in Tab 2 › left pane".
+        var text: String
+        /// The pane holding the port, while it still does; nil when it's this one, too.
+        var holder: Pane?
+    }
+
+    /// Whether a command that found a port taken would still find it so, and where its holder is now.
+    func portConflictStatus(of entry: TimelineEntry) -> PortConflictStatus? {
+        guard var conflict = entry.portConflict else { return nil }
+        guard let holder = environment.panes.pane(id: conflict.pane),
+              let held = holder.session.listeningPorts.first(where: { $0.port == conflict.port }) else {
+            return PortConflictStatus(text: conflict.sentence(stillHeld: false))
+        }
+        // By the name its process goes by now, if it was given one.
+        conflict.program = held.displayName
+        if holder === self { return PortConflictStatus(text: conflict.sentence(place: "this pane")) }
+        let elsewhere = holder.host !== host
+        let place = holder.host?.place(of: holder).map { elsewhere ? "another window, \($0)" : $0 }
+        return PortConflictStatus(text: conflict.sentence(place: place ?? (elsewhere ? "another window" : "another pane")),
+                                  holder: holder)
+    }
+
+    /// A command failed: if what it printed says a port was taken, finds the pane whose program has it.
+    private func recordPortConflict(of id: Int, output: String) {
+        guard let entry = timeline.value.entry(id: id), case .failed(let code) = entry.status, code > 0,
+              let port = PortConflict.port(inOutput: output, command: entry.command),
+              let holder = environment.panes.holder(of: port) else { return }
+        timeline.setPortConflict(PortConflict(port: port, program: holder.port.program, pane: holder.pane.session.id.uuidString),
+                                 of: id)
     }
 
     // MARK: - Shell integration
@@ -402,6 +536,8 @@ final class Pane: LocalProcessTerminalViewDelegate {
             runningDirectory = session.directory
             promptIsDrawn = false
             waitingPromptRow = nil
+            // A server takes a moment to start listening: look a couple of seconds from now.
+            secondsSincePortScan = Self.portScanInterval - 2
         default:
             break
         }
@@ -435,6 +571,8 @@ final class Pane: LocalProcessTerminalViewDelegate {
         let finished = timeline.running
         let usual = finished?.usualDuration
         timeline.finish(exitCode: exitCode, duration: duration, output: nil)
+        // What it was listening on is gone with it.
+        refreshListeningPorts()
         // Its output runs up to the next prompt, found once that's drawn.
         if let finished, finished.block != nil, !finished.fullScreen { outputToCapture = finished.id }
         if preferences.recordHistory {
@@ -917,6 +1055,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
         let (lines, lostEarlier) = lines(of: block.output..<end)
         let output = CapturedOutput(lines: lines, lostEarlier: lostEarlier)
         if !output.isEmpty { timeline.setOutput(output, of: id) }
+        recordPortConflict(of: id, output: output.text)
     }
 
     /// The rows a command's prompt, command line and output take up, while they're still in the scrollback
@@ -1484,6 +1623,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
         timer?.invalidate()
         session.running = nil
         timeline.abandonRunning()
+        setListeningPorts([])
         if preferences.exitBehavior.closesPane(exitCode: exitCode) {
             host?.paneDidFinish(self)
             return
@@ -1498,5 +1638,22 @@ final class Pane: LocalProcessTerminalViewDelegate {
         timer?.invalidate()
         session.exitStatus = .init(code: nil)
         view.setExitBannerVisible(true)
+    }
+}
+
+extension Sequence where Element == Pane {
+    /// What closing these panes would terminate, with what's listening looked at afresh.
+    @MainActor var running: Pane.Running {
+        var running = Pane.Running()
+        for pane in self {
+            let programs = pane.runningPrograms
+            for program in programs where !running.programs.contains(program) { running.programs.append(program) }
+            guard !programs.isEmpty else { continue }
+            pane.refreshListeningPorts()
+            for port in pane.session.listeningPorts where !running.ports.contains(where: { $0.port == port.port }) {
+                running.ports.append(port)
+            }
+        }
+        return running
     }
 }

@@ -59,6 +59,31 @@ final class FakeHost: PaneHost {
     func explainFailure(of entry: TimelineEntry, in pane: Pane) { explained.append(entry) }
     private(set) var openedFiles: [URL] = []
     func openFile(_ url: URL, from pane: Pane) { openedFiles.append(url) }
+    /// Where the host says its panes are.
+    var place: String? = "Tab 1"
+    func place(of pane: Pane) -> String? { place }
+    private(set) var revealed: [Pane] = []
+    func reveal(_ pane: Pane) { revealed.append(pane) }
+    var windowTitle: String?
+}
+
+/// A TCP port nothing is listening on, as far as can be told: the system picked it a moment ago.
+func freePort() throws -> Int {
+    let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+    guard descriptor >= 0 else { throw POSIXError(.EMFILE) }
+    defer { close(descriptor) }
+    var address = sockaddr_in()
+    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    address.sin_family = sa_family_t(AF_INET)
+    address.sin_addr.s_addr = inet_addr("127.0.0.1")
+    var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+    let bound = withUnsafeMutablePointer(to: &address) {
+        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { pointer in
+            bind(descriptor, pointer, length) == 0 && getsockname(descriptor, pointer, &length) == 0
+        }
+    }
+    guard bound else { throw POSIXError(.EADDRINUSE) }
+    return Int(UInt16(bigEndian: address.sin_port))
 }
 
 /// Never reports anything, so tests don't depend on the machine's load.

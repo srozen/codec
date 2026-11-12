@@ -97,6 +97,16 @@ final class TerminalTab: ObservableObject, Identifiable {
     /// The title the tab has without a custom name: what's running in its focused pane.
     var automaticTitle: String { focused.session.title }
 
+    /// What shows when the pointer rests on the tab: where its focused pane is (and what it's running,
+    /// when the tab has a name of its own), then what its panes' programs are listening on.
+    var toolTip: String {
+        let directory = focused.session.abbreviatedDirectory
+        let ports = panes.flatMap(\.session.listeningPorts)
+        let lines = [customTitle == nil ? directory : "\(automaticTitle) — \(directory)",
+                     ports.isEmpty ? nil : ListeningPorts.phrase(ports, namingPrograms: true, capitalized: true)]
+        return lines.compactMap { $0 }.joined(separator: "\n")
+    }
+
     /// Names the tab. Blank names (or nil) go back to the automatic title.
     func rename(to name: String?) {
         let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

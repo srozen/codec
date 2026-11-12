@@ -18,6 +18,8 @@ public enum CodecApp {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, AppCoordinating {
     private let environment: AppEnvironment
     private(set) var windows: [TerminalWindowController] = []
+    /// Fills in Window › Listening Ports; menus don't keep their delegates.
+    private lazy var listeningPortsMenu = ListeningPortsMenu(directory: environment.panes)
     private var settingsWindow: NSWindow?
     /// Nil outside a bundled app with a version (tests, `swift run`).
     private(set) var updater: Updater?
@@ -34,7 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSWindow.allowsAutomaticWindowTabbing = false
-        NSApp.mainMenu = MainMenu.build()
+        NSApp.mainMenu = MainMenu.build(listeningPorts: listeningPortsMenu)
         if let notifier = environment.notifier as? Notifier {
             notifier.activate()
             notifier.onOpen = { [weak self] id in
@@ -82,14 +84,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             }
             return .terminateCancel
         }
-        var programs: [String] = []
-        for window in windows {
-            for program in window.runningPrograms where !programs.contains(program) { programs.append(program) }
-        }
-        guard !programs.isEmpty else { return .terminateNow }
+        let running = windows.flatMap(\.allPanes).running
+        guard !running.programs.isEmpty else { return .terminateNow }
         let alert = NSAlert()
         alert.messageText = "Quit Codec?"
-        alert.informativeText = "\(RunningPrograms.list(programs)) \(programs.count == 1 ? "is" : "are") still running. Quitting will terminate \(programs.count == 1 ? "it" : "them")."
+        alert.informativeText = "\(running.list) \(running.count == 1 ? "is" : "are") still running. Quitting will terminate \(running.count == 1 ? "it" : "them")."
         alert.addButton(withTitle: "Quit")
         alert.addButton(withTitle: "Cancel")
         return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel

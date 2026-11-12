@@ -49,6 +49,8 @@ final class Session: ObservableObject {
     @Published var toolchain = Toolchain()
     /// A virtual environment found where the shell is, waiting for the user to say whether to activate it.
     @Published var pendingVenv: Toolchain.PythonEnvironment?
+    /// The TCP ports the programs started from the pane listen on, lowest first.
+    @Published var listeningPorts: [ListeningPort] = []
 
     var abbreviatedDirectory: String {
         (directory as NSString).abbreviatingWithTildeInPath

@@ -196,4 +196,25 @@ struct MainMenuTests {
         #expect(hidden.map(\.keyEquivalent) == [key(NSRightArrowFunctionKey), key(NSDownArrowFunctionKey)])
         #expect(hidden.allSatisfy { $0.keyEquivalentModifierMask == [.command, .control] && $0.allowsKeyEquivalentWhenHidden })
     }
+
+    @Test func theViewMenuShowsListeningPorts() throws {
+        _ = NSApplication.shared
+        let entry = try #require(item(MainMenu.build(), path: ["View", "Listening Ports"]))
+        #expect(entry.keyEquivalent == "o" && entry.keyEquivalentModifierMask == [.command, .shift])
+        #expect(entry.action == #selector(TerminalWindowController.togglePorts(_:)))
+    }
+
+    @Test func theWindowMenuListsListeningPorts() throws {
+        let env = try TestEnvironment()
+        defer { env.tearDown() }
+        let ports = ListeningPortsMenu(directory: env.environment.panes)
+        let menu = MainMenu.build(listeningPorts: ports)
+        let submenu = try #require(item(menu, path: ["Window", "Listening Ports"])?.submenu)
+        // Filled in as it opens, by the object the app keeps for that.
+        #expect(submenu.delegate === ports)
+        submenu.delegate?.menuNeedsUpdate?(submenu)
+        submenu.update()
+        #expect(submenu.items.map(\.title) == ["No Listening Ports"])
+        #expect(submenu.items.first?.isEnabled == false)
+    }
 }

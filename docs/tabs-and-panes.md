@@ -8,6 +8,8 @@ Tabs live in the title bar. ⌘T opens one in the current directory; ⌘1…⌘9
 
 A tab is titled after what's running in it. To name it yourself, double-click it, right-click › Rename Tab…, or press ⇧⌘R. Clear the name to go back to the automatic title.
 
+Rest the pointer on a tab for its folder, and the [ports](prompt-and-status-bar.md#listening-ports) its panes' programs are listening on: "Listening on :3000 (node)". The [Ports tab](prompt-and-status-bar.md#every-port-in-one-place) of the right sidebar (⇧⌘O) and Window › Listening Ports list them for every tab and window, and go to the pane of the one you choose.
+
 Drag a tab along the tab bar to put it elsewhere; ⌘1…⌘9 follow the new order, and so does the window when Codec reopens it. Middle-click a tab to close it.
 
 ## Splits
@@ -34,7 +36,7 @@ Closed a tab by mistake? ⇧⌘T (Shell › Reopen Closed Tab) brings it back, a
 
 ## Closing safely
 
-Before a tab, a pane or a window closes, or Codec quits, it checks whether that would end something still running, in the foreground or in the background (`npm run dev &` counts; the shell's own helpers don't), and names what would be terminated before asking.
+Before a tab, a pane or a window closes, or Codec quits, it checks whether that would end something still running, in the foreground or in the background (`npm run dev &` counts; the shell's own helpers don't), and names what would be terminated before asking. A program that's [listening on a port](prompt-and-status-bar.md#listening-ports) is named with it, even when it was started by something else: "“npm” and “node” (listening on :3000) are still running and will be terminated."
 
 ## When something needs you
 
@@ -57,4 +59,4 @@ Right-click in a pane for Copy, Copy Output, Select Output, Paste, Select All, S
 
 ## The command palette
 
-⇧⌘P, or the ⌘ button at the right of the tab bar, opens the command palette: every action, theme, open tab and [Intel](intel.md) item, fuzzy-searched.
+⇧⌘P, or the ⌘ button at the right of the tab bar, opens the command palette: every action, theme, open tab, [listening port](prompt-and-status-bar.md#listening-ports) and [Intel](intel.md) item, fuzzy-searched.

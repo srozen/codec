@@ -4,7 +4,7 @@
 
 You tried a few things, went on for a while, and now you want to see what happened earlier. The Commands sidebar is that pane's story: every command it ran, with how it went and what it printed.
 
-Open it with ⇧⌘L, or the sidebar button at the right end of the tab bar. It follows the focused pane, like the file tree.
+Open it with ⇧⌘L, or the sidebar button at the right end of the tab bar. It follows the focused pane, like the file tree. It shares the right sidebar with the **Ports** tab (⇧⌘O), which lists [what's listening](prompt-and-status-bar.md#every-port-in-one-place) in every pane.
 
 ## What it shows
 
@@ -12,7 +12,7 @@ Commands are listed oldest first, under the folder they ran in. When a [Python e
 
 - a green or red dot for whether it worked (pulsing while it runs),
 - when it ran and how long it took,
-- the last line it printed (`Build complete!`, `3 tests failed`), or the exit status of a failed one.
+- the last line it printed (`Build complete!`, `3 tests failed`), or the exit status of a failed one. While a command is running a server, its row says so instead: `Listening on :3000` (see [listening ports](prompt-and-status-bar.md#listening-ports)).
 
 ## How long it usually takes
 
@@ -56,13 +56,25 @@ When the fix is a command (`git push --set-upstream origin feature/login`, `npm 
 
 Turn it off in Settings › Shell › Offer to explain failed commands.
 
+## Port already in use
+
+You start the dev server and it dies with `EADDRINUSE`: something already has the port, and it's usually the same server, left running in a pane you forgot. Codec knows what [each pane's programs listen on](prompt-and-status-bar.md#listening-ports), so it can say which.
+
+![npm run dev refused its port: the row says Node has it in Tab 1's left pane, with Go to Pane](images/port-in-use.png)
+
+When a command fails saying the address or port is in use, and a program in one of Codec's panes holds that port, the command's row says so: "Port 3000 is in use by “node” in Tab 2 › left pane", with **Go to Pane**, which brings that pane to the front, in another window if that's where it is. The output viewer says the same, and so does right-click › Go to Pane Listening on :3000. [Explain](#why-did-it-fail) is told too, so its answer starts from who has the port rather than guessing.
+
+- The port comes from the error (`address already in use :::3000`, `bind(2) for "127.0.0.1" port 3000`), or from the command when the error names none (`python -m http.server 8000`).
+- Once the other program lets go of the port, the row says it *was* in use, and there's no pane to go to.
+- A port held by something Codec didn't start (another app, a container, a system service) gets no such line: the row shows the command's last line, as usual.
+
 ## Filtering
 
 The filter field searches commands and what they printed. A row shows the line that matched, and going to it scrolls to that line. ⚠ shows failed commands only; the bin clears the list (the commands are still tracked, just hidden).
 
 ## Right-click
 
-Go to Command, Show Output, Explain Failure (failed commands), Save to Intel…, Copy Command, Copy Output, Select Output, Insert Command, Run Again, Copy Folder Path.
+Go to Command, Show Output, Explain Failure (failed commands), Go to Pane Listening on… (a command that found its [port taken](#port-already-in-use)), Save to Intel…, Copy Command, Copy Output, Select Output, Insert Command, Run Again, Copy Folder Path.
 
 ## Saving a command for later
 

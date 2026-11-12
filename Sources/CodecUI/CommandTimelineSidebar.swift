@@ -44,6 +44,11 @@ final class PaneTimeline: ObservableObject {
         value.setOutput(output, of: id)
     }
 
+    func setPortConflict(_ conflict: PortConflict, of id: Int) {
+        guard value.entry(id: id)?.portConflict != conflict else { return }
+        value.setPortConflict(conflict, of: id)
+    }
+
     func abandonRunning() {
         guard running != nil else { return }
         value.abandonRunning()
@@ -108,6 +113,7 @@ final class CommandTimelineSidebar: NSView {
     private var theme: CodecTheme
     private var codeFont: NSFont
     private var subscription: AnyCancellable?
+    private var portsSubscription: AnyCancellable?
     private var clock: Timer?
     /// Where the scrollback starts, as of the last reload: commands above it are only in the kept output.
     private var scrollbackStart: Int?
@@ -249,7 +255,30 @@ final class CommandTimelineSidebar: NSView {
         subscription = pane?.timeline.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in MainActor.assumeIsolated { self?.reload() } }
+        portsSubscription = pane?.panes.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in MainActor.assumeIsolated { self?.portsDidChange() } }
         reload(scrollToEnd: true)
+    }
+
+    /// What some pane's programs listen on changed: the running command's row says what it's
+    /// listening on, and a row about a port that was taken offers its holder only while there's one.
+    private func portsDidChange() {
+        let conflicts = IndexSet(rows.indices.filter { rows[$0].entry?.portConflict != nil })
+        if !conflicts.isEmpty {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0
+                table.noteHeightOfRows(withIndexesChanged: conflicts)
+            }
+        }
+        refreshVisibleRows()
+    }
+
+    /// Goes to the pane whose program holds the port a failed command wanted.
+    func goToPortHolder(of entry: TimelineEntry) {
+        guard let holder = pane?.portConflictStatus(of: entry)?.holder else { return NSSound.beep() }
+        outputPopover?.close()
+        holder.host?.reveal(holder)
     }
 
     private var query: String { searchField.stringValue.trimmingCharacters(in: .whitespaces) }
@@ -336,8 +365,12 @@ final class CommandTimelineSidebar: NSView {
                                                    theme: theme)
         case .entry(let entry):
             guard let cell = view as? TimelineCell else { return }
-            cell.show(entry, query: query, inScrollback: isInScrollback(entry), theme: theme, codeFont: codeFont)
+            // A running command is the one in the foreground: jobs left in the background listen for themselves.
+            cell.show(entry, query: query, inScrollback: isInScrollback(entry), theme: theme, codeFont: codeFont,
+                      listening: entry.isRunning ? pane?.session.listeningPorts.filter(\.foreground) ?? [] : [],
+                      conflict: pane?.portConflictStatus(of: entry))
             cell.onSave = { [weak self] in self?.saveToIntel(entry) }
+            cell.onGoToPane = { [weak self] in self?.goToPortHolder(of: entry) }
         }
     }
 
@@ -424,7 +457,7 @@ final class CommandTimelineSidebar: NSView {
         let explanation = FailureExplanationModel(entry: entry, output: output, explainer: explainer())
         let viewer = CommandOutputViewer(
             entry: entry, output: output, inScrollback: inScrollback, query: query,
-            theme: theme, codeFont: codeFont,
+            theme: theme, codeFont: codeFont, portConflict: pane.portConflictStatus(of: entry),
             actions: .init(
                 goTo: { [weak self, weak popover] in
                     popover?.performClose(nil)
@@ -443,7 +476,8 @@ final class CommandTimelineSidebar: NSView {
                 insertCommand: { [weak self, weak popover] command in
                     popover?.performClose(nil)
                     self?.insert(command, run: false)
-                }),
+                },
+                goToPane: { [weak self] in self?.goToPortHolder(of: entry) }),
             canInsert: pane.isAtCommandLine, explanation: explanation)
         popover.contentViewController = viewer
         outputPopover = popover
@@ -458,6 +492,14 @@ final class CommandTimelineSidebar: NSView {
         guard let explainer = explainer(), FailureReport(entry: entry, output: nil) != nil else { return [] }
         return [ClosureMenuItem("Explain Failure", image: "sparkles", enabled: explainer.availability == .available) { [weak self] in
             self?.showOutput(of: entry, row: row, explain: true)
+        }]
+    }
+
+    /// Go to the pane holding the port a failed command wanted, while it still does.
+    private func portHolderItems(for entry: TimelineEntry) -> [NSMenuItem] {
+        guard let conflict = entry.portConflict, pane?.portConflictStatus(of: entry)?.holder != nil else { return [] }
+        return [ClosureMenuItem("Go to Pane Listening on :\(conflict.port)", image: "network") { [weak self] in
+            self?.goToPortHolder(of: entry)
         }]
     }
 
@@ -512,7 +554,10 @@ extension CommandTimelineSidebar: NSTableViewDataSource, NSTableViewDelegate {
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        rows[row].entry == nil ? 22 : 40
+        guard let entry = rows[row].entry else { return 22 }
+        // A command that found its port taken says by whom, on up to two lines, over Go to Pane.
+        guard let conflict = pane?.portConflictStatus(of: entry) else { return TimelineCell.height }
+        return conflict.holder == nil ? TimelineCell.heightSayingWhy : TimelineCell.heightSayingWhyAndWhere
     }
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
@@ -574,7 +619,7 @@ extension CommandTimelineSidebar: NSMenuDelegate {
             ClosureMenuItem("Show Output", image: "text.alignleft", enabled: hasOutput) { [weak self] in
                 self?.showOutput(of: entry, row: row)
             },
-        ] + explainItems(for: entry, row: row) + [
+        ] + explainItems(for: entry, row: row) + portHolderItems(for: entry) + [
             .separator(),
             ClosureMenuItem("Save to Intel…", image: "bookmark") { [weak self] in self?.saveToIntel(entry) },
             .separator(),
@@ -613,25 +658,20 @@ final class TimelineHeaderModel: ObservableObject {
     var onClear: () -> Void = {}
 }
 
-/// "Commands", the pane they're from, and the list's options.
+/// The pane the commands are from, and the list's options. The tab above it says they're commands.
 struct TimelineHeader: View {
     @ObservedObject var model: TimelineHeaderModel
     let theme: CodecTheme
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "list.bullet.rectangle")
+            Image(systemName: "terminal")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
-            Text("Commands")
+            Text(model.paneTitle.isEmpty ? "Commands" : model.paneTitle)
                 .font(.system(size: 12, weight: .semibold))
-            if !model.paneTitle.isEmpty {
-                Text(model.paneTitle)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
+                .lineLimit(1)
+                .truncationMode(.middle)
             Spacer(minLength: 4)
             TimelineHeaderButton(systemImage: model.failedOnly ? "exclamationmark.triangle.fill" : "exclamationmark.triangle",
                                  help: model.failedOnly ? "Show All Commands" : "Show Failed Commands Only",
@@ -837,6 +877,14 @@ final class TimelineCell: NSTableCellView {
     private let saveButton = NSButton()
     /// How far along a running command likely is, from how long it usually takes.
     private let progress = ProgressLine()
+    /// A row's height; with a second line of detail, for why it failed; and with Go to Pane under that.
+    static let height: CGFloat = 40
+    static let heightSayingWhy: CGFloat = 54
+    static let heightSayingWhyAndWhere: CGFloat = 78
+
+    /// Go to Pane, under a command that found its port taken by a program in another pane.
+    private let goButton = NSButton(title: "Go to Pane", target: nil, action: nil)
+    var onGoToPane: (() -> Void)?
     /// Save to Intel, from the button that shows over the row while the mouse is on it.
     var onSave: (() -> Void)?
     private var hovering = false {
@@ -876,7 +924,13 @@ final class TimelineCell: NSTableCellView {
         archived.toolTip = "No longer in the terminal’s scrollback. Codec kept its output: double-click or press Space to see it."
         archived.setContentCompressionResistancePriority(.required, for: .horizontal)
         progress.isHidden = true
-        for view in [dot, command, time, detail, duration, archived, saveButton, progress] {
+        goButton.controlSize = .small
+        goButton.bezelStyle = .accessoryBarAction
+        goButton.font = .systemFont(ofSize: 11)
+        goButton.target = self
+        goButton.action = #selector(goToPane)
+        goButton.isHidden = true
+        for view in [dot, command, time, detail, duration, archived, saveButton, progress, goButton] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
@@ -908,11 +962,17 @@ final class TimelineCell: NSTableCellView {
             saveButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             saveButton.widthAnchor.constraint(equalToConstant: 22),
             saveButton.heightAnchor.constraint(equalToConstant: 18),
+            goButton.leadingAnchor.constraint(equalTo: command.leadingAnchor),
+            goButton.topAnchor.constraint(equalTo: detail.bottomAnchor, constant: 4),
         ])
     }
 
     @objc private func save() {
         onSave?()
+    }
+
+    @objc private func goToPane() {
+        onGoToPane?()
     }
 
     override func updateTrackingAreas() {
@@ -937,7 +997,8 @@ final class TimelineCell: NSTableCellView {
         fatalError("init(coder:) is not supported")
     }
 
-    func show(_ entry: TimelineEntry, query: String, inScrollback: Bool, theme: CodecTheme, codeFont: NSFont) {
+    func show(_ entry: TimelineEntry, query: String, inScrollback: Bool, theme: CodecTheme, codeFont: NSFont,
+              listening: [ListeningPort] = [], conflict: Pane.PortConflictStatus? = nil) {
         command.attributedStringValue = ShellHighlighting.attributed(entry.command, theme: theme, font: codeFont, size: 12)
         let calendar = Calendar.current
         time.stringValue = calendar.isDateInToday(entry.started)
@@ -983,6 +1044,8 @@ final class TimelineCell: NSTableCellView {
         } else if entry.isRunning, let usualText, !entry.fullScreen {
             detailText = usualText.text
             if usualText.over { detailColor = theme.warning }
+        } else if entry.isRunning, !listening.isEmpty, !entry.fullScreen {
+            detailText = ListeningPorts.phrase(listening, capitalized: true)
         } else if entry.isRunning {
             detailText = entry.fullScreen ? "Running full screen…" : "Running…"
         } else if entry.fullScreen {
@@ -994,12 +1057,27 @@ final class TimelineCell: NSTableCellView {
             detailText = "No output"
             detailColor = .tertiaryLabelColor
         }
-        if case .failed(let code) = entry.status, code >= 0, entry.output?.firstLine(matching: query) == nil {
+        let matched = entry.output?.firstLine(matching: query) != nil
+        if let conflict, !matched {
+            // Why it failed says more than the last line it printed.
+            detailText = conflict.text
+            detailColor = .labelColor
+        } else if case .failed(let code) = entry.status, code >= 0, !matched {
             detailText = "Exit \(code) · " + detailText
         }
+        // A sentence, where the other rows have a line of output: in the font for prose, and with a
+        // second line rather than being cut.
+        let sentence = conflict != nil && !matched
+        detail.maximumNumberOfLines = sentence ? 2 : 1
+        detail.usesSingleLineMode = !sentence
+        detail.cell?.wraps = sentence
+        detail.lineBreakMode = sentence ? .byWordWrapping : .byTruncatingTail
+        detail.cell?.truncatesLastVisibleLine = true
         detail.stringValue = detailText
-        detail.font = NSFont(descriptor: codeFont.fontDescriptor, size: 10.5) ?? .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        detail.font = sentence ? .systemFont(ofSize: 11)
+            : NSFont(descriptor: codeFont.fontDescriptor, size: 10.5) ?? .monospacedSystemFont(ofSize: 10.5, weight: .regular)
         detail.textColor = detailColor
+        goButton.isHidden = conflict?.holder == nil
         archived.isHidden = inScrollback || entry.isRunning || entry.fullScreen
 
         let color: NSColor
@@ -1022,9 +1100,9 @@ final class TimelineCell: NSTableCellView {
         } else {
             dot.layer?.removeAnimation(forKey: "pulse")
         }
-        toolTip = entry.command
+        toolTip = [entry.command, conflict?.text].compactMap { $0 }.joined(separator: "\n")
         updateSaveButton()
-        setAccessibilityLabel(spokenDescription(entry, detail: detailText))
+        setAccessibilityLabel(spokenDescription(entry, detail: conflict?.text ?? detailText))
     }
 
     private func spokenDescription(_ entry: TimelineEntry, detail: String) -> String {
@@ -1040,6 +1118,15 @@ final class TimelineCell: NSTableCellView {
     /// What the row shows, for tests.
     var shown: (detail: String, duration: String, durationColor: NSColor?, progress: Double?) {
         (detail.stringValue, duration.stringValue, duration.textColor, progress.isHidden ? nil : progress.shownFraction)
+    }
+
+    /// Whether the row offers Go to Pane, for tests.
+    var offersGoToPane: Bool { !goButton.isHidden }
+
+    /// Presses Go to Pane, for tests.
+    func pressGoToPane() {
+        guard !goButton.isHidden else { return }
+        _ = goButton.sendAction(goButton.action, to: goButton.target)
     }
 }
 

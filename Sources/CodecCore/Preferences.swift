@@ -38,6 +38,11 @@ public final class Preferences: ObservableObject {
     @Published public var shellPath: String { didSet { store(shellPath, .shellPath) } }
     @Published public var showSystemStats: Bool { didSet { store(showSystemStats, .showSystemStats) } }
     @Published public var prompt: PromptConfiguration { didSet { storePrompt() } }
+    /// How far the trackpad and the mouse wheel scroll, as a multiple of the system's own rate. At 1×,
+    /// SwiftTerm's, the scrollback follows the fingers and a wheel notch moves one line: many swipes to
+    /// get through a long output.
+    @Published public var scrollSpeed: Double { didSet { store(scrollSpeed, .scrollSpeed) } }
+    public static let scrollSpeeds: ClosedRange<Double> = 1...5
     /// Copies text to the clipboard as soon as it's selected.
     @Published public var copyOnSelect: Bool { didSet { store(copyOnSelect, .copyOnSelect) } }
     /// Shows the rest of a matching earlier command, dimmed, as you type (zsh).
@@ -74,7 +79,7 @@ public final class Preferences: ObservableObject {
              codecSounds, paneSounds, soundVolume, optionAsMeta, exitBehavior, shellIntegration, shellPath,
              showSystemStats, prompt, copyOnSelect, suggestCommands, historyKeys, friendlyCompletion, colorFileListings,
              ezaForLs, recordHistory, restoreWindows, restorePaneContents, showUsualDuration, activateVenvs, explainFailures,
-             checkForUpdates, commandSeparators, shadeAlternateCommands
+             checkForUpdates, commandSeparators, shadeAlternateCommands, scrollSpeed
     }
 
     private static let factoryDefaults: [Key: Any] = [
@@ -97,6 +102,7 @@ public final class Preferences: ObservableObject {
         .shellIntegration: true,
         .shellPath: "",
         .showSystemStats: true,
+        .scrollSpeed: 2.0,
         .copyOnSelect: false,
         .suggestCommands: true,
         .historyKeys: true,
@@ -134,6 +140,7 @@ public final class Preferences: ObservableObject {
         shellIntegration = defaults.bool(forKey: Key.shellIntegration.rawValue)
         shellPath = defaults.string(forKey: Key.shellPath.rawValue) ?? ""
         showSystemStats = defaults.bool(forKey: Key.showSystemStats.rawValue)
+        scrollSpeed = Self.clamp(defaults.double(forKey: Key.scrollSpeed.rawValue), Self.scrollSpeeds, fallback: 2)
         copyOnSelect = defaults.bool(forKey: Key.copyOnSelect.rawValue)
         suggestCommands = defaults.bool(forKey: Key.suggestCommands.rawValue)
         historyKeys = defaults.bool(forKey: Key.historyKeys.rawValue)

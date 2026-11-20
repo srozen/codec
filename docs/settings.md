@@ -21,6 +21,7 @@ Open Settings with ⌘,. Changes apply as you make them, unless a setting says i
 - **Project environments**: whether to [activate a project's Python environment](prompt-and-status-bar.md#project-environments-zsh) (`.venv`) when you go into it, and your answer for each project: change it, forget it so Codec asks again, or remove the ones about projects that can't be found anymore, which are flagged.
 - **Apple Intelligence**: whether failed commands offer to be [explained](commands-sidebar.md#why-did-it-fail) by Apple's on-device model.
 - **History**: whether Codec records the commands you run, and a button to forget everything recorded so far. Forgetting also hides older commands from your shell's history file in Codec, without changing the file.
+- **Scrolling**: how far the trackpad and the mouse wheel scroll, from 1× (the scrollback follows your fingers, a line per notch of the wheel) to 5×. 2× by default.
 - **Selection**: copy text as soon as it's selected.
 
 ## Prompt

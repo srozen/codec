@@ -259,6 +259,21 @@ private struct ShellSettings: View {
                     .foregroundStyle(.secondary)
             }
             Section {
+                LabeledContent("Speed") {
+                    HStack {
+                        Slider(value: $prefs.scrollSpeed, in: Preferences.scrollSpeeds, step: 0.5)
+                        Text(prefs.scrollSpeed.formatted(.number.precision(.fractionLength(0...1))) + "×")
+                            .monospacedDigit()
+                            .frame(width: 44, alignment: .trailing)
+                    }
+                }
+            } header: {
+                Text("Scrolling")
+            } footer: {
+                Text("How far the trackpad and the mouse wheel scroll: at 1× the scrollback follows your fingers and moves a line for each notch of the wheel. Also applies in full-screen programs such as vim and less.")
+                    .foregroundStyle(.secondary)
+            }
+            Section {
                 Toggle("Copy text as soon as it’s selected", isOn: $prefs.copyOnSelect)
             } header: {
                 Text("Selection")

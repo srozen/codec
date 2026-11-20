@@ -242,6 +242,35 @@ struct PaneTests {
         pane.changeFontSize(by: -100)
         #expect(pane.fontSize == 7)
     }
+
+    // MARK: Scrolling
+
+    @Test func aWheelNotchScrollsAsFarAsTheSettingSays() async throws {
+        let env = try TestEnvironment()
+        defer { env.tearDown() }
+        let pane = env.makePane()
+        defer { pane.shutDown() }
+        let window = makeTestWindow()
+        defer { window.close() }
+        window.contentView = pane.view
+        #expect(await waitUntil { pane.terminal.process.running })
+        pane.terminal.feed(text: (1...200).map { "line \($0)\r\n" }.joined())
+        func top() -> Int? { pane.terminal.terminalContentSnapshot(region: .viewport)?.rows.first?.absoluteRow }
+        func notchUp() throws {
+            let wheel = try #require(CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: 1, wheel2: 0, wheel3: 0))
+            pane.terminal.scrollWheel(with: try #require(NSEvent(cgEvent: wheel)))
+        }
+        let bottom = try #require(top())
+        #expect(bottom > 10)
+
+        // Twice the system's rate unless set otherwise.
+        try notchUp()
+        #expect(top() == bottom - 2)
+        env.preferences.scrollSpeed = 4
+        pane.applyPreferences()
+        try notchUp()
+        #expect(top() == bottom - 6)
+    }
 }
 
 @Suite("Pane context menu", .serialized, .timeLimit(.minutes(1)))

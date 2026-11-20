@@ -77,6 +77,7 @@ struct PreferencesTests {
         #expect(!preferences.scanlines)
         #expect(preferences.commandSeparators)
         #expect(preferences.shadeAlternateCommands)
+        #expect(preferences.scrollSpeed == 2)
     }
 
     @Test func persistsChangesAcrossInstances() {
@@ -88,12 +89,14 @@ struct PreferencesTests {
         first.bell = .codecLock
         first.exitBehavior = .keepOpen
         first.shellPath = "/bin/bash"
+        first.scrollSpeed = 3.5
         let second = Preferences(defaults: defaults)
         #expect(second.themeID == "amber")
         #expect(second.fontSize == 15)
         #expect(second.bell == .codecLock)
         #expect(second.exitBehavior == .keepOpen)
         #expect(second.shellPath == "/bin/bash")
+        #expect(second.scrollSpeed == 3.5)
     }
 
     @Test func repairsInvalidStoredValues() {
@@ -102,10 +105,12 @@ struct PreferencesTests {
         defaults.set(500.0, forKey: "fontSize")
         defaults.set("loud", forKey: "bell")
         defaults.set(-2.0, forKey: "opacity")
+        defaults.set(0.0, forKey: "scrollSpeed")
         let preferences = Preferences(defaults: defaults)
         #expect(preferences.fontSize == 13)
         #expect(preferences.bell == .visual)
         #expect(preferences.opacity == 0.9)
+        #expect(preferences.scrollSpeed == 2)
     }
 
     @Test func postsAChangeNotification() {

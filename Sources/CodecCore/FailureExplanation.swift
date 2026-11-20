@@ -10,16 +10,20 @@ public struct FailureReport: Equatable, Sendable {
     public var output: String
     /// The Python environment and tool versions it ran with (`Toolchain.summary`), empty when unknown.
     public var tools: String
+    /// What Codec found out for itself about the failure (a port taken by a program in another
+    /// pane), empty when there's nothing.
+    public var known: String
 
     /// Characters of output to send: about half the model's context, leaving room for its answer.
     public static let outputBudget = 6_000
 
-    public init(command: String, directory: String, exitCode: Int32, output: String, tools: String = "") {
+    public init(command: String, directory: String, exitCode: Int32, output: String, tools: String = "", known: String = "") {
         self.command = command
         self.directory = directory
         self.exitCode = exitCode
         self.output = output
         self.tools = tools
+        self.known = known
     }
 
     /// The report on a command that failed with an exit status; nil for one that worked, is still
@@ -27,7 +31,8 @@ public struct FailureReport: Equatable, Sendable {
     public init?(entry: TimelineEntry, output: String?, budget: Int = outputBudget) {
         guard case .failed(let code) = entry.status, code >= 0 else { return nil }
         self.init(command: entry.command, directory: (entry.directory as NSString).abbreviatingWithTildeInPath,
-                  exitCode: code, output: Self.excerpt(output ?? "", budget: budget), tools: entry.toolchain?.summary ?? "")
+                  exitCode: code, output: Self.excerpt(output ?? "", budget: budget), tools: entry.toolchain?.summary ?? "",
+                  known: entry.portConflict.map { "\($0.sentence()), a program running in one of this terminal’s panes." } ?? "")
     }
 
     public var prompt: String {
@@ -35,7 +40,7 @@ public struct FailureReport: Equatable, Sendable {
         Command: \(command)
         Folder: \(directory)
         \(tools.isEmpty ? "" : "Tools: \(tools)\n")Exit status: \(exitCode)
-        Output:
+        \(known.isEmpty ? "" : "Known: \(known)\n")Output:
         \(output.isEmpty ? "(nothing)" : output)
         """
     }
@@ -166,6 +171,7 @@ public struct OnDeviceExplainer: FailureExplaining {
         the folder it ran in, sometimes the Python environment and tool versions it ran with, its exit \
         status and the end of what it printed; lines before "…" are earlier errors. A tool marked "not \
         installed" was asked for by the project but isn't there, so another version or none ran instead. \
+        A line starting "Known:" is a fact the terminal checked for itself: rely on it, and say it. \
         Be brief and concrete. Quote the error message if there is one. Don't invent file names, options, \
         flags or packages that aren't in the command or output; in particular, don't suggest running the \
         same command again with new options. If the output doesn't say why, say so. \

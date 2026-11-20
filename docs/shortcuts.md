@@ -48,6 +48,7 @@
 | ⇧⌘E | Show / hide the file tree |
 | ⇧⌘I | Show / hide Intel |
 | ⇧⌘L | Show / hide the Commands sidebar |
+| ⇧⌘O | Show / hide the [listening ports](prompt-and-status-bar.md#every-port-in-one-place) |
 | Return | Open the selected item; in the Commands sidebar, go to the command |
 | Space | Commands sidebar: show the command's output |
 | → / ← | Intel: open / close a folder |

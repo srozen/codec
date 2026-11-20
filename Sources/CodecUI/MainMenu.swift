@@ -5,13 +5,14 @@ import AppKit
 enum MainMenu {
     private typealias W = TerminalWindowController
 
-    static func build() -> NSMenu {
+    /// `listeningPorts` fills in Window › Listening Ports as it opens; the caller keeps it alive.
+    static func build(listeningPorts: ListeningPortsMenu? = nil) -> NSMenu {
         let main = NSMenu()
         main.addItem(submenu(appMenu()))
         main.addItem(submenu(shellMenu()))
         main.addItem(submenu(editMenu()))
         main.addItem(submenu(viewMenu()))
-        let window = windowMenu()
+        let window = windowMenu(listeningPorts: listeningPorts)
         main.addItem(submenu(window))
         NSApp.windowsMenu = window
         let help = NSMenu(title: "Help")
@@ -132,6 +133,7 @@ enum MainMenu {
         menu.addItem(item("Toggle File Tree", #selector(W.toggleFileTree(_:)), "e", [.command, .shift]))
         menu.addItem(item("Intel", #selector(W.toggleIntel(_:)), "i", [.command, .shift]))
         menu.addItem(item("Commands", #selector(W.toggleCommandTimeline(_:)), "l", [.command, .shift]))
+        menu.addItem(item("Listening Ports", #selector(W.togglePorts(_:)), "o", [.command, .shift]))
         menu.addItem(item("Command History…", #selector(W.showCommandHistory(_:)), "y"))
         menu.addItem(item("Toggle Markdown Preview", #selector(W.toggleMarkdownPreview(_:)), "v", [.command, .shift]))
         menu.addItem(.separator())
@@ -150,7 +152,7 @@ enum MainMenu {
         return menu
     }
 
-    private static func windowMenu() -> NSMenu {
+    private static func windowMenu(listeningPorts: ListeningPortsMenu?) -> NSMenu {
         let menu = NSMenu(title: "Window")
         menu.addItem(item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"))
         menu.addItem(item("Zoom", #selector(NSWindow.performZoom(_:))))
@@ -184,6 +186,11 @@ enum MainMenu {
         panesMenu.addItem(item("Below", #selector(W.focusPaneDown(_:)), arrow(NSDownArrowFunctionKey), [.command, .option]))
         panes.submenu = panesMenu
         menu.addItem(panes)
+        let ports = NSMenuItem(title: ListeningPortsMenu.title, action: nil, keyEquivalent: "")
+        let portsMenu = NSMenu(title: ListeningPortsMenu.title)
+        portsMenu.delegate = listeningPorts
+        ports.submenu = portsMenu
+        menu.addItem(ports)
         menu.addItem(.separator())
         menu.addItem(item("Bring All to Front", #selector(NSApplication.arrangeInFront(_:))))
         return menu

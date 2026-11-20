@@ -24,6 +24,55 @@ protocol AppCoordinating: AnyObject {
     func attentionDidChange()
 }
 
+/// The panes that are open, across every window: a command that finds a port taken can be told
+/// which of them holds it. Publishes when what any of them listens on changes.
+@MainActor
+final class PaneDirectory: ObservableObject {
+    private struct Entry {
+        weak var pane: Pane?
+    }
+
+    private var entries: [Entry] = []
+
+    var panes: [Pane] { entries.compactMap(\.pane) }
+
+    func add(_ pane: Pane) {
+        entries.removeAll { $0.pane == nil }
+        entries.append(Entry(pane: pane))
+    }
+
+    func remove(_ pane: Pane) {
+        entries.removeAll { $0.pane == nil || $0.pane === pane }
+        objectWillChange.send()
+    }
+
+    func pane(id: String) -> Pane? {
+        panes.first { $0.session.id.uuidString == id }
+    }
+
+    /// The pane with a program listening on `port` right now, and that program: every pane looks
+    /// again first, as the one asking has just been refused the port.
+    func holder(of port: Int) -> (pane: Pane, port: ListeningPort)? {
+        for pane in panes {
+            pane.refreshListeningPorts()
+            if let held = pane.session.listeningPorts.first(where: { $0.port == port }) { return (pane, held) }
+        }
+        return nil
+    }
+
+    /// A pane's ports changed.
+    func portsDidChange() {
+        objectWillChange.send()
+    }
+
+    /// Tabs or panes were added, moved or closed in some window: where the listening panes are may
+    /// read differently now. Nothing to tell when nothing listens.
+    func placesDidChange() {
+        guard panes.contains(where: { !$0.session.listeningPorts.isEmpty }) else { return }
+        objectWillChange.send()
+    }
+}
+
 /// The services a window and its panes depend on. The app builds one with the real implementations;
 /// tests build one with fakes.
 @MainActor
@@ -42,6 +91,8 @@ final class AppEnvironment {
     let paneArchive: PaneArchive
     /// Tabs closed lately, for ⇧⌘T, from any window.
     let closedTabs = ClosedTabs()
+    /// Every pane there is, in any window, for finding the one whose program holds a port.
+    let panes = PaneDirectory()
     /// Explains failed commands; nil where there's nothing to do it with.
     let explainer: (any FailureExplaining)?
     weak var coordinator: (any AppCoordinating)?

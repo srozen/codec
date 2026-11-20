@@ -68,6 +68,25 @@ public indirect enum SplitLayout<Leaf: AnyObject> {
         return all[(index + (forward ? 1 : all.count - 1)) % all.count]
     }
 
+    /// Where `target` is in the layout, in words, for telling someone which pane is meant: "left",
+    /// "bottom right", "middle". From the outermost split along each axis, so panes nested deeper on
+    /// the same side share a name. Nil for a layout of one pane, or one without `target`.
+    public func position(of target: Leaf) -> String? {
+        var words: [SplitAxis: String] = [:]
+        var node = self
+        while case .split(let axis, let children) = node {
+            guard let index = children.firstIndex(where: { $0.contains(target) }) else { return nil }
+            if words[axis] == nil {
+                let ends = axis == .horizontal ? ("left", "right") : ("top", "bottom")
+                words[axis] = index == 0 ? ends.0 : index == children.count - 1 ? ends.1 : "middle"
+            }
+            node = children[index]
+        }
+        guard node.isLeaf(target), !words.isEmpty else { return nil }
+        let both = [words[.vertical], words[.horizontal]].compactMap { $0 }
+        return both == ["middle", "middle"] ? "middle" : both.joined(separator: " ")
+    }
+
     /// Whether both layouts hold the same leaves in the same arrangement.
     public func isSameShape(as other: SplitLayout) -> Bool {
         switch (self, other) {

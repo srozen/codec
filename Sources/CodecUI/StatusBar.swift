@@ -49,6 +49,7 @@ private struct TabStatus: View {
         SessionStatus(session: pane.session, theme: theme,
                       onBranchChanged: { [weak pane] in pane?.gitBranchDidChange() },
                       run: { [weak pane] command in pane?.runAtPrompt(command) ?? false },
+                      open: { [weak pane] port in pane?.open(port) },
                       explain: explain.map { explain in { [weak pane] in if let pane { explain(pane) } } })
             .id(ObjectIdentifier(pane))
     }
@@ -60,6 +61,8 @@ private struct SessionStatus: View {
     var onBranchChanged: () -> Void
     /// Runs a command at the pane's prompt; false when the shell is busy.
     var run: (String) -> Bool
+    /// Opens what a port serves in the browser.
+    var open: (ListeningPort) -> Void
     /// Explain, beside a failed command; nil when explaining isn't offered.
     var explain: (() -> Void)?
     @State private var choosingBranch = false
@@ -85,6 +88,7 @@ private struct SessionStatus: View {
                 }
             }
             ToolchainStatus(session: session, theme: theme, run: run)
+            PortsStatus(ports: session.listeningPorts, open: open)
             commandStatus
         }
     }
@@ -129,6 +133,51 @@ private struct SessionStatus: View {
                 .help("Ask Apple Intelligence, on this Mac, why it failed")
             }
         }
+    }
+}
+
+/// The ports the pane's programs listen on. One opens in the browser at a click; several make a menu.
+struct PortsStatus: View {
+    let ports: [ListeningPort]
+    var open: (ListeningPort) -> Void
+
+    var body: some View {
+        if ports.count == 1, let port = ports.first {
+            Button { open(port) } label: {
+                Chip(systemImage: "network", text: port.label)
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .fixedSize()
+            .help(Self.help(for: port))
+            .accessibilityLabel(Self.help(for: port))
+        } else if !ports.isEmpty {
+            Menu {
+                ForEach(ports) { port in
+                    Button(Self.menuTitle(for: port)) { open(port) }
+                }
+            } label: {
+                Chip(systemImage: "network", text: ListeningPorts.label(ports), trailingSymbol: "chevron.up.chevron.down")
+                    .contentShape(Capsule())
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(ListeningPorts.phrase(ports, namingPrograms: true, capitalized: true))
+            .accessibilityLabel("\(ListeningPorts.phrase(ports, capitalized: true)). Open in the browser")
+        }
+    }
+
+    /// "Open http://localhost:3000/app: “node” is listening on :3000".
+    static func help(for port: ListeningPort) -> String {
+        "Open \(port.url.absoluteString): “\(port.displayName)” is listening on \(port.label)"
+    }
+
+    /// "localhost:3000/app — node": the address without its scheme unless it's not plain HTTP.
+    static func menuTitle(for port: ListeningPort) -> String {
+        let address = port.url.absoluteString
+        return "\(address.hasPrefix("http://") ? String(address.dropFirst(7)) : address) — \(port.displayName)"
     }
 }
 

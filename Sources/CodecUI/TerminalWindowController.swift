@@ -37,6 +37,12 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     private(set) var timelineSidebar: CommandTimelineSidebar!
     private var timelineWidthConstraint: NSLayoutConstraint!
     private static let timelineVisibleKey = "CommandsVisible"
+    /// The right sidebar: the Commands and Ports tabs above the pane's commands or what's listening.
+    private let inspector = NSView()
+    private var inspectorBar: NSHostingView<InspectorBar>!
+    private(set) var portsSidebar: PortsSidebar!
+    let ports: PortsModel
+    private static let inspectorTabKey = "InspectorTab"
     let intel: IntelLibrary
     private(set) var intelSidebar: IntelSidebar!
     /// The left sidebar: the Files and Intel tabs above the file tree or the Intel list.
@@ -52,6 +58,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         self.environment = environment
         fileTree = FileTreeModel(defaults: environment.preferences.stateDefaults)
         intel = IntelLibrary(personalFolder: environment.intelFolder)
+        ports = PortsModel(directory: environment.panes)
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: Self.defaultSize(font: environment.preferences.font())),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -80,7 +87,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         observeState()
         model.navigatorTab = preferences.stateDefaults.string(forKey: Self.navigatorTabKey).flatMap(NavigatorTab.init) ?? .files
         setNavigatorVisible(preferences.stateDefaults.bool(forKey: Self.fileTreeVisibleKey))
-        setTimelineVisible(preferences.stateDefaults.bool(forKey: Self.timelineVisibleKey))
+        model.inspectorTab = preferences.stateDefaults.string(forKey: Self.inspectorTabKey).flatMap(InspectorTab.init) ?? .commands
+        setInspectorVisible(preferences.stateDefaults.bool(forKey: Self.timelineVisibleKey))
     }
 
     @available(*, unavailable)
@@ -118,7 +126,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
                     guard let self else { return }
                     self.setNavigatorVisible(!self.model.fileTreeVisible)
                 },
-                toggleTimeline: { [weak self] in self?.toggleCommandTimeline(nil) },
+                toggleTimeline: { [weak self] in
+                    guard let self else { return }
+                    self.setInspectorVisible(!self.model.timelineVisible)
+                },
                 beginRenaming: { [weak self] in self?.beginRenaming($0) },
                 finishRenaming: { [weak self] in self?.finishRenaming($0, to: $1) })))
         tabBar.movesWindow = false
@@ -166,7 +177,30 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
             return self.environment.explainer
         }
         timelineSidebar.isHidden = true
-        timelineWidthConstraint = timelineSidebar.widthAnchor.constraint(equalToConstant: 0)
+        ports.host = self
+        portsSidebar = PortsSidebar(model: ports, theme: preferences.theme)
+        portsSidebar.onResize = { [weak self] width in self?.resizeTimeline(to: width) }
+        portsSidebar.isHidden = true
+        inspectorBar = NSHostingView(rootView: InspectorBar(model: model, theme: preferences.theme, select: { _ in }))
+        inspectorBar.rootView = makeInspectorBar()
+        for view in [inspectorBar!, timelineSidebar!, portsSidebar!] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            inspector.addSubview(view)
+        }
+        let underTheBar: [NSLayoutConstraint] = [timelineSidebar!, portsSidebar!].flatMap { view -> [NSLayoutConstraint] in [
+            view.topAnchor.constraint(equalTo: inspectorBar.bottomAnchor),
+            view.leadingAnchor.constraint(equalTo: inspector.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: inspector.trailingAnchor),
+            view.bottomAnchor.constraint(equalTo: inspector.bottomAnchor),
+        ] }
+        NSLayoutConstraint.activate(underTheBar + [
+            inspectorBar.topAnchor.constraint(equalTo: inspector.topAnchor),
+            inspectorBar.leadingAnchor.constraint(equalTo: inspector.leadingAnchor),
+            inspectorBar.trailingAnchor.constraint(equalTo: inspector.trailingAnchor),
+            inspectorBar.heightAnchor.constraint(equalToConstant: 30),
+        ])
+        inspector.isHidden = true
+        timelineWidthConstraint = inspector.widthAnchor.constraint(equalToConstant: 0)
         let storedTimelineWidth = preferences.stateDefaults.double(forKey: Self.timelineWidthKey)
         timelineWidth = storedTimelineWidth > 0
             ? min(max(CGFloat(storedTimelineWidth), CommandTimelineSidebar.widthRange.lowerBound), CommandTimelineSidebar.widthRange.upperBound)
@@ -180,7 +214,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         editorWidth = editorPanel.widthAnchor.constraint(equalToConstant: 0)
         editor.confirmClose = { [weak self] document, done in self?.confirmClosing(document, then: done) ?? done(true) }
 
-        for view in [backdrop, tint, tabBar!, navigator, editorPanel!, paneContainer, timelineSidebar!, statusBar!, palette!] as [NSView] {
+        for view in [backdrop, tint, tabBar!, navigator, editorPanel!, paneContainer, inspector, statusBar!, palette!] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(view)
         }
@@ -188,9 +222,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         let filling: [NSLayoutConstraint] = backdrop.constraintsFilling(content) + tint.constraintsFilling(content)
             + palette.constraintsFilling(content)
         let commands: [NSLayoutConstraint] = [
-            timelineSidebar.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
-            timelineSidebar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            timelineSidebar.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
+            inspector.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            inspector.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            inspector.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
             timelineWidthConstraint,
         ]
         NSLayoutConstraint.activate(filling + commands)
@@ -209,7 +243,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
             editorPanel.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
             editorWidth,
             paneContainer.leadingAnchor.constraint(equalTo: editorPanel.trailingAnchor),
-            paneContainer.trailingAnchor.constraint(equalTo: timelineSidebar.leadingAnchor),
+            paneContainer.trailingAnchor.constraint(equalTo: inspector.leadingAnchor),
             paneContainer.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
             statusBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             statusBar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
@@ -246,6 +280,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         intelSidebar?.applyTheme(theme)
         if navigatorBar != nil { navigatorBar.rootView = makeNavigatorBar() }
         timelineSidebar?.apply(theme: theme, codeFont: preferences.font())
+        portsSidebar?.apply(theme: theme)
+        if inspectorBar != nil { inspectorBar.rootView = makeInspectorBar() }
         editorPanel?.apply(theme: theme, font: preferences.font())
         allPanes.forEach { $0.applyPreferences() }
         installSelectedTab(force: true)
@@ -281,7 +317,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         focusedPaneCameToFront()
         updateWindowTitle()
         followFocusedDirectory()
-        if model.timelineVisible { timelineSidebar.follow(focusedPane) }
+        if model.timelineVisible, model.inspectorTab == .commands { timelineSidebar.follow(focusedPane) }
     }
 
     private func updateWindowTitle() {
@@ -487,13 +523,40 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     private var timelineWidth: CGFloat = CommandTimelineSidebar.defaultWidth
 
+    /// Shows the Commands sidebar, or hides the right sidebar.
     func setTimelineVisible(_ visible: Bool) {
-        if !visible { giveTerminalTheKeyboard(ifIn: timelineSidebar) }
+        setInspectorVisible(visible, tab: visible ? .commands : nil)
+    }
+
+    /// Shows or hides the right sidebar, on `tab` when given or the tab it was on.
+    func setInspectorVisible(_ visible: Bool, tab: InspectorTab? = nil) {
+        if let tab, tab != model.inspectorTab {
+            model.inspectorTab = tab
+            preferences.stateDefaults.set(tab.rawValue, forKey: Self.inspectorTabKey)
+        }
+        let shown = visible ? model.inspectorTab : nil
+        // Before hiding it: AppKit would leave the keyboard with the window, not the terminal.
+        if shown != .commands { giveTerminalTheKeyboard(ifIn: timelineSidebar) }
+        if shown != .ports { giveTerminalTheKeyboard(ifIn: portsSidebar) }
         model.timelineVisible = visible
         preferences.stateDefaults.set(visible, forKey: Self.timelineVisibleKey)
-        timelineSidebar.isHidden = !visible
+        inspector.isHidden = !visible
+        timelineSidebar.isHidden = shown != .commands
+        portsSidebar.isHidden = shown != .ports
         timelineWidthConstraint.constant = visible ? fittingTimelineWidth : 0
-        timelineSidebar.follow(visible ? focusedPane : nil)
+        timelineSidebar.follow(shown == .commands ? focusedPane : nil)
+        ports.isActive = shown == .ports
+    }
+
+    private func makeInspectorBar() -> InspectorBar {
+        InspectorBar(model: model, theme: preferences.theme) { [weak self] tab in
+            guard let self else { return }
+            self.setInspectorVisible(true, tab: tab)
+            if tab == .commands {
+                self.window?.layoutIfNeeded()
+                self.timelineSidebar.focusList()
+            }
+        }
     }
 
     /// The sidebar's width, narrower than the user made it when the window can't leave the terminal room
@@ -512,11 +575,16 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     /// ⇧⌘L: shows the Commands sidebar with the keyboard on it, or hides it.
     @objc func toggleCommandTimeline(_ sender: Any?) {
-        setTimelineVisible(!model.timelineVisible)
-        if model.timelineVisible {
-            window?.layoutIfNeeded()
-            timelineSidebar.focusList()
-        }
+        if model.timelineVisible, model.inspectorTab == .commands { return setInspectorVisible(false) }
+        setInspectorVisible(true, tab: .commands)
+        window?.layoutIfNeeded()
+        timelineSidebar.focusList()
+    }
+
+    /// ⇧⌘O: shows what's listening in every pane, or hides it when it's showing.
+    @objc func togglePorts(_ sender: Any?) {
+        if model.timelineVisible, model.inspectorTab == .ports { return setInspectorVisible(false) }
+        setInspectorVisible(true, tab: .ports)
     }
 
     /// Keeps the tree on the focused pane's directory.
@@ -710,6 +778,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
                     guard let self, let tab else { return }
                     // Its splits, its name or a pane's directory may have changed.
                     self.onStateChange?()
+                    self.environment.panes.placesDidChange()
                     guard tab === self.model.selected else { return }
                     self.updateWindowTitle()
                 }
@@ -781,7 +850,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     private func observeState() {
         model.objectWillChange
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in MainActor.assumeIsolated { self?.onStateChange?() } }
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.onStateChange?()
+                    // Tabs came, went or moved: "Tab 2" may be another tab now.
+                    self?.environment.panes.placesDidChange()
+                }
+            }
             .store(in: &cancellables)
         for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification] {
             NotificationCenter.default.publisher(for: name, object: window)
@@ -806,15 +881,25 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     /// Shows the pane with this session ID. Returns false if it isn't in this window.
     func reveal(sessionID: String) -> Bool {
-        for tab in model.tabs {
-            if let pane = tab.panes.first(where: { $0.session.id.uuidString == sessionID }) {
-                select(tab)
-                tab.focus(pane)
-                window?.makeKeyAndOrderFront(nil)
-                return true
-            }
-        }
-        return false
+        guard let pane = allPanes.first(where: { $0.session.id.uuidString == sessionID }) else { return false }
+        reveal(pane)
+        return true
+    }
+
+    func reveal(_ pane: Pane) {
+        guard let tab = model.tabs.first(where: { $0.layout.contains(pane) }) else { return }
+        if tab !== model.selected { select(tab) }
+        tab.focus(pane)
+        window?.makeKeyAndOrderFront(nil)
+        window?.makeFirstResponder(pane.view.preferredResponder)
+    }
+
+    var windowTitle: String? { window?.title }
+
+    func place(of pane: Pane) -> String? {
+        guard let index = model.tabs.firstIndex(where: { $0.layout.contains(pane) }) else { return nil }
+        let tab = "Tab \(index + 1)"
+        return model.tabs[index].layout.position(of: pane).map { "\(tab) › \($0) pane" } ?? tab
     }
 
     private func remove(_ pane: Pane) {
@@ -875,31 +960,19 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     /// Asks before closing panes that have programs running in them.
     private func confirmClosing(_ panes: [Pane], what: String, then close: @escaping () -> Void) {
-        var programs: [String] = []
-        for pane in panes {
-            for program in pane.runningPrograms where !programs.contains(program) { programs.append(program) }
-        }
-        guard !programs.isEmpty, let window else {
+        let running = panes.running
+        guard !running.programs.isEmpty, let window else {
             close()
             return
         }
         let alert = NSAlert()
         alert.messageText = "Close \(what)?"
-        alert.informativeText = "\(RunningPrograms.list(programs)) \(programs.count == 1 ? "is" : "are") still running and will be terminated."
+        alert.informativeText = "\(running.list) \(running.count == 1 ? "is" : "are") still running and will be terminated."
         alert.addButton(withTitle: "Close")
         alert.addButton(withTitle: "Cancel")
         alert.beginSheetModal(for: window) { response in
             if response == .alertFirstButtonReturn { close() }
         }
-    }
-
-    /// Everything the window's panes would terminate if it closed, each program once.
-    var runningPrograms: [String] {
-        var programs: [String] = []
-        for pane in allPanes {
-            for program in pane.runningPrograms where !programs.contains(program) { programs.append(program) }
-        }
-        return programs
     }
 
     var hasRunningJobs: Bool {
@@ -963,7 +1036,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         guard let tab = model.tabs.first(where: { $0.layout.contains(pane) }) else { return }
         if tab !== model.selected { select(tab) }
         tab.focus(pane)
-        if !model.timelineVisible { setTimelineVisible(true) }
+        if !model.timelineVisible || model.inspectorTab != .commands { setTimelineVisible(true) }
         window?.layoutIfNeeded()
         let row = timelineSidebar.rows.firstIndex { $0.entry?.id == entry.id }
         if let row {
@@ -1375,8 +1448,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
             .init(id: "new-intel-doc", title: "New Intel Document…", systemImage: "doc.text") { [weak self] in
                 self?.newIntel(.doc)
             },
-            .init(id: "commands", title: model.timelineVisible ? "Hide Commands Sidebar" : "Show Commands Sidebar", shortcut: "⇧⌘L",
-                  systemImage: "sidebar.right") { [weak self] in self?.toggleCommandTimeline(nil) },
+            .init(id: "commands", title: model.timelineVisible && model.inspectorTab == .commands ? "Hide Commands Sidebar" : "Show Commands Sidebar",
+                  shortcut: "⇧⌘L", systemImage: "sidebar.right") { [weak self] in self?.toggleCommandTimeline(nil) },
+            .init(id: "ports", title: model.timelineVisible && model.inspectorTab == .ports ? "Hide Listening Ports" : "Show Listening Ports",
+                  shortcut: "⇧⌘O", systemImage: "network") { [weak self] in self?.togglePorts(nil) },
             .init(id: "command-history", title: "Search Command History", shortcut: "⌘Y", systemImage: "clock.arrow.circlepath") { [weak self] in
                 self?.showCommandHistory(nil)
             },
@@ -1417,6 +1492,20 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
                 self?.environment.coordinator?.showSettings()
             },
         ]
+        // What's listening, in any window: type a port to go to its pane, or to open it.
+        for location in environment.panes.listening().flatMap(\.ports) {
+            let id = "\(location.port.port)-\(location.pane.session.id.uuidString)"
+            let elsewhere = location.pane.host !== self
+            let place = (elsewhere ? "another window, " : "") + location.place
+            commands.append(.init(id: "port-\(id)", title: "Go to \(location.port.label) — \(location.port.program), \(place)",
+                                  systemImage: "network") {
+                location.goToPane()
+            })
+            commands.append(.init(id: "open-port-\(id)", title: "Open \(location.port.url.absoluteString) in the Browser",
+                                  systemImage: "safari") {
+                location.openInBrowser()
+            })
+        }
         let preferences = self.preferences
         for theme in CodecTheme.all {
             commands.append(.init(id: "theme-\(theme.id)", title: "Theme: \(theme.name)", systemImage: "paintpalette") {

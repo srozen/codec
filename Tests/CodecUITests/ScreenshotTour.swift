@@ -47,18 +47,25 @@ struct ScreenshotTour {
         defer { Self.windowsSayTheyreVisible(false) }
         NSApplication.shared.setActivationPolicy(.regular)
 
-        try await hero(env, project: project)
-        try await intel(env, project: project)
-        try await history(env, project: project)
-        try await editor(env, project: project)
-        try await openFile(env, project: project)
-        try await listing(env, project: project)
-        try await branches(env, project: project)
-        try await themes(env, project: project)
-        try await usualDuration(env, project: project)
-        try await environments(env, project: project)
-        try await environmentList(env, project: project)
-        try await environmentSettings(env)
+        let shots: [(name: String, take: () async throws -> Void)] = [
+            ("hero", { try await hero(env, project: project) }),
+            ("intel", { try await intel(env, project: project) }),
+            ("history", { try await history(env, project: project) }),
+            ("editor", { try await editor(env, project: project) }),
+            ("open-file", { try await openFile(env, project: project) }),
+            ("listing", { try await listing(env, project: project) }),
+            ("branches", { try await branches(env, project: project) }),
+            ("themes", { try await themes(env, project: project) }),
+            ("usual-duration", { try await usualDuration(env, project: project) }),
+            ("environments", { try await environments(env, project: project) }),
+            ("environment-list", { try await environmentList(env, project: project) }),
+            ("environment-settings", { try await environmentSettings(env) }),
+            ("ports", { try await ports(env, project: project, home: home) }),
+        ]
+        // Only the shots asked for, so a change to one feature doesn't retake every image:
+        // `CODEC_SHOT=ports make screenshots`, or several, `CODEC_SHOT=hero,ports`.
+        let only = ProcessInfo.processInfo.environment["CODEC_SHOT"]?.split(separator: ",").map(String.init)
+        for shot in shots where only?.contains(shot.name) != false { try await shot.take() }
     }
 
     /// Swaps `NSWindow.occlusionState` for one that's always visible, or back.
@@ -221,6 +228,40 @@ struct ScreenshotTour {
         try await settle(seconds: 8)
         try await capture(controller.window!, as: "usual-duration")
         try await waitFor { pane.session.running == nil }
+    }
+
+    /// A dev server running: its port in the status bar and on its row. Then the same command in a
+    /// second pane, refused the port: its row says which pane has it. Then the list of what's listening.
+    private func ports(_ env: TestEnvironment, project: URL, home: URL) async throws {
+        try makeDevServer(home)
+        let (controller, pane) = try await window(env, project: project, size: NSSize(width: 1360, height: 600))
+        defer { close(controller) }
+        controller.toggleCommandTimeline(nil)
+        try await run("git status --short", in: pane)
+        try await settle(seconds: 0.3)
+        pane.terminal.send(txt: "npm run dev\r")
+        try await waitFor { pane.session.listeningPorts.first?.address != nil }
+        controller.window?.makeFirstResponder(pane.view.preferredResponder)
+        try await settle(seconds: 4)
+        try await capture(controller.window!, as: "ports")
+
+        controller.splitRight(nil)
+        let right = try #require(controller.model.selected?.focused)
+        try await waitFor { right.isAtCommandLine }
+        try await settle(seconds: 0.3)
+        right.terminal.send(txt: "npm run dev\r")
+        try await waitFor { right.timeline.entries.last?.portConflict != nil && right.isAtCommandLine }
+        try await settle()
+        try await capture(controller.window!, as: "port-in-use")
+
+        // Another server beside it, the first one given a name: the Ports tab lists both.
+        try await settle(seconds: 0.3)
+        right.terminal.send(txt: "PORT=8080 node api/server.js\r")
+        try await waitFor { right.session.listeningPorts.first?.address != nil }
+        pane.name(try #require(pane.session.listeningPorts.first), as: "Storefront")
+        controller.togglePorts(nil)
+        try await settle(seconds: 3)
+        try await capture(controller.window!, as: "ports-list")
     }
 
     /// Going into a project with a Python environment and mise tools: the question whether to
@@ -461,6 +502,66 @@ struct ScreenshotTour {
         try #require(process.terminationStatus == 0, "\(command) failed")
     }
 
+    /// Stand-ins for `npm run dev` and the Node server it starts: a program called `node` that listens
+    /// for real and says where, as a server does, or fails the way Node does when the port is taken.
+    /// It's compiled here, as a program goes by its file's own name, whatever links to it.
+    private func makeDevServer(_ home: URL) throws {
+        let bin = home.appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let source = home.appendingPathComponent("server.c")
+        try #"""
+            #include <arpa/inet.h>
+            #include <stdio.h>
+            #include <stdlib.h>
+            #include <unistd.h>
+
+            int main(int argc, char **argv) {
+                int port = getenv("PORT") ? atoi(getenv("PORT")) : argc > 1 ? atoi(argv[1]) : 3000;
+                int descriptor = socket(AF_INET, SOCK_STREAM, 0);
+                struct sockaddr_in address = {0};
+                address.sin_family = AF_INET;
+                address.sin_port = htons(port);
+                address.sin_addr.s_addr = inet_addr("127.0.0.1");
+                if (bind(descriptor, (struct sockaddr *)&address, sizeof address) != 0 || listen(descriptor, 8) != 0) {
+                    printf("node:events:497\n      throw er; // Unhandled 'error' event\n      ^\n\n"
+                           "Error: listen EADDRINUSE: address already in use 127.0.0.1:%d\n"
+                           "    at Server.setupListenHandle [as _listen2] (node:net:1908:16)\n"
+                           "    at listenInCluster (node:net:1965:12)\n"
+                           "    at Server.listen (node:net:2067:7) {\n"
+                           "  code: 'EADDRINUSE',\n  syscall: 'listen',\n  address: '127.0.0.1',\n  port: %d\n}\n\n"
+                           "Node.js v24.12.0\n", port, port);
+                    return 1;
+                }
+                printf("Server ready on http://localhost:%d\n", port);
+                fflush(stdout);
+                for (;;) pause();
+            }
+
+            """#.write(to: source, atomically: true, encoding: .utf8)
+        try shell("cc -o '\(bin.path)/node' '\(source.path)' && rm '\(source.path)'", in: home)
+        // A port nothing else on this Mac has, so the first server gets it.
+        let port = [3000, 4000, 5173, 8080, 8000].first { port in
+            let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+            defer { Darwin.close(descriptor) }
+            var address = sockaddr_in()
+            address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            address.sin_family = sa_family_t(AF_INET)
+            address.sin_port = in_port_t(port).bigEndian
+            address.sin_addr.s_addr = inet_addr("127.0.0.1")
+            return withUnsafePointer(to: &address) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0 }
+            }
+        } ?? 3000
+        let npm = bin.appendingPathComponent("npm")
+        try #"""
+            #!/bin/sh
+            printf '\n> storefront@1.4.0 dev\n> node server.js\n\n'
+            exec "$(dirname "$0")/node" \#(port)
+
+            """#.write(to: npm, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: npm.path)
+    }
+
     /// A project with a uv environment and tools from mise, and a `mise` that reports them there.
     private func makeStorefront(_ home: URL) throws {
         let store = home.appendingPathComponent("Developer/storefront")
@@ -548,6 +649,12 @@ struct ScreenshotTour {
         try (zshrc + "\n").write(to: home.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8)
         try makeStorefront(home)
         try shell("git clone --quiet '\(Self.repository.path)' '\(project.path)'", in: home)
+        // The clone is on whatever branch this checkout is on. Taken from a feature branch, as the shots
+        // of a new feature are, that branch would show in `git log`: it goes by `main` instead.
+        try shell("""
+            b=$(git branch --show-current); [ "$b" = main ] || \
+            { git branch -M main && git update-ref -d "refs/remotes/origin/$b" && git remote set-head origin main; }
+            """, in: project)
         try shell("""
             git config user.name 'Solid Snake' && git config user.email snake@example.com && \
             git branch feature/intel-folders && git branch fix/history-ranking && git branch release/1.2 && \

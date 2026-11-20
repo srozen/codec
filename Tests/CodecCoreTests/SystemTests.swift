@@ -156,6 +156,16 @@ struct RunningProgramsTests {
         #expect(RunningPrograms.list(["make", "npm", "ssh"]) == "“make”, “npm” and “ssh”")
     }
 
+    @Test func saysWhatTheProgramsAreListeningOn() {
+        let node = [ListeningPort(port: 3000, program: "node"), ListeningPort(port: 9229, program: "node")]
+        // The server is named even when the shell only knows what started it.
+        #expect(RunningPrograms.programs(["npm"], listening: node) == ["npm", "node"])
+        #expect(RunningPrograms.list(["npm"], listening: node) == "“npm” and “node” (listening on :3000 and :9229)")
+        #expect(RunningPrograms.list(["node"], listening: Array(node.prefix(1))) == "“node” (listening on :3000)")
+        #expect(RunningPrograms.list(["make", "nc", "ssh"], listening: [ListeningPort(port: 8080, program: "nc")])
+                == "“make”, “nc” (listening on :8080) and “ssh”")
+    }
+
     @Test func findsChildProcesses() throws {
         let child = Process()
         child.executableURL = URL(fileURLWithPath: "/bin/sleep")

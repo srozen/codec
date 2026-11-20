@@ -15,6 +15,8 @@ final class WindowModel: ObservableObject {
     @Published var timelineVisible = false
     /// The left sidebar's tab; `fileTreeVisible` says whether it's showing.
     @Published var navigatorTab: NavigatorTab = .files
+    /// The right sidebar's tab; `timelineVisible` says whether it's showing.
+    @Published var inspectorTab: InspectorTab = .commands
 
     var selected: TerminalTab? { tabs.first { $0.id == selectedID } }
 }
@@ -84,7 +86,7 @@ struct TabBar: View {
             BarIconButton(systemImage: "plus", help: "New Tab (⌘T)", action: actions.newTab)
             Spacer(minLength: 24)
             BarIconButton(systemImage: "command", help: "Command Palette (⇧⌘P)", action: actions.showPalette)
-            BarIconButton(systemImage: "sidebar.right", help: model.timelineVisible ? "Hide Commands (⇧⌘L)" : "Show Commands (⇧⌘L)",
+            BarIconButton(systemImage: "sidebar.right", help: model.timelineVisible ? "Hide Commands and Ports" : "Show Commands and Ports",
                           active: model.timelineVisible, action: actions.toggleTimeline)
         }
         .padding(.leading, model.fullScreen ? 10 : 84)
@@ -206,7 +208,6 @@ private struct TabButton: View {
     @State private var hovering = false
 
     var body: some View {
-        let session = tab.focused.session
         let attention = tab.panes.contains { $0.session.needsAttention }
         let unseen = !selected && tab.panes.contains { $0.session.unseenOutput }
 
@@ -225,8 +226,8 @@ private struct TabButton: View {
             .frame(width: 12)
 
             if renaming {
-                TabNameEditor(initialName: tab.customTitle ?? "", placeholder: tab.automaticTitle,
-                              onFinish: { actions.finishRenaming(tab, $0) })
+                InlineNameEditor(initialName: tab.customTitle ?? "", placeholder: tab.automaticTitle, label: "Tab name",
+                                 onFinish: { actions.finishRenaming(tab, $0) })
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Text(tab.title)
@@ -283,7 +284,7 @@ private struct TabButton: View {
             Divider()
             Button("Close Tab") { actions.close(tab) }
         }
-        .help(tab.customTitle == nil ? session.abbreviatedDirectory : "\(tab.automaticTitle) — \(session.abbreviatedDirectory)")
+        .help(tab.toolTip)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
@@ -325,17 +326,20 @@ struct UsualProgressBar: View {
     }
 }
 
-/// Inline editor for a tab's name. Return saves, Escape cancels, clicking elsewhere saves.
-/// A blank name goes back to the automatic title, shown as the placeholder.
-private struct TabNameEditor: View {
+/// Inline editor for a name the user gives: a tab's, or a listening process's. Return saves, Escape
+/// cancels, clicking elsewhere saves. A blank name goes back to the automatic one, shown as the placeholder.
+struct InlineNameEditor: View {
     let placeholder: String
+    /// What it's the name of, for VoiceOver: "Tab name".
+    let label: String
     var onFinish: (String?) -> Void
     @State private var text: String
     @State private var finished = false
     @FocusState private var focused: Bool
 
-    init(initialName: String, placeholder: String, onFinish: @escaping (String?) -> Void) {
+    init(initialName: String, placeholder: String, label: String, onFinish: @escaping (String?) -> Void) {
         self.placeholder = placeholder
+        self.label = label
         self.onFinish = onFinish
         _text = State(initialValue: initialName)
     }
@@ -351,7 +355,7 @@ private struct TabNameEditor: View {
                 if !isFocused { finish(text) }
             }
             .task { focused = true }
-            .accessibilityLabel("Tab name")
+            .accessibilityLabel(label)
     }
 
     private func finish(_ name: String?) {

@@ -28,7 +28,37 @@ Along the bottom of the window:
 - the **directory**: click to open it in Finder,
 - the **git branch**: click to switch,
 - **how many environments** are in effect (the Python environment and each tool version), when there are any: click it for the list, with where each comes from ([below](#project-environments-zsh)),
+- the **ports** the pane's programs are listening on (`:3000`), when there are any: click to open one in the browser ([below](#listening-ports)),
 - the **running or last command**, with its exit status and how long it took; while a command you've run before is running, how far along it likely is ([how long it usually takes](commands-sidebar.md#how-long-it-usually-takes)). After a failure, **Explain** asks Apple Intelligence [why it failed](commands-sidebar.md#why-did-it-fail).
+
+## Listening ports
+
+Every dev server prints its address differently, and you scroll back to find it. Codec asks macOS instead: when a program started from the pane listens on a TCP port, the port shows in the status bar.
+
+![A dev server running: its port in the status bar, and on its row in the Commands sidebar](images/ports.png)
+
+- **Click it** to open `http://localhost:3000` in the browser. If the program printed an address for that port as it started (`Local: https://localhost:3000/app`), that's what opens, scheme and path included; an address for every interface (`http://0.0.0.0:8000`) opens as `localhost`.
+- **Several ports** (`:3000 :9229`) make a menu, each with its address and the program holding it.
+- It counts whatever the pane's shell started, however far down: `npm run dev` runs a shell that runs Node, and it's Node's port that shows. Jobs in the background count too. A server that detaches itself from the terminal (a daemon) doesn't.
+- The port goes when the program stops listening.
+
+### Every port in one place
+
+The status bar shows the focused pane's ports. For all of them, open the **Ports** tab of the right sidebar, beside [Commands](commands-sidebar.md): ⇧⌘O or View › Listening Ports. The sidebar button at the right end of the tab bar brings the sidebar back on the tab it was last on.
+
+![The Ports tab: two servers in two panes, one of them named Storefront](images/ports-list.png)
+
+It lists every port the programs in any pane are listening on, with the program and where its pane is, this window's first and other windows' under their names. It keeps up as servers start and stop, and as tabs and panes move.
+
+- **Click a port** to go straight to its pane, in whichever tab or window it is.
+- **Hover it** for two buttons: the compass opens it in the browser, the pencil names it. Right-click has the same, and Copy Address.
+- **Name a process** to tell servers apart when they're all "node": click the pencil, type "Storefront", press Return. The name stands in for the program wherever the port shows (this list, the status bar's tooltips and menu, the tab's tooltip, Window › Listening Ports, the command palette, and the line about a [port already in use](commands-sidebar.md#port-already-in-use)), on every port the process has. It lasts as long as the process: a server that's restarted is a new process and goes by its program's name again. Clear the name, or right-click › Remove Name, to take it away.
+
+**Window › Listening Ports** has the same list as a menu (`:3000  Storefront — Tab 2 › left pane`), under each window's name when more than one has ports. Choose a port to go to its pane; hold ⌥ and the item opens the port in the browser instead. The [command palette](tabs-and-panes.md#the-command-palette) (⇧⌘P) has both too: type the port or the name, then pick "Go to :3000 — Storefront, Tab 2 › left pane" or "Open http://localhost:3000 in the Browser".
+
+The same ports show in the [Commands sidebar](commands-sidebar.md#what-it-shows) on the running command's row, in the tab's tooltip, and in the question Codec asks [before closing](tabs-and-panes.md#closing-safely) something that's still running. And when another command finds one of them taken, Codec [says which pane has it](commands-sidebar.md#port-already-in-use).
+
+Codec looks a couple of seconds after a command starts, whenever something is printed, and every few seconds otherwise, by asking the kernel about the processes under the pane's shell. It runs nothing (no `lsof`), and works in any shell, with or without Codec's integration.
 
 ## Project environments (zsh)
 

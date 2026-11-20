@@ -114,6 +114,24 @@ struct SplitLayoutTests {
         #expect(SplitLayout.leaf(a).leaf(after: b) === a)
     }
 
+    @Test func saysWhereALeafIs() {
+        #expect(SplitLayout.leaf(a).position(of: a) == nil)
+        let sideBySide = SplitLayout.split(.horizontal, [.leaf(a), .leaf(b), .leaf(c)])
+        #expect([a, b, c].map { sideBySide.position(of: $0) } == ["left", "middle", "right"])
+        #expect(sideBySide.position(of: d) == nil)
+        let stacked = SplitLayout.split(.vertical, [.leaf(a), .leaf(b)])
+        #expect([a, b].map { stacked.position(of: $0) } == ["top", "bottom"])
+        // A pane on the left, and two stacked on the right.
+        let nested = SplitLayout.split(.horizontal, [.leaf(a), .split(.vertical, [.leaf(b), .leaf(c)])])
+        #expect([a, b, c].map { nested.position(of: $0) } == ["left", "top right", "bottom right"])
+        // Deeper on the same side, the outermost split along each axis says where.
+        let deep = SplitLayout.split(.horizontal, [.leaf(a), .split(.vertical, [.leaf(b), .split(.horizontal, [.leaf(c), .leaf(d)])])])
+        #expect([c, d].map { deep.position(of: $0) } == ["bottom right", "bottom right"])
+        let grid = SplitLayout.split(.vertical, [.leaf(a), .split(.horizontal, [.leaf(b), .leaf(c), .leaf(d)]), .leaf(Leaf("e"))])
+        #expect(grid.position(of: c) == "middle")
+        #expect(grid.position(of: b) == "middle left")
+    }
+
     @Test func sameShapeComparesLeavesByIdentityAndStructure() {
         let one = SplitLayout.leaf(a).splitting(a, with: b, axis: .horizontal)
         let same = SplitLayout.leaf(a).splitting(a, with: b, axis: .horizontal)

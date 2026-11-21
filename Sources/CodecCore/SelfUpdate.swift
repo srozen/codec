@@ -32,8 +32,8 @@ public enum SelfUpdateError: LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case .noDiskImage: "The release has no disk image."
-        case .download(let status): "GitHub answered with an error (\(status)) when downloading it."
-        case .damaged: "The download doesn’t match the checksum GitHub lists for it."
+        case .download(let status): "The server answered with an error (\(status)) when downloading it."
+        case .damaged: "The download doesn’t match the checksum the release lists for it."
         case .noApp: "The disk image has no app in it."
         case .notCodec(let reason): "The app in the disk image isn’t signed as this copy of Codec is. \(reason)"
         case .wrongVersion(let found, let expected): "The disk image holds Codec \(found), not \(expected)."
@@ -43,7 +43,7 @@ public enum SelfUpdateError: LocalizedError, Equatable {
 }
 
 /// Installs a release over the copy of Codec that's running. Its disk image is downloaded and checked
-/// against the checksum GitHub lists, and the app in it is copied next to this one and checked again:
+/// against the checksum the release lists, and the app in it is copied next to this one and checked again:
 /// it has to be signed with the same certificate as this copy, with the same identifier, and be the
 /// version the release says. Quitting then only has to swap the two.
 public struct SelfUpdate: UpdateInstalling {
@@ -177,8 +177,8 @@ public struct SelfUpdate: UpdateInstalling {
         return image
     }
 
-    /// `digest` as GitHub lists an asset's: "sha256:" and the hex. Releases from before GitHub listed
-    /// one have none; the app's signature is checked all the same.
+    /// `digest` as a release lists an asset's: "sha256:" and the hex. Releases on GitHub from before it
+    /// listed one have none; the app's signature is checked all the same.
     public static func checkDigest(of file: URL, against digest: String?) throws {
         guard let digest, digest.hasPrefix("sha256:") else { return }
         let handle = try FileHandle(forReadingFrom: file)

@@ -365,7 +365,7 @@ private struct UpdateSettings: View {
                     }
                 }
             } footer: {
-                Text("Once a day, Codec asks GitHub for its latest release and posts a notification when there’s a newer one. Nothing about you, your Mac or what you run is sent. If you installed Codec with Homebrew, Homebrew upgrades it.")
+                Text("Once a day, Codec looks for its latest release on codec.srozen.com and posts a notification when there’s a newer one. Nothing about you, your Mac or what you run is sent. If you installed Codec with Homebrew, Homebrew upgrades it.")
                     .foregroundStyle(.secondary)
             }
         }

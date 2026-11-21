@@ -10,6 +10,11 @@
 </p>
 
 <p align="center">
+  <a href="https://codec.srozen.com/download"><img src="https://img.shields.io/badge/Download_for_macOS-4be49c?style=for-the-badge&logo=apple&logoColor=0c1310" alt="Download for macOS"></a><br>
+  <sub>For macOS 26 or later, on Apple silicon or Intel. With Homebrew, or from source: see <a href="#get-it">Get it</a>.</sub>
+</p>
+
+<p align="center">
   <a href="https://github.com/srozen/codec/actions/workflows/ci.yml"><img src="https://github.com/srozen/codec/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/macOS-26%2B-black?logo=apple" alt="macOS 26+">
   <img src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white" alt="Swift 6">
@@ -80,7 +85,7 @@ Four themes (Codec, Arctic, Amber and Daylight) drawn through everything from th
 
 Codec needs **macOS 26** or later, on Apple silicon or Intel.
 
-**Download** the disk image from the [latest release](https://github.com/srozen/codec/releases/latest), open it and drag Codec to Applications.
+**Download** it from [codec.srozen.com](https://codec.srozen.com), open the disk image and drag Codec to Applications.
 
 **Or with Homebrew:**
 

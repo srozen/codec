@@ -1,0 +1,230 @@
+/* Codec's website. The colors are the app's own: the icon's screen and phosphor green, and the
+   prompt's path and branch chips. Dark only, as a terminal is. */
+
+:root {
+  color-scheme: dark;
+  --screen: #0c1310;
+  --raised: #121c18;
+  --rule: #213029;
+  --ink: #dce6e0;
+  --muted: #93a59c;
+  --phosphor: #4be49c;
+  --phosphor-ink: #062314;
+  --path: #84b8ec;
+  --path-bg: #142739;
+  --branch: #cba0e8;
+  --branch-bg: #261c34;
+
+  --mono: "Martian Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --sans: "Atkinson Hyperlegible Next", -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+
+  --column: 40rem;
+  --wide: 72rem;
+  --gutter: clamp(1rem, 4vw, 2.5rem);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--screen);
+  color: var(--ink);
+  font: 400 1.125rem/1.62 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+img { display: block; max-width: 100%; height: auto; }
+
+a { color: var(--ink); text-decoration-color: color-mix(in srgb, var(--phosphor) 55%, transparent); text-underline-offset: 0.2em; }
+a:hover { color: var(--phosphor); }
+
+:focus-visible { outline: 2px solid var(--phosphor); outline-offset: 3px; border-radius: 4px; }
+
+code, kbd, pre { font-family: var(--mono); font-stretch: 87.5%; }
+
+code { font-size: 0.84em; padding: 0.1em 0.35em; border-radius: 4px; background: var(--raised); color: var(--path); }
+
+/* Header */
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  max-width: var(--wide);
+  margin: 0 auto;
+  padding: 1.25rem var(--gutter);
+}
+
+.brand { display: flex; align-items: center; gap: 0.6rem; text-decoration: none; font: 600 1rem var(--mono); }
+.brand img { border-radius: 7px; }
+
+.top nav { display: flex; align-items: center; gap: clamp(0.75rem, 3vw, 1.75rem); font-size: 0.95rem; }
+.top nav a { text-decoration: none; color: var(--muted); }
+.top nav a:hover { color: var(--ink); }
+.top nav .nav-download { color: var(--phosphor); }
+
+@media (max-width: 34rem) {
+  .top nav a:not(.nav-download) { display: none; }
+}
+
+/* Hero */
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(10rem, 17rem);
+  align-items: center;
+  gap: clamp(2rem, 6vw, 5rem);
+  max-width: var(--wide);
+  margin: 0 auto;
+  padding: clamp(3rem, 9vw, 7rem) var(--gutter) clamp(2.5rem, 6vw, 4.5rem);
+}
+
+h1 {
+  margin: 0;
+  max-width: 14ch;
+  font: 500 clamp(2.4rem, 6.4vw, 4.6rem)/1.06 var(--mono);
+  font-stretch: 75%;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+.lede { max-width: 34em; margin: 1.5rem 0 0; color: var(--muted); font-size: 1.2rem; }
+
+.get { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1.25rem; margin-top: 2.25rem; }
+
+.button {
+  display: inline-block;
+  padding: 0.8rem 1.35rem;
+  border-radius: 10px;
+  background: var(--phosphor);
+  color: var(--phosphor-ink);
+  font: 600 1rem/1 var(--sans);
+  text-decoration: none;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--phosphor) 60%, white) inset, 0 0 28px -6px var(--phosphor);
+}
+.button:hover { color: var(--phosphor-ink); background: color-mix(in srgb, var(--phosphor) 88%, white); }
+
+.release { margin: 0; color: var(--muted); font-size: 0.95rem; }
+
+/* The app's own icon, as scripts/make-icon.swift draws it. */
+
+.mark { width: 100%; filter: drop-shadow(0 30px 60px rgb(0 0 0 / 0.55)); }
+
+@media (max-width: 46rem) {
+  .hero { grid-template-columns: 1fr; }
+  .mark { grid-row: 1; width: 7rem; }
+}
+
+/* Screenshots */
+
+.shot { max-width: var(--wide); margin: 0 auto; padding: 0 var(--gutter); }
+.shot img { width: 100%; border-radius: 14px; }
+.shot-hero { margin-bottom: clamp(3rem, 8vw, 6rem); }
+
+/* Prose */
+
+.prose { max-width: calc(var(--column) + 2 * var(--gutter)); margin: 0 auto; padding: 0 var(--gutter); }
+.prose p { margin: 0 0 1em; }
+
+.intro p { font-size: 1.3rem; line-height: 1.55; }
+
+.feature { padding-top: clamp(4rem, 10vw, 7.5rem); padding-bottom: 1.5rem; }
+
+h2 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem 0.9rem;
+  margin: 0 0 1.1rem;
+  font: 500 clamp(1.45rem, 3vw, 1.9rem)/1.2 var(--mono);
+  font-stretch: 87.5%;
+  letter-spacing: -0.02em;
+}
+
+kbd {
+  font-size: 0.8rem;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  padding: 0.25em 0.55em;
+  border-radius: 6px;
+  color: var(--branch);
+  background: var(--branch-bg);
+}
+
+/* Install */
+
+.install {
+  max-width: var(--wide);
+  margin: clamp(5rem, 12vw, 9rem) auto 0;
+  padding: clamp(2.5rem, 6vw, 4rem) var(--gutter) 0;
+  border-top: 1px solid var(--rule);
+}
+
+.ways { max-width: 52rem; margin-top: 1.5rem; }
+
+.way {
+  display: grid;
+  grid-template-columns: 9rem minmax(0, 1fr);
+  gap: 0.5rem 2rem;
+  padding: 1.75rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+.way:last-child { border-bottom: 0; }
+
+@media (max-width: 40rem) { .way { grid-template-columns: minmax(0, 1fr); } }
+
+.way h3 { margin: 0; font: 600 1.05rem/1.6 var(--sans); }
+.way p { margin: 0 0 1rem; color: var(--muted); }
+
+.copyable { position: relative; }
+
+pre {
+  margin: 0;
+  padding: 1rem 1.1rem;
+  padding-right: 4.5rem;
+  overflow-x: auto;
+  border-radius: 10px;
+  background: var(--raised);
+  box-shadow: 0 0 0 1px var(--rule) inset;
+  font-size: 0.82rem;
+  line-height: 1.7;
+}
+pre code { padding: 0; background: none; color: var(--ink); font-size: inherit; }
+
+.copy {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  padding: 0.3rem 0.6rem;
+  border: 0;
+  border-radius: 6px;
+  background: var(--path-bg);
+  color: var(--path);
+  font: 500 0.8rem var(--sans);
+  cursor: pointer;
+}
+.copy:hover { color: var(--ink); }
+
+.requirements { margin: 1rem 0 0; color: var(--muted); font-size: 1rem; }
+
+/* Footer */
+
+.bottom {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 1rem 2rem;
+  max-width: var(--wide);
+  margin: clamp(4rem, 10vw, 7rem) auto 0;
+  padding: 2rem var(--gutter) 3rem;
+  border-top: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+.bottom p { margin: 0; }
+.bottom nav { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; }
+.bottom a { color: var(--muted); }
+.bottom a:hover { color: var(--ink); }

@@ -340,6 +340,8 @@ struct PortConflictUITests {
 
         // Its row says so, with the way there.
         #expect(sidebar.pane === client)
+        // The sidebar reloads on the next turn of the run loop, so the row can come a moment after the entry.
+        #expect(await waitUntil { sidebar.rows.contains { $0.entry?.id == failed.id } })
         let row = try #require(sidebar.rows.firstIndex { $0.entry?.id == failed.id })
         #expect(await waitUntil { sidebar.tableView(sidebar.table, heightOfRow: row) == TimelineCell.heightSayingWhyAndWhere })
         let cell = try #require(sidebar.table.view(atColumn: 0, row: row, makeIfNecessary: true) as? TimelineCell)

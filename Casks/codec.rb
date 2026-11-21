@@ -5,14 +5,16 @@ cask "codec" do
   version "0.1.7"
   sha256 "853bbcd4f4d8250a7f9231fc015a68b929235093b124a8be512642bffa796724"
 
-  url "https://github.com/srozen/codec/releases/download/v#{version}/Codec-#{version}.dmg"
+  url "https://codec.srozen.com/releases/Codec-#{version}.dmg"
   name "Codec"
   desc "Native terminal that remembers what you did"
-  homepage "https://github.com/srozen/codec"
+  homepage "https://codec.srozen.com"
 
   livecheck do
-    url :url
-    strategy :github_latest
+    url "https://codec.srozen.com/releases/latest.json"
+    strategy :json do |json|
+      json["tag_name"]&.delete_prefix("v")
+    end
   end
 
   depends_on macos: :tahoe

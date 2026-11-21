@@ -36,4 +36,4 @@ The Codec prompt (the default) and its builder, or your shell's own prompt. See 
 
 ## Updates
 
-The version you have, whether Codec checks GitHub for a newer one once a day, and Check Now. See [Getting started › Updates](getting-started.md#updates).
+The version you have, whether Codec looks for a newer one once a day, and Check Now. See [Getting started › Updates](getting-started.md#updates).

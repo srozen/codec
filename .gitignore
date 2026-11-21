@@ -5,3 +5,5 @@ build/
 .DS_Store
 # Codec sound files: game audio, keep local and out of the repository.
 Resources/Sounds/*.mp3
+node_modules/
+.wrangler/

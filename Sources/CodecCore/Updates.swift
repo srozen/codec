@@ -63,12 +63,14 @@ public struct AppVersion: Comparable, CustomStringConvertible, Sendable {
     }
 }
 
-/// A published release, as GitHub's releases API describes it.
+/// A published release, as GitHub's releases API describes it. Codec's own latest.json on
+/// codec.srozen.com has the same shape, so either can be read.
 public struct Release: Decodable, Equatable, Sendable {
     public struct Asset: Decodable, Equatable, Sendable {
         public var name: String
         public var url: URL
-        /// Its checksum, as "sha256:" and the hex; GitHub lists one for assets uploaded since mid-2025.
+        /// Its checksum, as "sha256:" and the hex. latest.json always lists one; GitHub, for assets
+        /// uploaded since mid-2025.
         public var digest: String?
 
         public init(name: String, url: URL, digest: String? = nil) {
@@ -139,7 +141,7 @@ public enum UpdatePolicy {
     }
 }
 
-/// Where releases are looked up. The app asks GitHub; tests use a fake.
+/// Where releases are looked up. The app asks codec.srozen.com, then GitHub; tests use a fake.
 public protocol ReleaseSource: Sendable {
     /// The newest release that isn't a draft or a prerelease.
     func latest() async throws -> Release
@@ -152,32 +154,42 @@ public enum UpdateCheckError: LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case .noReleases: "No release of Codec has been published yet."
-        case .unexpectedResponse(let status): "GitHub answered with an error (\(status)). Try again later."
+        case .unexpectedResponse(let status): "The update server answered with an error (\(status)). Try again later."
         }
     }
 }
 
-/// Codec's releases on GitHub. Asks for the latest one and nothing else: no cookies, no cache, and
-/// nothing about the Mac beyond what any web request carries.
-public struct GitHubReleases: ReleaseSource {
-    /// Codec's, or, to try an update before releasing it, the release JSON at `CODEC_RELEASES_URL`.
-    /// What's installed from there still has to be signed as the running copy is.
-    public static var codec: GitHubReleases {
-        GitHubReleases(repository: "srozen/codec",
-                       latestURL: ProcessInfo.processInfo.environment["CODEC_RELEASES_URL"].flatMap(URL.init(string:)))
+/// Where Codec's releases are published.
+public enum CodecReleases {
+    /// latest.json on Codec's website, which the release workflow writes after each release: a file
+    /// served from a CDN, so it answers however many people ask.
+    public static let feed = URL(string: "https://codec.srozen.com/releases/latest.json")!
+    /// GitHub's API, which answers only 60 requests an hour from one address without signing in, then
+    /// 403: everyone behind the same office network or VPN shares those. Asked only when the website
+    /// doesn't answer.
+    public static let gitHub = URL(string: "https://api.github.com/repos/srozen/codec/releases/latest")!
+
+    /// The website, then GitHub; or, to try an update before releasing it, only the release JSON at
+    /// `CODEC_RELEASES_URL`. What's installed from there still has to be signed as the running copy is.
+    public static var source: any ReleaseSource {
+        if let url = ProcessInfo.processInfo.environment["CODEC_RELEASES_URL"].flatMap(URL.init(string:)) {
+            return ReleaseFeed(url: url)
+        }
+        return FirstAnswer([ReleaseFeed(url: feed), ReleaseFeed(url: gitHub)])
     }
+}
 
-    /// "owner/name".
-    public var repository: String
-    public var latestURL: URL
+/// The latest release as JSON at `url`, in the shape of GitHub's releases API. Asks for it and nothing
+/// else: no cookies, no cache, and nothing about the Mac beyond what any web request carries.
+public struct ReleaseFeed: ReleaseSource {
+    public var url: URL
 
-    public init(repository: String, latestURL: URL? = nil) {
-        self.repository = repository
-        self.latestURL = latestURL ?? URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!
+    public init(url: URL) {
+        self.url = url
     }
 
     public func latest() async throws -> Release {
-        var request = URLRequest(url: latestURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("Codec", forHTTPHeaderField: "User-Agent")
         let session = URLSession(configuration: .ephemeral)
@@ -187,6 +199,29 @@ public struct GitHubReleases: ReleaseSource {
         if status == 404 { throw UpdateCheckError.noReleases }
         guard status == 200 else { throw UpdateCheckError.unexpectedResponse(status) }
         return try JSONDecoder().decode(Release.self, from: data)
+    }
+}
+
+/// Asks each source in turn and takes the first release one gives. When none does, throws what the
+/// first said: it's the one that's meant to answer.
+public struct FirstAnswer: ReleaseSource {
+    public var sources: [any ReleaseSource]
+
+    public init(_ sources: [any ReleaseSource]) {
+        self.sources = sources
+    }
+
+    public func latest() async throws -> Release {
+        var firstError: (any Error)?
+        for source in sources {
+            try Task.checkCancellation()
+            do {
+                return try await source.latest()
+            } catch {
+                firstError = firstError ?? error
+            }
+        }
+        throw firstError ?? UpdateCheckError.noReleases
     }
 }
 

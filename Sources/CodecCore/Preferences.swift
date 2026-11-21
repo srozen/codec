@@ -68,7 +68,7 @@ public final class Preferences: ObservableObject {
     @Published public var activateVenvs: Bool { didSet { store(activateVenvs, .activateVenvs) } }
     /// Offers to explain a failed command with Apple Intelligence, on this Mac.
     @Published public var explainFailures: Bool { didSet { store(explainFailures, .explainFailures) } }
-    /// Asks GitHub once a day whether there's a newer Codec.
+    /// Looks once a day for a newer Codec.
     @Published public var checkForUpdates: Bool { didSet { store(checkForUpdates, .checkForUpdates) } }
 
     /// Commands that run at least this long notify you when they finish in the background.

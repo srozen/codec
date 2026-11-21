@@ -75,13 +75,47 @@ struct UpdatesTests {
         #expect(UpdatePolicy.isDue(lastChecked: now.addingTimeInterval(3600), now: now))
     }
 
-    @Test func asksGitHubForTheLatestRelease() {
-        #expect(GitHubReleases.codec.latestURL.absoluteString == "https://api.github.com/repos/srozen/codec/releases/latest")
+    @Test func asksTheWebsiteBeforeGitHub() throws {
+        let source = try #require(CodecReleases.source as? FirstAnswer)
+        let urls = source.sources.compactMap { ($0 as? ReleaseFeed)?.url.absoluteString }
+        #expect(urls == ["https://codec.srozen.com/releases/latest.json",
+                         "https://api.github.com/repos/srozen/codec/releases/latest"])
+    }
+
+    @Test func takesTheFirstSourceThatAnswers() async throws {
+        let page = URL(string: "https://github.com/srozen/codec/releases")!
+        let website = FixedReleases(.failure(.unexpectedResponse(502)))
+        let gitHub = FixedReleases(.success(Release(tag: "v1.3.0", page: page)))
+        #expect(try await FirstAnswer([website, gitHub]).latest().tag == "v1.3.0")
+
+        let first = FixedReleases(.success(Release(tag: "v1.4.0", page: page)))
+        #expect(try await FirstAnswer([first, gitHub]).latest().tag == "v1.4.0")
+    }
+
+    @Test func saysWhatTheFirstSourceSaidWhenNoneAnswers() async {
+        let website = FixedReleases(.failure(.unexpectedResponse(502)))
+        let gitHub = FixedReleases(.failure(.unexpectedResponse(403)))
+        await #expect(throws: UpdateCheckError.unexpectedResponse(502)) {
+            try await FirstAnswer([website, gitHub]).latest()
+        }
     }
 
     @Test func knowsWhenHomebrewInstalledCodec() {
         #expect(Homebrew.installedCodec { $0 == "/opt/homebrew/Caskroom/codec" })
         #expect(Homebrew.installedCodec { $0 == "/usr/local/Caskroom/codec" })
         #expect(!Homebrew.installedCodec { _ in false })
+    }
+}
+
+/// Answers with a fixed release, or an error.
+private struct FixedReleases: ReleaseSource {
+    var result: Result<Release, UpdateCheckError>
+
+    init(_ result: Result<Release, UpdateCheckError>) {
+        self.result = result
+    }
+
+    func latest() async throws -> Release {
+        try result.get()
     }
 }

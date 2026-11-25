@@ -75,7 +75,8 @@ struct RestoreTests {
         let window = try #require(app.windows.first)
         window.newTab(nil)
         window.model.selected?.rename(to: "logs")
-        #expect(await waitUntil(timeout: .seconds(5)) {
+        // A second after the change, on a quiet machine; CI's runners, with the whole suite running, take longer.
+        #expect(await waitUntil {
             SavedWorkspace.load(from: env.preferences.stateDefaults)?.windows.first?.tabs.map(\.title) == [nil, "logs"]
         })
     }

@@ -816,10 +816,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     private var focusedPane: Pane? { model.selected?.focused }
     var allPanes: [Pane] { model.tabs.flatMap(\.panes) }
 
+    /// Opens a tab after the last one, as browsers and Terminal do, wherever the current tab is.
     func addTab(directory: String?) {
         let tab = TerminalTab(pane: makePane(directory: directory))
-        let position = model.selected.flatMap { selected in model.tabs.firstIndex { $0 === selected } }.map { $0 + 1 }
-        insert(tab, at: position ?? model.tabs.count)
+        insert(tab, at: model.tabs.count)
         select(tab)
     }
 

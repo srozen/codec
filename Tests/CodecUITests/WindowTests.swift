@@ -294,17 +294,23 @@ struct WindowTests {
         #expect(window.frame.height - window.contentLayoutRect.maxY == TabBar.height)
     }
 
-    @Test func newTabsOpenAfterTheCurrentOneInItsDirectory() throws {
+    @Test func newTabsOpenAfterTheLastOneInTheCurrentDirectory() throws {
         let env = try TestEnvironment()
         defer { env.tearDown() }
         let window = makeWindow(env)
         defer { close(window) }
+        window.newTab(nil)
+        window.newTab(nil)
+        // From the first of three tabs, the new one still goes last.
+        let first = window.model.tabs[0]
+        window.select(first)
         let sub = env.directory.appendingPathComponent("sub")
         try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
-        window.model.selected?.focused.session.directory = sub.path
+        first.focused.session.directory = sub.path
         window.newTab(nil)
-        #expect(window.model.tabs.count == 2)
-        #expect(window.model.selectedID == window.model.tabs[1].id)
+        #expect(window.model.tabs.count == 4)
+        #expect(window.model.tabs[0] === first)
+        #expect(window.model.selectedID == window.model.tabs[3].id)
         #expect(window.model.selected?.focused.session.directory == sub.path)
     }
 

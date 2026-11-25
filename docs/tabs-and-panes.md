@@ -4,7 +4,7 @@
 
 ## Tabs
 
-Tabs live in the title bar. ⌘T opens one in the current directory; ⌘1…⌘9 go to a tab, ⇧⌘] / ⇧⌘[ or ⌃⇥ move between them.
+Tabs live in the title bar. ⌘T opens one after the last tab, in the current directory; ⌘1…⌘9 go to a tab, ⇧⌘] / ⇧⌘[ or ⌃⇥ move between them.
 
 A tab is titled after what's running in it. To name it yourself, double-click it, right-click › Rename Tab…, or press ⇧⌘R. Clear the name to go back to the automatic title.
 

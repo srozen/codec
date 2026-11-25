@@ -43,6 +43,11 @@ public final class Preferences: ObservableObject {
     /// get through a long output.
     @Published public var scrollSpeed: Double { didSet { store(scrollSpeed, .scrollSpeed) } }
     public static let scrollSpeeds: ClosedRange<Double> = 1...5
+    /// Folds a command's output once the next command has run, when it's longer than
+    /// `foldLongOutputLines` (zsh).
+    @Published public var foldLongOutput: Bool { didSet { store(foldLongOutput, .foldLongOutput) } }
+    @Published public var foldLongOutputLines: Int { didSet { store(foldLongOutputLines, .foldLongOutputLines) } }
+    public static let foldLongOutputLineCounts: ClosedRange<Int> = 5...10_000
     /// Copies text to the clipboard as soon as it's selected.
     @Published public var copyOnSelect: Bool { didSet { store(copyOnSelect, .copyOnSelect) } }
     /// Shows the rest of a matching earlier command, dimmed, as you type (zsh).
@@ -79,7 +84,7 @@ public final class Preferences: ObservableObject {
              codecSounds, paneSounds, soundVolume, optionAsMeta, exitBehavior, shellIntegration, shellPath,
              showSystemStats, prompt, copyOnSelect, suggestCommands, historyKeys, friendlyCompletion, colorFileListings,
              ezaForLs, recordHistory, restoreWindows, restorePaneContents, showUsualDuration, activateVenvs, explainFailures,
-             checkForUpdates, commandSeparators, shadeAlternateCommands, scrollSpeed
+             checkForUpdates, commandSeparators, shadeAlternateCommands, scrollSpeed, foldLongOutput, foldLongOutputLines
     }
 
     private static let factoryDefaults: [Key: Any] = [
@@ -103,6 +108,8 @@ public final class Preferences: ObservableObject {
         .shellPath: "",
         .showSystemStats: true,
         .scrollSpeed: 2.0,
+        .foldLongOutput: false,
+        .foldLongOutputLines: 100,
         .copyOnSelect: false,
         .suggestCommands: true,
         .historyKeys: true,
@@ -141,6 +148,9 @@ public final class Preferences: ObservableObject {
         shellPath = defaults.string(forKey: Key.shellPath.rawValue) ?? ""
         showSystemStats = defaults.bool(forKey: Key.showSystemStats.rawValue)
         scrollSpeed = Self.clamp(defaults.double(forKey: Key.scrollSpeed.rawValue), Self.scrollSpeeds, fallback: 2)
+        foldLongOutput = defaults.bool(forKey: Key.foldLongOutput.rawValue)
+        let foldLines = defaults.integer(forKey: Key.foldLongOutputLines.rawValue)
+        foldLongOutputLines = Self.foldLongOutputLineCounts.contains(foldLines) ? foldLines : 100
         copyOnSelect = defaults.bool(forKey: Key.copyOnSelect.rawValue)
         suggestCommands = defaults.bool(forKey: Key.suggestCommands.rawValue)
         historyKeys = defaults.bool(forKey: Key.historyKeys.rawValue)

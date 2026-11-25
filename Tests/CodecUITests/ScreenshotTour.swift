@@ -57,6 +57,7 @@ struct ScreenshotTour {
             ("branches", { try await branches(env, project: project) }),
             ("themes", { try await themes(env, project: project) }),
             ("usual-duration", { try await usualDuration(env, project: project) }),
+            ("folds", { try await folds(env, project: project) }),
             ("environments", { try await environments(env, project: project) }),
             ("environment-list", { try await environmentList(env, project: project) }),
             ("environment-settings", { try await environmentSettings(env) }),
@@ -361,6 +362,21 @@ struct ScreenshotTour {
             return true
         }
         write(grid, as: "themes")
+    }
+
+    /// A command's output folded under its command line, and the Fold button of the one under the pointer.
+    private func folds(_ env: TestEnvironment, project: URL) async throws {
+        let (controller, pane) = try await window(env, project: project, size: NSSize(width: 980, height: 520))
+        defer { close(controller) }
+        for command in ["ls -l Sources/CodecUI", "make lint", "ls Sources/CodecCore | head -8"] {
+            try await run(command, in: pane)
+        }
+        try await waitFor { pane.canFoldNow && pane.timeline.entries.last?.output != nil }
+        #expect(pane.foldAllOutput())
+        try point(pane, at: "Commands.swift")
+        pane.refreshFolds()
+        try await settle()
+        try await capture(controller.window!, as: "folds")
     }
 
     // MARK: Windows and commands

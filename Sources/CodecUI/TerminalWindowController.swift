@@ -1441,6 +1441,18 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     @objc func previousCommand(_ sender: Any?) { focusedPane?.jumpToCommand(previous: true) }
     @objc func nextCommand(_ sender: Any?) { focusedPane?.jumpToCommand(previous: false) }
 
+    @objc func foldOutput(_ sender: Any?) {
+        if focusedPane?.foldOutput() != true { NSSound.beep() }
+    }
+
+    @objc func unfoldOutput(_ sender: Any?) {
+        if focusedPane?.unfoldOutput() != true { NSSound.beep() }
+    }
+
+    @objc func foldAllOutput(_ sender: Any?) {
+        if focusedPane?.foldAllOutput() != true { NSSound.beep() }
+    }
+
     @objc func showCommandPalette(_ sender: Any?) {
         if model.paletteOpen {
             hideCommandPalette()
@@ -1490,6 +1502,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
             .init(id: "previous-tab", title: "Previous Tab", shortcut: "⇧⌘[", systemImage: "chevron.left") { [weak self] in self?.previousTab(nil) },
             .init(id: "previous-command", title: "Jump to Previous Command", shortcut: "⌘↑", systemImage: "arrow.up.to.line") { [weak self] in self?.previousCommand(nil) },
             .init(id: "next-command", title: "Jump to Next Command", shortcut: "⌘↓", systemImage: "arrow.down.to.line") { [weak self] in self?.nextCommand(nil) },
+            .init(id: "fold-output", title: "Fold Output", shortcut: "⌥⌘[", systemImage: "chevron.right") { [weak self] in self?.foldOutput(nil) },
+            .init(id: "unfold-output", title: "Unfold Output", shortcut: "⌥⌘]", systemImage: "chevron.down") { [weak self] in self?.unfoldOutput(nil) },
+            .init(id: "fold-all-output", title: "Fold All Output", shortcut: "⌥⇧⌘[", systemImage: "chevron.right.2") { [weak self] in self?.foldAllOutput(nil) },
             .init(id: "clear", title: "Clear Buffer", shortcut: "⌘K", systemImage: "eraser") { [weak self] in self?.clearBuffer(nil) },
             .init(id: "copy-output", title: "Copy Output of Last Command", shortcut: "⇧⌘C", systemImage: "doc.on.doc.fill") { [weak self] in
                 self?.copyLastOutput(nil)

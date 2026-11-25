@@ -25,6 +25,10 @@ final class TerminalFinder {
     /// The rows last searched, top to bottom, to place the marks down the edge.
     private var searchedRows: Range<Int> = 0..<0
 
+    /// Called with what's about to be searched for when the query or the options changed, before the
+    /// scrollback is read: the pane puts back folded output that holds a match.
+    var beforeSearch: ((NSRegularExpression) -> Void)?
+
     var isOpen: Bool { !bar.isHidden }
 
     init(terminal: CodecTerminalView) {
@@ -110,6 +114,7 @@ final class TerminalFinder {
         let previous = current.map { (index: $0, start: matches[$0].runs[0]) }
         let query = bar.query
         if !query.isEmpty { Self.findPasteboard = query }
+        if revealing, let expression = TextSearch.expression(for: query, options: bar.options) { beforeSearch?(expression) }
         guard let expression = TextSearch.expression(for: query, options: bar.options),
               let snapshot = terminal.terminalContentSnapshot(region: .history(maximumScrollbackRows: CodecTerminalView.scrollback))
         else {

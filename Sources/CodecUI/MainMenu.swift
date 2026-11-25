@@ -142,6 +142,10 @@ enum MainMenu {
         menu.addItem(item("Jump to Previous Command", #selector(W.previousCommand(_:)), arrow(NSUpArrowFunctionKey)))
         menu.addItem(item("Jump to Next Command", #selector(W.nextCommand(_:)), arrow(NSDownArrowFunctionKey)))
         menu.addItem(.separator())
+        menu.addItem(item("Fold Output", #selector(W.foldOutput(_:)), "[", [.command, .option]))
+        menu.addItem(item("Unfold Output", #selector(W.unfoldOutput(_:)), "]", [.command, .option]))
+        menu.addItem(item("Fold All Output", #selector(W.foldAllOutput(_:)), "[", [.command, .option, .shift]))
+        menu.addItem(.separator())
         menu.addItem(item("Bigger", #selector(W.biggerFont(_:)), "+"))
         let alternate = item("Bigger", #selector(W.biggerFont(_:)), "=")
         alternate.isHidden = true

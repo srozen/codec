@@ -186,6 +186,20 @@ struct MainMenuTests {
         #expect(all(menu).filter { $0.keyEquivalent == "f" && $0.keyEquivalentModifierMask == [.command, .shift] }.count == 1)
     }
 
+    /// ⌥⌘ and an arrow moves between panes, so folding takes the brackets.
+    @Test func foldsOutputWithOptionCommandBrackets() throws {
+        _ = NSApplication.shared
+        let menu = MainMenu.build()
+        let expected: [(String, String, NSEvent.ModifierFlags)] = [
+            ("Fold Output", "[", [.command, .option]), ("Unfold Output", "]", [.command, .option]),
+            ("Fold All Output", "[", [.command, .option, .shift]),
+        ]
+        for (title, key, modifiers) in expected {
+            let entry = try #require(item(menu, path: ["View", title]), "\(title)")
+            #expect(entry.keyEquivalent == key && entry.keyEquivalentModifierMask == modifiers, "\(title)")
+        }
+    }
+
     @Test func splitsTowardAnArrowWithControlCommand() throws {
         _ = NSApplication.shared
         let menu = MainMenu.build()

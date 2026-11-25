@@ -12,6 +12,8 @@ final class PaneView: NSView {
     let scanlines = ScanlineView()
     /// Marks a command the user went back to.
     let commandMark = CommandMarkView()
+    /// The rows standing in for folded output, and the button that folds.
+    let folds = FoldView()
     /// Underlines the file name under the pointer while ⌘ is held.
     let fileLink = FileLinkView()
     /// Find in the terminal: its bar and its highlights.
@@ -34,6 +36,8 @@ final class PaneView: NSView {
     var onDismiss: (() -> Void)? {
         didSet { keyCatcher.onEscape = onDismiss }
     }
+    /// The pointer moved over the pane, or left it.
+    var onPointerMoved: (() -> Void)?
     /// The answer to the virtual environment question.
     var onVenvDecision: ((Toolchain.PythonEnvironment, VenvAnswer) -> Void)?
 
@@ -61,7 +65,7 @@ final class PaneView: NSView {
             self?.onScroll?()
         }
 
-        for view in [commandSeparators, terminal, finder.highlights, fileLink, scanlines, commandMark, finder.bar, dimmer, venvBanner, overlay,
+        for view in [commandSeparators, terminal, folds, finder.highlights, fileLink, scanlines, commandMark, finder.bar, dimmer, venvBanner, overlay,
                      keyCatcher] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
@@ -81,13 +85,30 @@ final class PaneView: NSView {
             finder.bar.topAnchor.constraint(equalTo: topAnchor, constant: 8),
             finder.bar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             barRoom,
-        ] + [commandSeparators, finder.highlights, fileLink, scanlines, commandMark, dimmer, overlay].flatMap { $0.constraintsFilling(self) })
+        ] + [commandSeparators, folds, finder.highlights, fileLink, scanlines, commandMark, dimmer, overlay].flatMap { $0.constraintsFilling(self) })
     }
 
     override func layout() {
         super.layout()
         if finder.isOpen { finder.refreshHighlights() }
         onLayout?()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.filter { $0.owner === self }.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                       owner: self))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        onPointerMoved?()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        onPointerMoved?()
     }
 
     /// Back in a window, as when its tab is selected again: what's drawn over the rows is due again.
@@ -113,6 +134,7 @@ final class PaneView: NSView {
     func apply(theme: CodecTheme, scanlines enabled: Bool) {
         finder.apply(theme: theme)
         fileLink.theme = theme
+        folds.theme = theme
         commandSeparators.theme = theme
         scanlines.isHidden = !enabled
         scanlines.lineColor = theme.isDark ? .black : NSColor(white: 0, alpha: 0.5)
@@ -316,6 +338,139 @@ final class FileLinkView: NSView {
         text.draw(with: NSRect(x: icon.maxX + 5, y: (tagFrame.midY - lineHeight / 2).rounded(),
                                width: tagFrame.maxX - 7 - (icon.maxX + 5), height: lineHeight),
                   options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+    }
+}
+
+/// Folded output. Where a command's output was folded, the terminal has one blank row; this draws
+/// over it what the row stands for: how many lines, how long the command took, how it ended and the
+/// last thing it printed. And for the command under the pointer, the button that folds its output,
+/// at the right of its command line. Only the button takes clicks; a click on a row goes through to
+/// the terminal, which hands it to the pane.
+final class FoldView: NSView {
+    struct Row: Equatable {
+        /// The blank row, in this view's coordinates.
+        var frame: NSRect
+        var summary: FoldSummary
+        /// The pointer is on it: it says what a click does.
+        var isHovered = false
+    }
+
+    struct Button: Equatable {
+        var frame: NSRect
+        /// "Fold 1,934 lines".
+        var title: String
+        var isHovered = false
+    }
+
+    var theme: CodecTheme = .codec {
+        didSet { needsDisplay = true }
+    }
+    /// The terminal's font, so the rows read as the terminal's own.
+    var font: NSFont = .monospacedSystemFont(ofSize: 13, weight: .regular) {
+        didSet { if font != oldValue { needsDisplay = true } }
+    }
+    private(set) var rows: [Row] = []
+    private(set) var button: Button?
+    var onButtonClick: (() -> Void)?
+
+    func update(rows: [Row] = [], button: Button? = nil) {
+        guard rows != self.rows || button != self.button else { return }
+        self.rows = rows
+        self.button = button
+        needsDisplay = true
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let button, let superview, button.frame.contains(convert(point, from: superview)) else { return nil }
+        return self
+    }
+
+    override func mouseDown(with event: NSEvent) {}
+
+    override func mouseUp(with event: NSEvent) {
+        guard let button, button.frame.contains(convert(event.locationInWindow, from: nil)) else { return }
+        onButtonClick?()
+    }
+
+    /// What the button and a hovered row's "Unfold" are set in: the system's font, a little smaller
+    /// than the terminal's, so they read as Codec's and not as something a program printed.
+    private var labelFont: NSFont { .systemFont(ofSize: max((font.pointSize * 0.85).rounded(), 10), weight: .medium) }
+    private static let chevronWidth: CGFloat = 7
+
+    /// How big the button is for its title, in a row this tall.
+    func buttonSize(title: String, rowHeight: CGFloat) -> NSSize {
+        let text = ceil((title as NSString).size(withAttributes: [.font: labelFont]).width)
+        return NSSize(width: 8 + Self.chevronWidth + 5 + text + 9, height: max(rowHeight - 2, 14))
+    }
+
+    /// What a row says, in the theme's colors: quiet, but for how the command ended.
+    func text(of summary: FoldSummary) -> NSAttributedString {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        let muted = theme.background.blended(withFraction: 0.62, of: theme.foreground) ?? theme.foreground
+        let quiet = theme.background.blended(withFraction: 0.45, of: theme.foreground) ?? theme.foreground
+        let text = NSMutableAttributedString()
+        for (part, color) in [(summary.leading, muted), (summary.status, summary.failed ? theme.alert : theme.accent),
+                              (summary.trailing, quiet)] where !part.isEmpty {
+            text.append(NSAttributedString(string: part, attributes: [.font: font, .foregroundColor: color, .paragraphStyle: paragraph]))
+        }
+        return text
+    }
+
+    /// A chevron `width` wide around `center`, pointing right, down or up.
+    private func chevron(at center: NSPoint, width: CGFloat, turned angle: CGFloat) -> NSBezierPath {
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: -width / 4, y: width / 2))
+        path.line(to: NSPoint(x: width / 4, y: 0))
+        path.line(to: NSPoint(x: -width / 4, y: -width / 2))
+        var transform = AffineTransform(translationByX: center.x, byY: center.y)
+        transform.rotate(byDegrees: angle)
+        path.transform(using: transform)
+        path.lineWidth = 1.5
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        return path
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let lineHeight = ceil(font.ascender - font.descender)
+        let cell = ceil(("M" as NSString).size(withAttributes: [.font: font]).width)
+        for row in rows {
+            let pill = NSBezierPath(roundedRect: row.frame.insetBy(dx: -4, dy: 1), xRadius: 5, yRadius: 5)
+            theme.foreground.withAlphaComponent((theme.isDark ? 0.07 : 0.08) * (row.isHovered ? 2 : 1)).setFill()
+            pill.fill()
+            // The disclosure triangle's place, in the row's first two cells.
+            theme.foreground.withAlphaComponent(row.isHovered ? 0.9 : 0.55).setStroke()
+            chevron(at: NSPoint(x: row.frame.minX + cell / 2, y: row.frame.midY), width: Self.chevronWidth, turned: 0).stroke()
+            var room = row.frame.width - cell * 2
+            if row.isHovered {
+                let label = NSAttributedString(string: "Unfold", attributes: [
+                    .font: labelFont, .foregroundColor: theme.foreground.withAlphaComponent(0.85),
+                ])
+                let size = label.size()
+                label.draw(at: NSPoint(x: row.frame.maxX - size.width - 6, y: (row.frame.midY - size.height / 2).rounded()))
+                room -= size.width + 18
+            }
+            text(of: row.summary).draw(with: NSRect(x: row.frame.minX + cell * 2, y: (row.frame.midY - lineHeight / 2).rounded(),
+                                                    width: max(room, 0), height: lineHeight),
+                                       options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+        }
+        guard let button else { return }
+        // Opaque: it can sit over the end of a long command, or over output once the command line is out of view.
+        let shape = NSBezierPath(roundedRect: button.frame.insetBy(dx: 0.5, dy: 0.5), xRadius: 5, yRadius: 5)
+        let tint = button.isHovered ? theme.accent : theme.foreground
+        (theme.background.blended(withFraction: button.isHovered ? 0.24 : 0.13, of: tint) ?? theme.background).setFill()
+        shape.fill()
+        tint.withAlphaComponent(button.isHovered ? 0.55 : 0.2).setStroke()
+        shape.lineWidth = 1
+        shape.stroke()
+        let ink = theme.foreground.withAlphaComponent(button.isHovered ? 1 : 0.8)
+        ink.setStroke()
+        chevron(at: NSPoint(x: button.frame.minX + 8 + Self.chevronWidth / 2, y: button.frame.midY + 1),
+                width: Self.chevronWidth, turned: 90).stroke()
+        let title = NSAttributedString(string: button.title, attributes: [.font: labelFont, .foregroundColor: ink])
+        title.draw(at: NSPoint(x: button.frame.minX + 8 + Self.chevronWidth + 5,
+                               y: (button.frame.midY - title.size().height / 2).rounded()))
     }
 }
 

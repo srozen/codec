@@ -45,6 +45,21 @@ They're hidden while a full-screen program has the screen, and come back a momen
 
 Copy or select what a command printed without dragging over it: right-click its output › Copy Output or Select Output, or press ⇧⌘C / ⇧⌘A for the last command. Codec finds a command's output from the command line itself, so it stays right however fast the output scrolled by, and after a resize rewraps the lines.
 
+### Folding output
+
+![Output folded under its command line](images/folds.png)
+
+After `npm install` or a long build, what you want is twenty screens up. Fold a command's output and one row takes its place, saying how many lines it was, how long the command took, how it ended and the last thing it printed.
+
+- Point anywhere at a command, its output included, and click Fold at the right of its command line. Scrolled deep into a long output, the button stays at the top of the pane. Or right-click the command › Fold Output.
+- ⌥⌘[ folds the command under the pointer, or else the newest one with output to fold; ⌥⌘] unfolds. ⌥⇧⌘[ folds every finished command but the last one.
+- Click the row to unfold it.
+- Settings › Shell › Command output can fold long output for you, once the command after it is done.
+
+Nothing is lost: the folded output keeps its colors and comes back as it was, Copy Output and the [Commands sidebar](commands-sidebar.md) still have all of it, and ⌘F unfolds any command whose output holds a match. Folds are kept with what the pane showed, and come back when Codec reopens it.
+
+Folding prints the scrollback again without the folded rows, so it only happens while the shell waits at its prompt: with a program running, the keys beep, and output due to fold waits for the prompt. Only finished commands fold, and only output of two rows or more. Images and links in the scrollback (Sixel, Kitty graphics, OSC 8) don't survive a fold.
+
 ⌘↑ and ⌘↓ jump between commands in the scrollback. For every command the pane ran, with its output kept even after it leaves the scrollback, open the [Commands sidebar](commands-sidebar.md).
 
 ## History as you type (zsh)

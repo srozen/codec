@@ -1,8 +1,8 @@
 name: Release
 
 # Push a tag like v1.2.0 to release that commit: a universal Codec.app in a disk image published to
-# GitHub Releases, then the Homebrew cask pointed at it. An annotated tag's message becomes the release
-# notes. The app is signed with the SIGNING_CERTIFICATE secret's certificate (ad hoc without one); when
+# GitHub Releases and to codec.srozen.com, where Codec looks for updates, then the Homebrew cask pointed
+# at it. An annotated tag's message becomes the release notes. The app is signed with the SIGNING_CERTIFICATE secret's certificate (ad hoc without one); when
 # that's a Developer ID, it's notarized too.
 on:
   push:
@@ -24,6 +24,18 @@ jobs:
     env:
       HAS_CERTIFICATE: ${{ secrets.SIGNING_CERTIFICATE != '' }}
     steps:
+      # Before building for an hour: without them, the release would stop halfway.
+      - name: Check the R2 secrets
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [[ -z "$R2_ACCESS_KEY_ID" || -z "$R2_SECRET_ACCESS_KEY" || -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
+            echo "::error::Add the R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and CLOUDFLARE_ACCOUNT_ID secrets to publish to codec.srozen.com (see docs/development.md)"
+            exit 1
+          fi
+
       - uses: actions/checkout@v5
         with:
           # The build number counts commits.
@@ -134,6 +146,15 @@ jobs:
             [[ -n "${PRERELEASE:-}" ]] && flags+=(--prerelease)
             gh release create "$GITHUB_REF_NAME" "$dmg" "${flags[@]}"
           fi
+
+      # The disk image to the R2 bucket the website serves, then latest.json, which Codec reads.
+      - name: Publish to codec.srozen.com
+        env:
+          GH_TOKEN: ${{ github.token }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: scripts/publish-release.sh "$VERSION" "build/Codec-$VERSION.dmg"
 
       - name: Update the Homebrew cask
         if: env.PRERELEASE == ''

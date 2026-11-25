@@ -254,6 +254,10 @@ struct PaneTests {
         defer { window.close() }
         window.contentView = pane.view
         #expect(await waitUntil { pane.terminal.process.running })
+        // The shell's prompt first: output that comes after the lines below scrolls back to the bottom.
+        #expect(await waitUntil {
+            pane.terminal.terminalContentSnapshot(region: .viewport)?.rows.contains { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty } == true
+        })
         pane.terminal.feed(text: (1...200).map { "line \($0)\r\n" }.joined())
         func top() -> Int? { pane.terminal.terminalContentSnapshot(region: .viewport)?.rows.first?.absoluteRow }
         func notchUp() throws {

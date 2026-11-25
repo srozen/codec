@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codec, a terminal that remembers what you did</title>
+  <meta name="description" content="Codec is a native macOS terminal that keeps every command and its output, your saved scripts and notes, your files and your history one keystroke away.">
+  <meta name="theme-color" content="#0c1310">
+  <meta property="og:title" content="Codec">
+  <meta property="og:description" content="A native macOS terminal that remembers what you did.">
+  <meta property="og:image" content="https://codec.srozen.com/images/hero.png">
+  <meta property="og:url" content="https://codec.srozen.com/">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="/images/app-icon.png">
+  <link rel="apple-touch-icon" href="/images/app-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:ital,wght@0,400;0,600;1,400&family=Martian+Mono:wdth,wght@75..112.5,300..700&display=swap">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/">
+      <img src="/images/app-icon.png" width="32" height="32" alt="">
+      <span>Codec</span>
+    </a>
+    <nav aria-label="Site">
+      <a href="https://github.com/srozen/codec/tree/main/docs#readme">Documentation</a>
+      <a href="https://github.com/srozen/codec">Source</a>
+      <a class="nav-download" href="/download">Download</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-text">
+        <h1>A terminal that remembers what you did.</h1>
+        <p class="lede">Every command and its output, your saved scripts and notes, your files and your history, one keystroke away. Native to macOS, with no account, and nothing about what you run leaves your Mac.</p>
+        <div class="get">
+          <a class="button" href="/download">Download for macOS</a>
+          <p class="release" id="release">For macOS 26 or later, on Apple silicon or Intel.</p>
+        </div>
+      </div>
+      <img class="mark" src="/images/app-icon.png" width="512" height="512" alt="">
+    </section>
+
+    <figure class="shot shot-hero">
+      <img src="/images/hero.png" width="2912" height="1832" fetchpriority="high"
+           alt="Codec with the file tree, a zsh session with Codec's prompt, and the Commands sidebar">
+    </figure>
+
+    <section class="intro prose">
+      <p>You ran a dozen things, went on for a while, and now you need what that build printed twenty minutes ago. Or the command you ran last Tuesday, in another folder, on another branch. Codec is built around that moment: it keeps track of what you run, where, and how it went, and puts it back in front of you without leaving the keyboard.</p>
+    </section>
+
+    <section class="feature prose">
+      <h2>Every command, remembered <kbd>⇧⌘L</kbd></h2>
+      <p>The Commands sidebar lists everything a pane ran, under the folder it ran in: whether it worked, how long it took, the last line it printed. Click one and the terminal scrolls back to it. Open its output to search it, copy from it or run it again, even after it scrolled out of the buffer, or you quit and came back the next day.</p>
+      <p>For the commands you run again and again, Codec knows how long they usually take: the build's progress shows on its tab while it runs, and Codec tells you when today's run is slower than usual.</p>
+    </section>
+    <figure class="shot">
+      <img src="/images/commands.png" width="2912" height="1832" loading="lazy" alt="The Commands sidebar with a command's output open">
+    </figure>
+
+    <section class="feature prose">
+      <h2>Intel: the commands you keep coming back to <kbd>⇧⌘I</kbd></h2>
+      <p>Save a command with the blanks left in, like <code>{{branch}}</code> or <code>{{env}}</code>, and run it next time from a form with defaults and choices. Saving one from the Commands sidebar spots the parts that tend to change and offers them as variables. Keep notes beside them as Markdown whose shell blocks run from the page.</p>
+      <p>It's plain Markdown in folders: yours in <code>~/.codec/intel</code>, and your team's in the repository, committed and shared like the rest of the code.</p>
+    </section>
+    <figure class="shot">
+      <img src="/images/intel.png" width="2552" height="1632" loading="lazy" alt="Intel in the left sidebar, organised in folders, with a script's form open">
+    </figure>
+
+    <section class="feature prose">
+      <h2>History that knows where you were <kbd>⌃R</kbd></h2>
+      <p>↑ walks back through what you ran, as in any shell. The full search shows every command with the folder it ran in, how long it took and whether it failed, ranked by how well it matches, then by whether it ran here. As you type, the rest of your last matching command waits dimmed after the cursor.</p>
+    </section>
+    <figure class="shot">
+      <img src="/images/history.png" width="2552" height="1632" loading="lazy" alt="The history search, grouped by day, with folders, durations and failures">
+    </figure>
+
+    <section class="feature prose">
+      <h2>Your project beside the shell <kbd>⇧⌘E</kbd></h2>
+      <p>The file tree follows you as you <code>cd</code>, colors files by git status, and fuzzy-finds any file in the project. Read and edit files beside the terminal, highlighted in twenty-odd languages. Markdown renders live, with Run buttons on its shell blocks, so a README becomes something you can click through.</p>
+    </section>
+    <figure class="shot">
+      <img src="/images/editor.png" width="2912" height="1832" loading="lazy" alt="The file tree colored by git status, and Swift code in the editor">
+    </figure>
+
+    <section class="feature prose">
+      <h2>Splits, branches and ports <kbd>⇧⌘B</kbd></h2>
+      <p>Tabs and nested splits in one window, and a branch switcher one click from the prompt. Quit and reopen, and every pane comes back in its folder, with its commands. The status bar shows the ports a pane's programs listen on, and when <code>npm run dev</code> dies because a port is taken, Codec tells you which pane has it.</p>
+    </section>
+    <figure class="shot">
+      <img src="/images/branches.png" width="2552" height="1632" loading="lazy" alt="Two panes side by side, and the branch switcher open">
+    </figure>
+
+    <section class="feature prose">
+      <h2>Looks the part <kbd>⌘,</kbd></h2>
+      <p>Four themes, Codec, Arctic, Amber and Daylight, drawn through everything from the prompt to the file icons and <code>ls</code>. Blur, opacity and optional scanlines. CPU, memory and network meters in the status bar, in bars and seven-segment digits. When a long command finishes in a pane you aren't watching, its tab lights up and you get a notification.</p>
+    </section>
+    <figure class="shot">
+      <img src="/images/themes.png" width="3808" height="2528" loading="lazy" alt="Codec, Arctic, Amber and Daylight themes">
+    </figure>
+
+    <section class="install" id="install">
+      <h2>Get Codec</h2>
+      <div class="ways">
+        <div class="way">
+          <h3>Download</h3>
+          <div>
+            <p>Open the disk image and drag Codec to Applications. It's signed and notarized by Apple, and it updates itself.</p>
+            <a class="button" href="/download">Download for macOS</a>
+          </div>
+        </div>
+        <div class="way">
+          <h3>Homebrew</h3>
+          <div class="copyable">
+            <pre><code>brew tap srozen/codec https://github.com/srozen/codec
+brew install --cask srozen/codec/codec</code></pre>
+            <button type="button" class="copy">Copy</button>
+          </div>
+        </div>
+        <div class="way">
+          <h3>Build it</h3>
+          <div>
+            <p>With Xcode 26 or later:</p>
+            <div class="copyable">
+              <pre><code>git clone https://github.com/srozen/codec.git
+cd codec &amp;&amp; make run</code></pre>
+              <button type="button" class="copy">Copy</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="requirements">Codec needs macOS 26 or later, on Apple silicon or Intel. It's free and open source, under the MIT License.</p>
+    </section>
+  </main>
+
+  <footer class="bottom">
+    <p>Codec is written in Swift with AppKit, SwiftUI and <a href="https://github.com/migueldeicaza/SwiftTerm">SwiftTerm</a>.</p>
+    <nav aria-label="Footer">
+      <a href="https://github.com/srozen/codec/tree/main/docs#readme">Documentation</a>
+      <a href="https://github.com/srozen/codec/blob/main/docs/shortcuts.md">Keyboard shortcuts</a>
+      <a href="https://github.com/srozen/codec/releases">Release notes</a>
+      <a href="https://github.com/srozen/codec">Source</a>
+    </nav>
+  </footer>
+
+  <script src="/site.js" defer></script>
+</body>
+</html>

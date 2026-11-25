@@ -67,7 +67,7 @@ struct SelfUpdateTests {
         SelfUpdate(installed: installed, requirement: requirement, bundleIdentifier: "com.srozen.codec")
     }
 
-    @Test func readsTheChecksumGitHubListsForAnAsset() throws {
+    @Test func readsTheChecksumAReleaseListsForAnAsset() throws {
         let json = #"{"tag_name": "v0.2.0", "html_url": "https://github.com/srozen/codec/releases/tag/v0.2.0", "assets": [{"name": "Codec-0.2.0.dmg", "browser_download_url": "https://example.com/Codec-0.2.0.dmg", "digest": "sha256:abc"}, {"name": "notes.txt", "browser_download_url": "https://example.com/notes.txt"}]}"#
         let release = try JSONDecoder().decode(Release.self, from: Data(json.utf8))
         #expect(release.diskImageAsset?.digest == "sha256:abc")

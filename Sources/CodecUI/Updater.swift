@@ -1,8 +1,8 @@
 import AppKit
 import CodecCore
 
-/// Looks for a newer Codec on GitHub: once a day on its own, if Settings allow it, and whenever Check
-/// for Updates… is chosen. A check of its own only posts a notification, so nothing pops up over a
+/// Looks for a newer Codec on its website, or GitHub: once a day on its own, if Settings allow it, and
+/// whenever Check for Updates… is chosen. A check of its own only posts a notification, so nothing pops up over a
 /// command being typed; the alert shows when you ask, or click the notification.
 ///
 /// Installing downloads the new version and gets it ready beside this one; quitting puts it in place,
@@ -62,7 +62,7 @@ final class Updater {
     private var schedule: Task<Void, Never>?
 
     init(current: AppVersion, preferences: Preferences, notifier: any Notifying,
-         source: any ReleaseSource = GitHubReleases.codec, installedWithHomebrew: Bool = Homebrew.installedCodec(),
+         source: any ReleaseSource = CodecReleases.source, installedWithHomebrew: Bool = Homebrew.installedCodec(),
          notarized: Bool = CodeSigning.runningAppHasTeamIdentifier, installer: (any UpdateInstalling)? = SelfUpdate.forRunningApp()) {
         self.current = current
         self.notarized = notarized

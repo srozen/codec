@@ -1,0 +1,11 @@
+# Codec's website, a Cloudflare Pages project, at https://codec.srozen.com. scripts/build-site.sh puts
+# it together in build/site (the pages below, docs/images and the functions) and deploys it from there.
+name = "codec"
+pages_build_output_dir = "public"
+compatibility_date = "2026-10-01"
+
+# Release disk images and latest.json, which the release workflow uploads. functions/ serves them at
+# /releases/ and sends /download to the newest disk image.
+[[r2_buckets]]
+binding = "RELEASES"
+bucket_name = "codec-releases"

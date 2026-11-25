@@ -286,7 +286,7 @@ struct PaneContextMenuTests {
         let pane = env.makePane(host: FakeHost())
         defer { pane.shutDown() }
         #expect(pane.contextMenu().itemTitles == [
-            "Cut", "Copy", "Paste", "Select All", "Copy Output", "Select Output", "Split Left", "Split Right", "Split Up", "Split Down",
+            "Cut", "Copy", "Paste", "Select All", "Copy Output", "Select Output", "Fold Output", "Split Left", "Split Right", "Split Up", "Split Down",
             "Find…", "Find in All Panes…", "Clear Buffer",
             "Restart Shell", "Open in Finder", "Copy Path", "Switch Branch…", "Close Pane",
         ])

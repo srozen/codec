@@ -210,6 +210,27 @@ private struct ShellSettings: View {
                     .foregroundStyle(.secondary)
             }
             Section {
+                Toggle("Fold long output when the next command runs", isOn: $prefs.foldLongOutput)
+                if prefs.foldLongOutput {
+                    Stepper(value: $prefs.foldLongOutputLines, in: Preferences.foldLongOutputLineCounts, step: 50) {
+                        LabeledContent("Longer than") {
+                            HStack(spacing: 6) {
+                                TextField("Lines", value: $prefs.foldLongOutputLines, format: .number)
+                                    .labelsHidden()
+                                    .multilineTextAlignment(.trailing)
+                                    .frame(width: 64)
+                                Text("lines")
+                            }
+                        }
+                    }
+                }
+            } header: {
+                Text("Command output")
+            } footer: {
+                Text("A folded command shows one row in place of its output: how many lines, how long it took, how it ended and its last line. Click the row to unfold it, or fold any command yourself with the Fold button at the right of its command line, or with ⌥⌘[ and ⌥⌘]. Output folds once the command after it is done and the shell is back at its prompt. zsh only.")
+                    .foregroundStyle(.secondary)
+            }
+            Section {
                 Toggle("Color files by type", isOn: $prefs.colorFileListings)
                 Toggle("Use eza for ls, with icons", isOn: $prefs.ezaForLs)
                 if !ezaInstalled { installEza }

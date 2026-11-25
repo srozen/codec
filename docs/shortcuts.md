@@ -22,6 +22,8 @@
 | Keys | Action |
 |---|---|
 | ⌘↑ / ⌘↓ | Previous / next command |
+| ⌥⌘[ / ⌥⌘] | Fold / unfold a command's output |
+| ⌥⇧⌘[ | Fold every command's output but the last one's |
 | ⇧⌘C / ⇧⌘A | Copy / select the last command's output |
 | ⌘K | Clear buffer |
 | ⌘F, ⌘G, ⇧⌘G | Find in the scrollback, next match, previous match |

@@ -44,6 +44,11 @@ final class PaneTimeline: ObservableObject {
         value.setOutput(output, of: id)
     }
 
+    func setFold(_ fold: CommandFold?, of id: Int) {
+        guard value.entry(id: id)?.fold != fold else { return }
+        value.setFold(fold, of: id)
+    }
+
     func setPortConflict(_ conflict: PortConflict, of id: Int) {
         guard value.entry(id: id)?.portConflict != conflict else { return }
         value.setPortConflict(conflict, of: id)

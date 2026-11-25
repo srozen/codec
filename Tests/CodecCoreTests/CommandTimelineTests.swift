@@ -25,6 +25,38 @@ struct CommandTimelineTests {
         #expect(entry.output?.lineCount == 2)
     }
 
+    @Test func aFoldKeepsTheOutputAndSaysWhatItHides() throws {
+        var timeline = CommandTimeline()
+        let id = timeline.begin(command: "npm install", directory: "/code", started: start, block: .init(prompt: 3, output: 4))
+        timeline.finish(exitCode: 0, duration: 42, output: CapturedOutput(lines: ["fetching", "added 312 packages in 41s"]))
+        #expect(timeline.entries[0].isFoldable)
+        let fold = CommandFold(transcript: "fetching   \r\n\u{1B}[0;32madded\u{1B}[0m 312 packages in 41s\r\n")
+        #expect(fold.lineCount == 2)
+        #expect(fold.text == "fetching\nadded 312 packages in 41s")
+        #expect(fold.matches(try NSRegularExpression(pattern: "added 312")))
+        #expect(!fold.matches(try NSRegularExpression(pattern: "0;32m")))
+        timeline.setFold(fold, of: id)
+        #expect(!timeline.entries[0].isFoldable)
+        #expect(FoldSummary(entry: timeline.entries[0]).text == "2 lines · 42.0 s · ✓ added 312 packages in 41s")
+        // It's saved with the command, and comes back with it.
+        let saved = try JSONDecoder().decode(CommandTimeline.self, from: JSONEncoder().encode(timeline))
+        #expect(saved.entries[0].fold == fold)
+
+        let failed = timeline.begin(command: "npm run build", directory: "/code", started: start, block: .init(prompt: 5, output: 6))
+        timeline.finish(exitCode: 1, duration: 65, output: CapturedOutput(lines: (1...1_934).map { "error TS\($0)" }))
+        timeline.setFold(CommandFold(transcript: (1...1_934).map { "error TS\($0)\r\n" }.joined()), of: failed)
+        #expect(FoldSummary(entry: timeline.entries[1]).text == "1,934 lines · 1m 05s · ✗ exit 1 · error TS1934")
+
+        // A fold goes with its place on screen: without the row, there's nowhere to unfold it.
+        #expect(timeline.rebased(firstRow: 4).entries.map { $0.fold != nil } == [false, true])
+        timeline.setBlocks([id: nil])
+        #expect(timeline.entries.map { $0.fold != nil } == [false, true])
+        timeline.forgetBlocks()
+        #expect(timeline.entries.allSatisfy { $0.fold == nil })
+        // What it printed is still kept.
+        #expect(timeline.entries[0].output?.summary == "added 312 packages in 41s")
+    }
+
     /// A shell that was killed never reports; the next command doesn't leave the old one running.
     @Test func abandonsACommandThatNeverFinished() {
         var timeline = CommandTimeline()

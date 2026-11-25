@@ -82,6 +82,74 @@ public struct CapturedOutput: Codable, Equatable, Sendable {
     }
 }
 
+/// A command's output taken out of the terminal, with one row left standing in for it: what the row
+/// hides, to put back when the command is unfolded.
+public struct CommandFold: Codable, Equatable, Sendable {
+    /// The output's rows as text with their colors and styles in escape sequences, ready to be printed
+    /// again. Soft-wrapped rows are one line, so it wraps anew at the terminal's width.
+    public var transcript: String
+    /// How many lines it holds.
+    public var lineCount: Int
+
+    public init(transcript: String) {
+        self.transcript = transcript
+        var lines = transcript.components(separatedBy: "\r\n")
+        while lines.last?.isEmpty == true { lines.removeLast() }
+        lineCount = lines.count
+    }
+
+    /// The output without its escape sequences, a line per line.
+    public var text: String {
+        var lines = transcript.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
+            .components(separatedBy: "\r\n")
+            .map { $0.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression) }
+        while lines.last?.isEmpty == true { lines.removeLast() }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Whether `expression` matches somewhere in the output.
+    public func matches(_ expression: NSRegularExpression) -> Bool {
+        let text = text
+        return expression.rangeOfFirstMatch(in: text, range: NSRange(location: 0, length: (text as NSString).length)).length > 0
+    }
+}
+
+/// What the row standing in for a folded command's output says: how much it printed, how long it
+/// took, how it ended and its last line, as the Commands sidebar tells it.
+public struct FoldSummary: Equatable, Sendable {
+    /// "1,934 lines".
+    public var lines: String
+    /// "42.0 s". Nil when it's not known how long the command took.
+    public var duration: String?
+    public var failed: Bool
+    /// "✓", or "✗ exit 1".
+    public var status: String
+    /// The last line the command printed with something on it.
+    public var lastLine: String?
+
+    public init(entry: TimelineEntry) {
+        let count = entry.fold?.lineCount ?? entry.output?.lineCount ?? 0
+        lines = "\(count.formatted(.number.locale(Locale(identifier: "en_US")))) \(count == 1 ? "line" : "lines")"
+        duration = entry.duration.map(Formatting.duration)
+        failed = entry.failed
+        status = entry.failed ? "✗ exit \(entry.exitCode ?? -1)" : "✓"
+        lastLine = entry.output?.summary ?? entry.fold.flatMap { fold in
+            fold.text.split(separator: "\n").last { !$0.allSatisfy(\.isWhitespace) }
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+        }
+    }
+
+    /// What comes before the status, and after it: "1,934 lines · 42.0 s · " and " added 312 packages".
+    public var leading: String { ([lines, duration].compactMap { $0 }).joined(separator: " · ") + " · " }
+    public var trailing: String {
+        guard let lastLine else { return "" }
+        return failed ? " · " + lastLine : " " + lastLine
+    }
+
+    /// "1,934 lines · 42.0 s · ✓ added 312 packages in 41s".
+    public var text: String { leading + status + trailing }
+}
+
 /// A line of a command's output that holds what was searched for.
 public struct OutputMatch: Equatable, Sendable {
     /// The line, without the spaces around it.
@@ -166,6 +234,8 @@ public struct TimelineEntry: Identifiable, Codable, Equatable, Sendable {
     public var toolchain: Toolchain?
     /// It failed because a port was taken by a program in one of Codec's panes: which, and whose.
     public var portConflict: PortConflict?
+    /// Its output, when it's folded: one row stands in for it in the terminal, at `block.output`.
+    public var fold: CommandFold?
 
     public init(id: Int, command: String, screenCommand: String? = nil, directory: String, started: Date,
                 block: CommandBlocks.Block?) {
@@ -188,6 +258,9 @@ public struct TimelineEntry: Identifiable, Codable, Equatable, Sendable {
         if case .failed = status { return true }
         return false
     }
+
+    /// Its output can be folded: it's over, on screen, and not folded already.
+    public var isFoldable: Bool { !isRunning && block != nil && !fullScreen && fold == nil }
 }
 
 /// The commands run in one pane, oldest first.
@@ -268,27 +341,40 @@ public struct CommandTimeline: Codable, Equatable, Sendable {
         entries[index].portConflict = conflict
     }
 
+    /// Folds a command's output, or unfolds it with nil.
+    public mutating func setFold(_ fold: CommandFold?, of id: Int) {
+        guard let index = entries.lastIndex(where: { $0.id == id }) else { return }
+        entries[index].fold = fold
+    }
+
     /// The shell went away mid-command: whatever was running won't report back.
     public mutating func abandonRunning() {
         guard let index = entries.indices.last, entries[index].isRunning else { return }
         entries[index].exitCode = -1
     }
 
-    /// The scrollback was cleared: no entry can be found on screen anymore.
+    /// The scrollback was cleared: no entry can be found on screen anymore. A fold goes with its place:
+    /// there's no row left to unfold it at.
     public mutating func forgetBlocks() {
-        for index in entries.indices where entries[index].block != nil { entries[index].block = nil }
+        for index in entries.indices where entries[index].block != nil {
+            entries[index].block = nil
+            entries[index].fold = nil
+        }
     }
 
     /// Forgets one entry's place on screen, when it turned out not to be there anymore.
     public mutating func forgetBlock(of id: Int) {
         guard let index = entries.lastIndex(where: { $0.id == id }) else { return }
         entries[index].block = nil
+        entries[index].fold = nil
     }
 
     /// Moves commands to where they were found again; see `CommandBlocks.relocate`.
     public mutating func setBlocks(_ blocks: [Int: CommandBlocks.Block?]) {
         for index in entries.indices {
-            if let block = blocks[entries[index].id] { entries[index].block = block }
+            guard let block = blocks[entries[index].id] else { continue }
+            entries[index].block = block
+            if block == nil { entries[index].fold = nil }
         }
     }
 
@@ -320,6 +406,7 @@ public struct CommandTimeline: Codable, Equatable, Sendable {
             copy.entries[index].block = block.prompt >= firstRow
                 ? CommandBlocks.Block(prompt: block.prompt - firstRow, output: block.output - firstRow,
                                       commandLine: block.commandLine) : nil
+            if copy.entries[index].block == nil { copy.entries[index].fold = nil }
         }
         return copy
     }

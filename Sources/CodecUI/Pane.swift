@@ -100,12 +100,16 @@ final class Pane: LocalProcessTerminalViewDelegate {
         terminal.contextMenuProvider = { [weak self] event in self?.contextMenu(at: event.locationInWindow) }
         terminal.shouldOwnPress = { [weak self] event in
             guard let self else { return false }
-            return self.pressFile(event) || self.pressBranch(event) || self.beginCommandLineGesture(event)
+            return self.pressFold(event) || self.pressFile(event) || self.pressBranch(event)
+                || self.beginCommandLineGesture(event)
         }
         terminal.onOwnedDrag = { [weak self] event in self?.continueCommandLineGesture(event) }
         terminal.onOwnedRelease = { [weak self] _ in
             guard let self else { return }
-            if let file = self.pressedFile {
+            if let fold = self.pressedFold {
+                self.pressedFold = nil
+                if let entry = self.timeline.value.entry(id: fold), !self.unfold(entry) { NSSound.beep() }
+            } else if let file = self.pressedFile {
                 self.pressedFile = nil
                 self.view.fileLink.isPressed = false
                 self.host?.openFile(file, from: self)
@@ -144,6 +148,9 @@ final class Pane: LocalProcessTerminalViewDelegate {
             if self.openableNames != nil { self.refreshFileLink(modifiers: self.fileLinkModifiers, rescan: true) }
         }
         view.onLayout = { [weak self] in self?.refreshCommandSeparators() }
+        view.onPointerMoved = { [weak self] in self?.refreshFolds() }
+        view.folds.onButtonClick = { [weak self] in self?.foldAtButton() }
+        view.finder.beforeSearch = { [weak self] expression in self?.unfoldOutput(matching: expression) }
         terminal.onRelease = { [weak self] clicks, dragged, point in
             self?.terminalGestureEnded(clicks: clicks, dragged: dragged, at: point)
         }
@@ -214,7 +221,10 @@ final class Pane: LocalProcessTerminalViewDelegate {
            let snapshot = terminal.terminalContentSnapshot(region: .history(maximumScrollbackRows: CodecTerminalView.scrollback)) {
             let end = newestBlockEnd ?? snapshot.cursorRow + 1
             var rows = snapshot.rows.filter { $0.absoluteRow < end }
-            while let last = rows.last, last.text.trimmingCharacters(in: .whitespaces).isEmpty { rows.removeLast() }
+            // Blank rows at the end go, but not the row standing in for a folded command's output.
+            let lastFold = timeline.entries.compactMap { $0.fold != nil ? $0.block?.output : nil }.max() ?? -1
+            while let last = rows.last, last.absoluteRow > lastFold,
+                  last.text.trimmingCharacters(in: .whitespaces).isEmpty { rows.removeLast() }
             firstRow = rows.first?.absoluteRow ?? end
             transcript = TerminalTranscript.text(of: rows)
         }
@@ -367,6 +377,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
         if printed { refreshCommandSeparators() }
         if printed, openableNames != nil { refreshFileLink(modifiers: fileLinkModifiers, rescan: true) }
         if printed { printedSincePortScan = true }
+        if !printed { foldLongOutputIfDue() }
         ticks += 1
         if ticks % 4 == 0 {
             pollProcess()
@@ -562,6 +573,10 @@ final class Pane: LocalProcessTerminalViewDelegate {
                 // Rows only grow; going back means the scrollback was cleared under the older commands.
                 if let last = blocks.blocks.last, block.prompt <= last.prompt { timeline.forgetBlocks() }
                 blocks.record(block)
+            }
+            // The command before this one is done being looked at: its output folds if it's long.
+            if preferences.foldLongOutput, let previous = timeline.entries.last, !previous.isRunning {
+                outputsToFold.append(previous.id)
             }
             let usual = usualDuration(of: started)
             session.running?.usual = usual
@@ -998,7 +1013,9 @@ final class Pane: LocalProcessTerminalViewDelegate {
     }
 
     func copyOutput(_ range: Range<Int>) {
-        guard let text = text(of: range) else { return }
+        // A folded command's output isn't on its rows: one row stands in for it.
+        let folded = timeline.entries.last { $0.fold != nil && $0.block?.output == range.lowerBound }?.fold?.text
+        guard let text = folded ?? text(of: range) else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }
@@ -1142,6 +1159,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
     /// other one, from its line to the next. The prompt waiting for a command counts as one. Only with
     /// shell integration, which is what tells commands apart.
     func refreshCommandSeparators() {
+        refreshFolds()
         let separators = view.commandSeparators
         let lines = preferences.commandSeparators, shading = preferences.shadeAlternateCommands
         guard lines || shading, session.integrated, !isShutDown, promptIsDrawn || !blocks.blocks.isEmpty,
@@ -1245,6 +1263,279 @@ final class Pane: LocalProcessTerminalViewDelegate {
         }
     }
 
+    // MARK: - Folding output
+
+    /// Commands whose output folds, if it's long, once the shell is back at a prompt: each was the
+    /// newest when another command started.
+    private var outputsToFold: [Int] = []
+    /// A folded command's row was pressed: it unfolds when the press ends.
+    private var pressedFold: Int?
+    /// The command the Fold button folds.
+    private var foldButtonEntry: Int?
+    /// The pointer is on the Fold button or a folded row, and shows as a hand.
+    private var isPointingAtFold = false
+
+    /// Whether output can be folded or unfolded now. SwiftTerm has no way to take rows out of its
+    /// scrollback, so folding prints the whole scrollback again without them, and anything a program
+    /// printed meanwhile would be lost: the shell must be waiting at a prompt it has drawn.
+    var canFoldNow: Bool {
+        isAtCommandLine && promptIsDrawn && terminal.window != nil
+    }
+
+    /// Whether a command's output can be folded: it's over, still in the scrollback, and more than a row.
+    func canFold(_ entry: TimelineEntry) -> Bool {
+        guard let entry = timeline.value.entry(id: entry.id), entry.isFoldable else { return false }
+        return (liveOutputRange(of: entry)?.count ?? 0) > 1
+    }
+
+    /// The finished command whose prompt, command line or output is at a window point.
+    private func blockEntry(at point: NSPoint) -> TimelineEntry? {
+        relocateBlocksIfNeeded()
+        guard let grid = TerminalGrid(terminal: terminal), let end = newestBlockEnd else { return nil }
+        let row = grid.viewportTop + grid.cell(at: point).row
+        guard row < end, let index = blocks.index(containing: row) else { return nil }
+        let block = blocks.blocks[index]
+        return timeline.entries.last { $0.block == block && !$0.isRunning }
+    }
+
+    /// The folded command whose row, the one standing in for its output, is at a window point.
+    func foldedEntry(at point: NSPoint) -> TimelineEntry? {
+        guard timeline.entries.contains(where: { $0.fold != nil }), let grid = TerminalGrid(terminal: terminal) else { return nil }
+        let row = grid.viewportTop + grid.cell(at: point).row
+        return timeline.entries.last { entry in
+            entry.fold != nil && entry.block?.output == row && entry.block.map(blocks.blocks.contains) == true
+        }
+    }
+
+    /// The command a fold or an unfold without a click is about: the one under the pointer, or else the
+    /// newest there is to fold or unfold.
+    func foldTarget(folded: Bool, at point: NSPoint? = nil) -> TimelineEntry? {
+        func applies(_ entry: TimelineEntry) -> Bool { folded ? entry.fold != nil && entry.block != nil : canFold(entry) }
+        let pointer = point ?? pointerLocation().flatMap { terminal.bounds.contains(terminal.convert($0, from: nil)) ? $0 : nil }
+        if let pointer, let entry = blockEntry(at: pointer), applies(entry) { return entry }
+        return point == nil ? timeline.entries.last(where: applies) : nil
+    }
+
+    /// Folds a command's output: one row takes its place, saying how much there was and how it ended.
+    /// False when it can't be folded, or not now.
+    @discardableResult
+    func fold(_ entry: TimelineEntry) -> Bool {
+        refold(folding: [entry.id])
+    }
+
+    /// Puts a folded command's output back.
+    @discardableResult
+    func unfold(_ entry: TimelineEntry) -> Bool {
+        refold(unfolding: [entry.id])
+    }
+
+    /// Folds the output under the pointer, or the newest that isn't folded.
+    @discardableResult
+    func foldOutput() -> Bool {
+        foldTarget(folded: false).map(fold) ?? false
+    }
+
+    /// Unfolds the output under the pointer, or the one folded last.
+    @discardableResult
+    func unfoldOutput() -> Bool {
+        foldTarget(folded: true).map(unfold) ?? false
+    }
+
+    /// Folds the output of every finished command but the last one, which is likely still being read.
+    @discardableResult
+    func foldAllOutput() -> Bool {
+        let finished = timeline.entries.filter { !$0.isRunning }
+        return refold(folding: finished.dropLast().filter(\.isFoldable).map(\.id))
+    }
+
+    /// Unfolds the commands whose folded output holds a match, so Find has it to show.
+    func unfoldOutput(matching expression: NSRegularExpression) {
+        let matching = timeline.entries.filter { $0.block != nil && $0.fold?.matches(expression) == true }
+        if !matching.isEmpty { refold(unfolding: matching.map(\.id), tellingFinder: false) }
+    }
+
+    /// A plain click on a folded command's row unfolds it.
+    func pressFold(_ event: NSEvent) -> Bool {
+        guard event.type == .leftMouseDown, event.clickCount == 1,
+              event.modifierFlags.intersection([.shift, .option, .command, .control]).isEmpty,
+              terminal.currentMouseMode == .off, let entry = foldedEntry(at: event.locationInWindow) else { return false }
+        pressedFold = entry.id
+        return true
+    }
+
+    /// The Fold button was clicked.
+    func foldAtButton() {
+        guard let entry = foldButtonEntry.flatMap(timeline.value.entry(id:)), fold(entry) else { return NSSound.beep() }
+    }
+
+    /// The setting that folds long output: a command's turn comes once another has run after it and the
+    /// shell is quiet at its prompt.
+    private func foldLongOutputIfDue() {
+        guard !outputsToFold.isEmpty, canFoldNow, outputToCapture == nil else { return }
+        let due = outputsToFold
+        outputsToFold = []
+        guard preferences.foldLongOutput else { return }
+        let limit = preferences.foldLongOutputLines
+        refold(folding: due.filter { (timeline.value.entry(id: $0)?.output?.lineCount ?? 0) > limit })
+    }
+
+    /// Folds and unfolds commands' output by printing the scrollback again, the folded rows left out
+    /// with one blank row in their place (`FoldView` draws the summary over it) and the unfolded ones
+    /// put back. It ends with the cursor where it was on the prompt, so the shell, which only ever moves
+    /// from where it thinks the cursor is, carries on none the wiser. Rows are renumbered, so the
+    /// commands are found again from the text, as after a resize.
+    @discardableResult
+    private func refold(folding: [Int] = [], unfolding: [Int] = [], tellingFinder: Bool = true) -> Bool {
+        guard canFoldNow, !(folding.isEmpty && unfolding.isEmpty) else { return false }
+        relocateBlocksIfNeeded()
+        struct Edit {
+            var id: Int
+            var rows: Range<Int>
+            /// The output to put back; nil to fold.
+            var unfolded: CommandFold?
+        }
+        var edits: [Edit] = []
+        for id in folding {
+            guard let entry = timeline.value.entry(id: id), entry.isFoldable,
+                  let rows = liveOutputRange(of: entry), rows.count > 1 else { continue }
+            edits.append(Edit(id: id, rows: rows))
+        }
+        for id in unfolding {
+            guard let entry = timeline.value.entry(id: id), let fold = entry.fold, let rows = liveOutputRange(of: entry) else { continue }
+            edits.append(Edit(id: id, rows: rows.lowerBound..<(rows.lowerBound + 1), unfolded: fold))
+        }
+        edits.sort { $0.rows.lowerBound < $1.rows.lowerBound }
+        guard !edits.isEmpty, let grid = TerminalGrid(terminal: terminal), let promptStart = newestBlockEnd,
+              let snapshot = terminal.terminalContentSnapshot(region: .history(maximumScrollbackRows: CodecTerminalView.scrollback)),
+              let first = snapshot.rows.first?.absoluteRow, edits[0].rows.lowerBound >= first else { return false }
+        func rows(_ range: Range<Int>) -> [TerminalContentRowSnapshot] {
+            let range = range.clamped(to: first..<(first + snapshot.rows.count))
+            return Array(snapshot.rows[(range.lowerBound - first)..<(range.upperBound - first)])
+        }
+        func isBlank(_ row: TerminalContentRowSnapshot) -> Bool { row.text.allSatisfy { $0.isWhitespace || $0 == "\0" } }
+        let cursorRow = snapshot.cursorRow
+        // Down to the cursor's row, or to what the line editor shows under it.
+        let last = max(snapshot.rows.last { !isBlank($0) }?.absoluteRow ?? cursorRow, cursorRow)
+        // Each prompt is marked again as the shell marked it, for jumping between commands.
+        let prompts = Set(blocks.blocks.map(\.prompt) + [promptStart]).sorted()
+        func kept(_ range: Range<Int>) -> String {
+            var text = "", start = range.lowerBound
+            for prompt in prompts where range.contains(prompt) {
+                text += TerminalTranscript.text(of: rows(start..<prompt)) + "\u{1B}]133;A;cl=line\u{07}"
+                start = prompt
+            }
+            return text + TerminalTranscript.text(of: rows(start..<range.upperBound))
+        }
+
+        var text = "\u{1B}[H\u{1B}[2J\u{1B}[3J"
+        var next = first
+        var folds: [(id: Int, fold: CommandFold?)] = []
+        for edit in edits where edit.rows.lowerBound >= next {
+            let replaced = rows(edit.rows)
+            if let unfolded = edit.unfolded {
+                // Only over the blank row left for it: anything else there isn't Codec's to replace.
+                guard replaced.count == 1, isBlank(replaced[0]) else { continue }
+                text += kept(next..<edit.rows.lowerBound) + unfolded.transcript
+                folds.append((edit.id, nil))
+            } else {
+                text += kept(next..<edit.rows.lowerBound) + "\r\n"
+                folds.append((edit.id, CommandFold(transcript: TerminalTranscript.text(of: replaced))))
+            }
+            next = edit.rows.upperBound
+        }
+        guard !folds.isEmpty else { return false }
+        var tail = kept(next..<(last + 1))
+        if tail.hasSuffix("\r\n") { tail.removeLast() }
+        text += tail
+        // The end of the prompt, marked where the shell marked it: on the command line's first row.
+        var commandRow = cursorRow
+        while commandRow > first, rows(commandRow..<(commandRow + 1)).first?.isWrapped == true { commandRow -= 1 }
+        func move(from: Int, to: Int, column: Int) -> String {
+            (from > to ? "\u{1B}[\(from - to)A" : from < to ? "\u{1B}[\(to - from)B" : "") + "\u{1B}[\(column + 1)G"
+        }
+        if let promptEndColumn {
+            text += move(from: last, to: commandRow, column: promptEndColumn) + "\u{1B}]133;B\u{07}"
+                + move(from: commandRow, to: cursorRow, column: snapshot.cursorColumn)
+        } else {
+            text += move(from: last, to: cursorRow, column: snapshot.cursorColumn)
+        }
+
+        // The command stays where it is on screen, if it was there.
+        let anchor = edits[0].id
+        let offset = timeline.value.entry(id: anchor)?.block.map { $0.output - 1 - grid.viewportTop }
+        terminal.selectNone()
+        terminal.feed(text: text)
+        for (id, fold) in folds { timeline.setFold(fold, of: id) }
+        rowsMayHaveMoved = true
+        waitingPromptRow = nil
+        relocateBlocksIfNeeded()
+        if let offset, grid.rows.indices.contains(offset), let block = timeline.value.entry(id: anchor)?.block,
+           let rebuilt = TerminalGrid(terminal: terminal) {
+            terminal.scrollTo(row: max(block.output - 1 - offset, 0) - rebuilt.bufferRowOffset)
+        }
+        openableNames = nil
+        if tellingFinder { view.finder.contentChanged() }
+        refreshCommandSeparators()
+        return true
+    }
+
+    /// Draws the row that stands in for each folded command's output, and the Fold button of the
+    /// command under the pointer: at the right of its command line, or of the pane's first row once
+    /// the command line has scrolled away, so it's at hand from anywhere in a long output.
+    func refreshFolds() {
+        let folds = view.folds
+        let folded = timeline.entries.filter { $0.fold != nil && $0.block != nil }
+        let pointer = pointerLocation().flatMap { view.bounds.contains(view.convert($0, from: nil)) ? $0 : nil }
+        foldButtonEntry = nil
+        guard !folded.isEmpty || pointer != nil, session.integrated, !isShutDown, !rowsMayHaveMoved,
+              terminal.terminalInputStateSnapshot()?.isAlternateBuffer == false,
+              let grid = TerminalGrid(terminal: terminal) else {
+            pointAtFold(false, pointer: pointer)
+            return folds.update()
+        }
+        let top = grid.viewportTop
+        let shown = top..<(top + grid.rows.count)
+        folds.font = terminal.font
+        var button: FoldView.Button?
+        var hoveredFold: Int?
+        if let pointer, let end = newestBlockEnd {
+            let row = top + grid.cell(at: pointer).row
+            if shown.contains(row), row < end, let index = blocks.index(containing: row) {
+                let block = blocks.blocks[index]
+                let entry = timeline.entries.last { $0.block == block && !$0.isRunning }
+                if let entry, entry.fold != nil {
+                    if row == block.output { hoveredFold = entry.id }
+                } else if let entry, entry.isFoldable, (blocks.outputRange(of: index, end: end)?.count ?? 0) > 1 {
+                    let line = folds.convert(grid.frame(row: max(block.output - 1, top) - top, columns: 0..<grid.columns), from: nil)
+                    let title = entry.output.map { "Fold \($0.lineCount.formatted(.number.locale(Locale(identifier: "en_US")))) lines" } ?? "Fold"
+                    let size = folds.buttonSize(title: title, rowHeight: line.height)
+                    let frame = NSRect(x: line.maxX - size.width - 4, y: (line.midY - size.height / 2).rounded(),
+                                       width: size.width, height: size.height)
+                    button = .init(frame: frame, title: title, isHovered: frame.contains(folds.convert(pointer, from: nil)))
+                    foldButtonEntry = entry.id
+                }
+            }
+        }
+        var rows: [FoldView.Row] = []
+        for entry in folded {
+            guard let block = entry.block, shown.contains(block.output), blocks.blocks.contains(block) else { continue }
+            rows.append(.init(frame: folds.convert(grid.frame(row: block.output - top, columns: 0..<grid.columns), from: nil),
+                              summary: FoldSummary(entry: entry), isHovered: entry.id == hoveredFold))
+        }
+        folds.update(rows: rows, button: button)
+        pointAtFold(button?.isHovered == true || hoveredFold != nil, pointer: pointer)
+    }
+
+    /// The pointing hand over what a click folds or unfolds, and the terminal's own pointer after it.
+    private func pointAtFold(_ pointing: Bool, pointer: NSPoint?) {
+        if pointing {
+            NSCursor.pointingHand.set()
+        } else if isPointingAtFold, let pointer, terminal.bounds.contains(terminal.convert(pointer, from: nil)) {
+            NSCursor.iBeam.set()
+        }
+        isPointingAtFold = pointing
+    }
+
     /// The output part of `rows(of:)`.
     func liveOutputRange(of entry: TimelineEntry) -> Range<Int>? {
         guard let rows = rows(of: entry), let block = timeline.value.entry(id: entry.id)?.block,
@@ -1257,6 +1548,8 @@ final class Pane: LocalProcessTerminalViewDelegate {
     /// the command isn't in the scrollback anymore.
     @discardableResult
     func reveal(_ entry: TimelineEntry, matching expression: NSRegularExpression? = nil) -> Int? {
+        // A match in folded output shows once it's unfolded, which moves the rows below it.
+        if let expression { unfoldOutput(matching: expression) }
         // Looked up again: the rows may have moved since the caller got its copy.
         guard let rows = rows(of: entry), var grid = TerminalGrid(terminal: terminal),
               let entry = timeline.value.entry(id: entry.id), let block = entry.block else { return nil }
@@ -1288,6 +1581,7 @@ final class Pane: LocalProcessTerminalViewDelegate {
 
     /// A command's output: all of it while it's still in the scrollback, otherwise what was kept.
     func output(of entry: TimelineEntry) -> String? {
+        if let fold = timeline.value.entry(id: entry.id)?.fold { return fold.text }
         if let range = liveOutputRange(of: entry), let text = text(of: range) { return text }
         return timeline.value.entry(id: entry.id)?.output?.text ?? entry.output?.text
     }
@@ -1506,6 +1800,19 @@ final class Pane: LocalProcessTerminalViewDelegate {
         menu.addItem(ClosureMenuItem("Select Output", image: "text.line.first.and.arrowtriangle.forward", enabled: output != nil) { [weak self] in
             if let output { self?.selectOutput(output) }
         })
+        // The command right-clicked, or else the newest with output to fold.
+        if let unfoldable = point.flatMap({ foldTarget(folded: true, at: $0) }) {
+            menu.addItem(ClosureMenuItem("Unfold Output", key: "]", modifiers: [.command, .option], image: "chevron.down",
+                                         enabled: canFoldNow) { [weak self] in
+                self?.unfold(unfoldable)
+            })
+        } else {
+            let foldable = point.map { foldTarget(folded: false, at: $0) } ?? foldTarget(folded: false)
+            menu.addItem(ClosureMenuItem("Fold Output", key: "[", modifiers: [.command, .option], image: "chevron.right",
+                                         enabled: foldable != nil && canFoldNow) { [weak self] in
+                if let foldable { self?.fold(foldable) }
+            })
+        }
         if preferences.explainFailures, let explainer = environment.explainer,
            let entry = finishedEntry(at: point), FailureReport(entry: entry, output: nil) != nil {
             menu.addItem(ClosureMenuItem("Explain Failure", image: "sparkles", enabled: explainer.availability == .available) { [weak self] in

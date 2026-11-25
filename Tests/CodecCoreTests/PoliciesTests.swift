@@ -78,6 +78,8 @@ struct PreferencesTests {
         #expect(preferences.commandSeparators)
         #expect(preferences.shadeAlternateCommands)
         #expect(preferences.scrollSpeed == 2)
+        #expect(!preferences.foldLongOutput)
+        #expect(preferences.foldLongOutputLines == 100)
     }
 
     @Test func persistsChangesAcrossInstances() {
@@ -90,6 +92,8 @@ struct PreferencesTests {
         first.exitBehavior = .keepOpen
         first.shellPath = "/bin/bash"
         first.scrollSpeed = 3.5
+        first.foldLongOutput = true
+        first.foldLongOutputLines = 250
         let second = Preferences(defaults: defaults)
         #expect(second.themeID == "amber")
         #expect(second.fontSize == 15)
@@ -97,6 +101,8 @@ struct PreferencesTests {
         #expect(second.exitBehavior == .keepOpen)
         #expect(second.shellPath == "/bin/bash")
         #expect(second.scrollSpeed == 3.5)
+        #expect(second.foldLongOutput)
+        #expect(second.foldLongOutputLines == 250)
     }
 
     @Test func repairsInvalidStoredValues() {
@@ -106,11 +112,13 @@ struct PreferencesTests {
         defaults.set("loud", forKey: "bell")
         defaults.set(-2.0, forKey: "opacity")
         defaults.set(0.0, forKey: "scrollSpeed")
+        defaults.set(2, forKey: "foldLongOutputLines")
         let preferences = Preferences(defaults: defaults)
         #expect(preferences.fontSize == 13)
         #expect(preferences.bell == .visual)
         #expect(preferences.opacity == 0.9)
         #expect(preferences.scrollSpeed == 2)
+        #expect(preferences.foldLongOutputLines == 100)
     }
 
     @Test func postsAChangeNotification() {
